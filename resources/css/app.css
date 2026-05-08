@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .live-panel {
+        @apply rounded-2xl border border-slate-700/90 bg-slate-900/75 shadow-xl shadow-black/35 backdrop-blur-sm;
+    }
+}

@@ -1,0 +1,144 @@
+<?php
+
+use App\Http\Controllers\AthleteMusicController;
+use App\Http\Controllers\InquiryController;
+use App\Http\Controllers\JudgeController;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ScoreboardController;
+use App\Http\Controllers\SecretaryController;
+use App\Http\Controllers\SupervisorController;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/', function () {
+    return view('welcome');
+});
+
+Route::get('/dashboard', function () {
+    return view('dashboard');
+})->middleware(['auth', 'verified'])->name('dashboard');
+
+Route::middleware('auth')->group(function () {
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+
+    Route::get('/athlete/music', [AthleteMusicController::class, 'index'])
+        ->middleware('role:athlete')
+        ->name('athlete.music');
+    Route::post('/athlete/music', [AthleteMusicController::class, 'store'])
+        ->middleware('role:athlete')
+        ->name('athlete.music.store');
+    Route::get('/tracks/{track}/download', [AthleteMusicController::class, 'download'])
+        ->name('tracks.download');
+
+    Route::get('/secretary/categories/{category}/queue', [SecretaryController::class, 'queue'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue');
+    Route::get('/secretary/categories/{category}/queue/ping', [SecretaryController::class, 'queuePing'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue.ping');
+    Route::post('/secretary/categories/{category}/queue', [SecretaryController::class, 'addToQueue'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue.add');
+    Route::post('/secretary/categories/{category}/queue-reorder', [SecretaryController::class, 'reorderQueue'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue.reorder');
+    Route::post('/secretary/performances/{performance}/queue-move', [SecretaryController::class, 'moveQueue'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue.move');
+    Route::post('/secretary/performances/{performance}/queue-remove', [SecretaryController::class, 'removeFromQueue'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.queue.remove');
+    Route::get('/secretary', [SecretaryController::class, 'categories'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.categories');
+    Route::get('/secretary/tournaments', [SecretaryController::class, 'tournaments'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournaments');
+    Route::post('/secretary/tournaments', [SecretaryController::class, 'storeTournament'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournaments.store');
+    Route::get('/secretary/tournaments/{tournament}', [SecretaryController::class, 'tournament'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament');
+    Route::get('/secretary/tournaments/{tournament}/live', [SecretaryController::class, 'tournamentLive'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.live');
+    Route::post('/secretary/tournaments/{tournament}/import-start-protocol', [SecretaryController::class, 'importStartProtocol'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.importStartProtocol');
+    Route::post('/secretary/tournaments/{tournament}/categories', [SecretaryController::class, 'storeCategory'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.categories.store');
+    Route::get('/secretary/athletes', [SecretaryController::class, 'athletes'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.athletes');
+    Route::post('/secretary/athletes', [SecretaryController::class, 'storeAthlete'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.athletes.store');
+    Route::post('/secretary/categories/{category}/call-next', [SecretaryController::class, 'callNext'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.callNext');
+    Route::post('/secretary/categories/{category}/auto-advance', [SecretaryController::class, 'setAutoAdvance'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.category.autoAdvance');
+    Route::post('/secretary/performances/{performance}/start', [SecretaryController::class, 'start'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.start');
+    Route::post('/secretary/performances/{performance}/finish', [SecretaryController::class, 'finish'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.finish');
+    Route::post('/secretary/categories/{category}/performance-music', [SecretaryController::class, 'uploadPerformanceMusic'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.category.performance.music');
+
+    Route::get('/judge', [JudgeController::class, 'tournaments'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tournaments');
+    Route::get('/judge/tournaments/{tournament}/tablet', [JudgeController::class, 'tournamentTablet'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tournament.tablet');
+    Route::get('/judge/tournaments/{tournament}/tablet/ping', [JudgeController::class, 'tournamentTabletPing'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tournament.tablet.ping');
+    Route::post('/judge/tournaments/{tournament}/tablet/score', [JudgeController::class, 'tournamentTabletSubmit'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tournament.tablet.score');
+    Route::get('/judge/categories/{category}/tablet', [JudgeController::class, 'redirectCategoryTabletToTournament'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tablet');
+    Route::get('/judge/categories/{category}', [JudgeController::class, 'category'])
+        ->middleware('role:judge,admin')
+        ->name('judge.category');
+    Route::post('/judge/performances/{performance}/score', [JudgeController::class, 'submitScore'])
+        ->middleware('role:judge,admin')
+        ->name('judge.score');
+    Route::post('/judge/performances/{performance}/finalize', [JudgeController::class, 'finalize'])
+        ->middleware('role:judge,admin')
+        ->name('judge.finalize');
+
+    Route::post('/supervisor/performances/{performance}/approve', [SupervisorController::class, 'approve'])
+        ->middleware('role:superior_jury,head_judge,admin,super_admin')
+        ->name('supervisor.approve');
+    Route::post('/supervisor/performances/{performance}/publish', [SupervisorController::class, 'publish'])
+        ->middleware('role:superior_jury,head_judge,admin,super_admin')
+        ->name('supervisor.publish');
+
+    Route::post('/performances/{performance}/inquiries', [InquiryController::class, 'store'])
+        ->middleware('role:secretary,superior_jury,head_judge,admin,super_admin')
+        ->name('inquiries.store');
+    Route::post('/inquiries/{inquiry}/under-review', [InquiryController::class, 'markUnderReview'])
+        ->middleware('role:superior_jury,head_judge,admin,super_admin')
+        ->name('inquiries.underReview');
+    Route::post('/inquiries/{inquiry}/decide', [InquiryController::class, 'decide'])
+        ->middleware('role:superior_jury,head_judge,admin,super_admin')
+        ->name('inquiries.decide');
+});
+
+require __DIR__.'/auth.php';
+
+Route::get('/scoreboard/categories/{category}', [ScoreboardController::class, 'category'])
+    ->name('scoreboard.category');
+
+Route::get('/scoreboard/categories/{category}/live', [ScoreboardController::class, 'categoryLive'])
+    ->name('scoreboard.category.live');
