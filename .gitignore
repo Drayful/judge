@@ -25,6 +25,11 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
+# Python scripts (local utilities, not part of the Laravel app)
+*.py
+__pycache__/
+*.pyc
+
 # local secrets / demo creds
 DEMO_CREDENTIALS.txt
 
