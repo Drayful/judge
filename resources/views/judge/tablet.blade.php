@@ -1,200 +1,290 @@
-@extends('layouts.tablet')
+@extends('layouts.judging')
 
-@section('title', 'Бригада '.$panel['panel'].($panel['subpanel'] ? ' '.$panel['subpanel'] : ''))
+@section('title', 'Бригада '.strtoupper($panel['panel']).' — '.($panel['slot'] ?? ''))
 
 @php
     $athlete = $current?->athlete;
     $cityLine = $athlete?->club ?? '—';
-    $statusTone = match ($streamStatus) {
-        'waiting_scores' => 'amber',
-        'finalized' => 'green',
-        'on_deck' => 'amber',
-        'scheduled' => 'gray',
-        'done' => 'green',
-        'empty' => 'red',
-        default => 'gray',
-    };
     $pKey = $panel['panel'];
-    $mode = $pKey === 'd' ? 'add' : ($pKey === 'a' || $pKey === 'e' ? 'subtract' : 'penalty');
-    $startVal = $mode === 'add' ? 0.0 : ($pKey === 'e' ? $eBase : $aBase);
+    $slot = $panel['slot'] ?? null;
+    $isAdd = $pKey === 'd';
+    $isSubtract = in_array($pKey, ['a', 'e'], true);
+    $isPenalty = $pKey === 'penalty';
+
     $saved = $myScore?->score !== null ? (float) $myScore->score : null;
     $alreadySubmitted = $myScore !== null && $myScore->submitted_at !== null;
     $submittedDisplay = $alreadySubmitted && $myScore->score !== null
         ? number_format((float) $myScore->score, 3, '.', '')
         : null;
+
+    $aBaseFloat = (float) $aBase;
+    $eBaseFloat = (float) $eBase;
+    $panelBase = $pKey === 'e' ? $eBaseFloat : ($pKey === 'a' ? $aBaseFloat : 0.0);
 @endphp
 
 @section('content')
-    <div class="max-w-lg mx-auto px-4 py-6 space-y-5">
-        <div class="flex items-center justify-between gap-3">
-            <a href="{{ route('judge.tournaments') }}" class="text-sm text-emerald-400 hover:text-emerald-300">← Турниры</a>
-            <a href="{{ route('judge.category', $category) }}" class="text-sm text-slate-400 hover:text-slate-200">Таблица потока</a>
-        </div>
+    <div class="h-screen overflow-hidden flex flex-col select-none">
+        <div class="w-full max-w-[1600px] mx-auto px-2 py-2 flex-1 min-h-0 flex flex-col gap-2">
 
-        <x-flash />
+            {{-- ====== ШАПКА (одна строка) ====== --}}
+            <div class="shrink-0 flex items-center gap-2 h-12">
+                <a href="{{ route('judge.tournaments') }}" class="text-xs text-slate-400 hover:text-slate-200 px-2">←</a>
 
-        @if ($errors->any())
-            <div class="rounded-xl border border-rose-800/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">
-                {{ $errors->first() }}
+                <div class="flex-1 min-w-0 rounded-lg bg-[#0f1830] border border-slate-800 px-3 py-1.5 flex items-center gap-3 h-full">
+                    @if($athlete)
+                        <span class="text-base font-semibold text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
+                        <span class="text-[11px] text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
+                    @else
+                        <span class="text-sm text-amber-200">Нет активного выступления</span>
+                    @endif
+                </div>
+
+                <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2">
+                    <span class="text-[10px] uppercase text-slate-400">Юн.</span>
+                    <span class="text-base font-bold text-cyan-200 tabular-nums">13</span>
+                </div>
+                <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2">
+                    <span class="text-[10px] uppercase text-slate-400">Сен.</span>
+                    <span class="text-base font-bold text-cyan-200 tabular-nums">16</span>
+                </div>
+                <div class="rounded-lg bg-[#0e5a3f] border border-emerald-700 px-3 h-full flex items-center">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-emerald-50">Ответственный судья</span>
+                </div>
+                <div class="rounded-lg bg-[#0f1830] border border-slate-800 px-3 h-full flex items-center">
+                    <span class="text-[10px] uppercase text-slate-400 mr-1">Слот</span>
+                    <span class="text-sm font-mono text-emerald-300">{{ $slot ?? '—' }}</span>
+                </div>
             </div>
-        @endif
 
-        {{-- Шапка ТЗ: ФИО, категория, город, статус --}}
-        <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
-            @if($current && $athlete)
-                <div class="text-lg font-semibold text-white leading-snug">
-                    {{ $athlete->last_name }} {{ $athlete->first_name }}
+            @if ($errors->any())
+                <div class="shrink-0 rounded-lg border border-rose-700/60 bg-rose-950/40 px-3 py-1 text-xs text-rose-100">
+                    {{ $errors->first() }}
                 </div>
-                <div class="mt-2 text-sm text-slate-400 space-y-1">
-                    <div><span class="text-slate-500">Турнир:</span> {{ $tournament->name }}</div>
-                    <div><span class="text-slate-500">Поток:</span> {{ $category->name }}</div>
-                    <div><span class="text-slate-500">Клуб / город:</span> {{ $cityLine }}</div>
-                    <div><span class="text-slate-500">Предмет:</span> {{ $current->apparatus ?? '—' }}</div>
+            @endif
+
+            @if(! $current || ! $athlete)
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div class="rounded-xl border border-amber-800/50 bg-amber-950/30 p-6 text-center max-w-md">
+                        <h2 class="text-lg font-semibold text-amber-100">Нет активного выступления</h2>
+                        <p class="mt-2 text-sm text-amber-100/80">Секретарь должен вызвать гимнастку (<code class="text-amber-300">scheduled / on_deck / performing</code>).</p>
+                    </div>
                 </div>
-                <div class="mt-4 flex flex-wrap items-center gap-2">
-                    <x-badge :tone="$statusTone">Статус: {{ $streamStatus }}</x-badge>
-                    <x-badge tone="violet">№ {{ $current->start_number ?? '—' }}</x-badge>
+            @elseif($alreadySubmitted)
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div class="rounded-2xl border border-emerald-800/60 bg-emerald-950/30 p-10 text-center">
+                        <div class="text-xs uppercase tracking-widest text-emerald-300/80">Оценка {{ $slot }} отправлена</div>
+                        <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ $submittedDisplay }}</div>
+                        <p class="mt-4 text-sm text-emerald-100/80">Дождитесь следующей гимнастки.</p>
+                    </div>
                 </div>
             @else
-                <div class="text-slate-300 text-sm">Нет активного выступления для оценки.</div>
-                <p class="mt-2 text-xs text-slate-500">Секретарь должен вызвать гимнастку (статус on_deck / performing) или начать поток.</p>
+                <x-judge-panel
+                    :type="$pKey"
+                    :subpanel="$panel['subpanel'] ?? null"
+                    :penalty-type="$panel['penalty_type'] ?? null"
+                    :slot="$slot"
+                    :base="$panelBase"
+                    :saved="$saved"
+                    :tournament="$tournament"
+                />
             @endif
         </div>
-
-        @if($current && $athlete && $panel['panel'] !== 'penalty' && $alreadySubmitted)
-            <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 space-y-4">
-                <div class="text-center">
-                    <div class="text-xs uppercase tracking-wider text-slate-500">Оценка отправлена</div>
-                    <div class="mt-2 text-5xl font-bold tabular-nums tracking-tight text-emerald-200">{{ $submittedDisplay }}</div>
-                    <p class="mt-3 text-sm text-slate-400">Повторная отправка для этого выступления не требуется. Дождитесь следующей гимнастки.</p>
-                </div>
-                <button type="button" disabled
-                    class="w-full rounded-2xl bg-slate-700/80 py-4 text-lg font-semibold text-slate-400 cursor-not-allowed border border-slate-700">
-                    Отправить оценку (уже отправлено: {{ $submittedDisplay }})
-                </button>
-            </div>
-        @elseif($current && $athlete && $panel['panel'] !== 'penalty')
-            @php
-                $initial = $saved !== null ? $saved : $startVal;
-            @endphp
-            <div
-                class="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 space-y-5"
-                x-data="{
-                    working: {{ json_encode($initial) }},
-                    actions: [],
-                    add(v) {
-                        this.working = Math.round((this.working + v) * 1000) / 1000;
-                        if (this.working < 0) this.working = 0;
-                        if (this.working > 99.999) this.working = 99.999;
-                        this.actions.unshift(v);
-                        if (this.actions.length > 24) this.actions.pop();
-                    },
-                    reset() {
-                        this.working = {{ json_encode($startVal) }};
-                        this.actions = [];
-                    }
-                }"
-            >
-                <div class="text-center">
-                    <div class="text-xs uppercase tracking-wider text-slate-500">Текущая оценка (черновик)</div>
-                    <div class="mt-2 text-5xl font-bold tabular-nums tracking-tight text-white" x-text="working.toFixed(3)"></div>
-                    <div class="mt-1 text-xs text-slate-500">
-                        Панель: <span class="text-emerald-300/90 font-mono">{{ strtoupper($panel['panel']) }}{{ $panel['subpanel'] ? ' / '.$panel['subpanel'] : '' }}</span>
-                    </div>
-                </div>
-
-                @if($mode === 'add')
-                    <div class="grid grid-cols-3 gap-2">
-                        @foreach ([0.1, 0.2, 0.3, 0.5, 1.0, 2.0] as $step)
-                            <button type="button" @click="add({{ $step }})"
-                                class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 py-4 text-lg font-semibold text-white active:scale-[0.98] transition">
-                                +{{ $step === (float) (int) $step ? (int) $step : $step }}
-                            </button>
-                        @endforeach
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button type="button" @click="add(-0.1)" class="rounded-xl border border-slate-700 py-3 text-slate-300 hover:bg-slate-800">−0.1</button>
-                        <button type="button" @click="reset()" class="rounded-xl border border-amber-900/50 bg-amber-950/30 py-3 text-amber-100 hover:bg-amber-950/50">Сброс</button>
-                    </div>
-                @else
-                    <div class="grid grid-cols-3 gap-2">
-                        @foreach ([-0.1, -0.2, -0.3, -0.5, -1.0, -2.0] as $step)
-                            <button type="button" @click="add({{ $step }})"
-                                class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 py-4 text-lg font-semibold text-white active:scale-[0.98] transition">
-                                {{ $step }}
-                            </button>
-                        @endforeach
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button type="button" @click="add(0.1)" class="rounded-xl border border-slate-700 py-3 text-slate-300 hover:bg-slate-800">+0.1</button>
-                        <button type="button" @click="reset()" class="rounded-xl border border-amber-900/50 bg-amber-950/30 py-3 text-amber-100 hover:bg-amber-950/50">Сброс к базе</button>
-                    </div>
-                @endif
-
-                <form method="POST" action="{{ route('judge.tournament.tablet.score', $tournament) }}" class="space-y-3">
-                    @csrf
-                    <input type="hidden" name="score" :value="working.toFixed(3)">
-                    @if(auth()->user()->isAdmin())
-                        <input type="hidden" name="panel" value="{{ $panel['panel'] }}">
-                        @if(($panel['subpanel'] ?? null) !== null)
-                            <input type="hidden" name="subpanel" value="{{ $panel['subpanel'] }}">
-                        @endif
-                    @endif
-                    <div class="rounded-xl border border-slate-800/80 bg-slate-950/60 p-3 max-h-36 overflow-y-auto">
-                        <div class="text-xs font-medium text-slate-500 mb-2">История шагов (Вставить)</div>
-                        <template x-for="(a, i) in actions" :key="i">
-                            <div class="text-sm font-mono text-slate-300 border-b border-slate-800/80 py-1" x-text="(a > 0 ? '+' : '') + a"></div>
-                        </template>
-                        <div x-show="actions.length === 0" class="text-xs text-slate-600">Пока пусто</div>
-                    </div>
-
-                    <button type="submit"
-                        class="w-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 py-4 text-lg font-bold text-white shadow-lg shadow-emerald-950/40 active:scale-[0.99] transition">
-                        Отправить оценку
-                    </button>
-                </form>
-            </div>
-        @elseif($current && $athlete && $panel['panel'] === 'penalty' && $alreadySubmitted)
-            <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 space-y-4">
-                <div class="text-xs uppercase tracking-wider text-slate-500">Штраф отправлен</div>
-                <div class="text-4xl font-bold tabular-nums text-emerald-200">{{ $submittedDisplay }}</div>
-                <p class="text-sm text-slate-400">Повторная отправка для этого выступления не требуется.</p>
-                <button type="button" disabled
-                    class="w-full rounded-2xl bg-slate-700/80 py-4 text-lg font-semibold text-slate-400 cursor-not-allowed border border-slate-700">
-                    Отправить (уже отправлено: {{ $submittedDisplay }})
-                </button>
-            </div>
-        @elseif($current && $athlete && $panel['panel'] === 'penalty')
-            <div class="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
-                <form method="POST" action="{{ route('judge.tournament.tablet.score', $tournament) }}" class="space-y-3">
-                    @csrf
-                    <label class="block text-sm text-slate-400">Штраф (число)</label>
-                    <input name="score" type="number" step="0.001" min="0" max="99.999"
-                        value="{{ $myScore?->score ?? '' }}"
-                        class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-white">
-                    @if(auth()->user()->isAdmin())
-                        <input type="hidden" name="panel" value="penalty">
-                        <input type="hidden" name="penalty_type" value="{{ $panel['penalty_type'] ?? 'line' }}">
-                    @endif
-                    <button type="submit" class="w-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 py-4 text-lg font-bold text-white">Отправить</button>
-                </form>
-            </div>
-        @endif
-
-        <p class="text-center text-xs text-slate-600 px-2">
-            Итог D+A+E−штраф считается на сервере (A/E: при 4 судьях отбрасываются min/max). После отправки диспатчится событие <code class="text-slate-500">ScoreUpdated</code>.
-        </p>
     </div>
 
 @endsection
 
 @push('body-scripts')
     <script>
+        function judgeTablet(opts) {
+            return {
+                // Конфиг панели
+                mode: opts.mode,             // 'add' | 'subtract' | 'penalty'
+                base: opts.base,             // 10.0 для A/E
+                panel: opts.panel,
+                subpanel: opts.subpanel,
+                penaltyType: opts.penaltyType,
+                submitUrl: opts.submitUrl,
+                tabletUrl: opts.tabletUrl,
+                tournamentId: opts.tournamentId,
+
+                // Стейт
+                page: 1,
+                draft: 0,
+                actions: [],                 // [{v, cat, label}]
+                busy: false,
+                error: null,
+                numpadOpen: false,
+                numpadValue: '',
+
+                // Лимиты по категориям (A1: dance, dynamic — макс. 2)
+                cat: { dance: 0, dynamic: 0 },
+                catMax: { dance: 2, dynamic: 2 },
+                catLabel: {
+                    dance: 'Танц. шаги',
+                    dynamic: 'Дин./эфф.',
+                    rhythm: 'Ритм',
+                    union: 'Соединение',
+                    interrupt: 'Прерывание',
+                    character: 'Характер',
+                    bodyExpr: 'Экспр. тела',
+                    faceExpr: 'Экспр. лица',
+                    space: 'Площадка',
+                    musicChar: 'Муз. характер',
+                    musicIntro: 'Муз. вступл.',
+                    musicDyn: 'Муз. динамика',
+                    link: 'Связь',
+                },
+
+                init() {
+                    if (opts.initial && opts.initial !== 0) {
+                        this.draft = opts.initial;
+                        this.actions = [{ v: opts.initial, cat: null, label: '' }];
+                    }
+                },
+
+                round3(v) { return Math.round(v * 1000) / 1000; },
+
+                /** Добавить значение (всегда положительное; mode определяет, прибавлять или вычитать на итог). */
+                add(v, cat) {
+                    cat = cat || null;
+                    if (cat && this.catMax[cat] !== undefined) {
+                        if (this.cat[cat] >= this.catMax[cat]) return;
+                        this.cat[cat] += 1;
+                    }
+                    const next = this.round3(this.draft + v);
+                    if (next < 0 || next > 99.999) return;
+                    this.draft = next;
+                    this.actions.unshift({
+                        v: v,
+                        cat: cat,
+                        label: cat ? (this.catLabel[cat] || cat) : '',
+                    });
+                    if (this.actions.length > 40) this.actions.pop();
+                },
+                // alias на старое название «press» (используется в партиалах)
+                press(v, cat) { return this.add(v, cat); },
+
+                set(v) {
+                    this.draft = this.round3(v);
+                    this.actions = v === 0 ? [] : [{ v: v, cat: null, label: '' }];
+                    this.resetCats();
+                },
+
+                /** «ОТМЕНА» — по новому ТЗ: удаляет ПОСЛЕДНЕЕ действие из истории и пересчитывает сумму. */
+                cancel() {
+                    if (this.actions.length === 0) return;
+                    const last = this.actions.shift();
+                    if (last.cat && this.cat[last.cat] !== undefined) {
+                        this.cat[last.cat] = Math.max(0, this.cat[last.cat] - 1);
+                    }
+                    this.draft = this.round3(this.draft - last.v);
+                    if (this.draft < 0) this.draft = 0;
+                },
+
+                /** Полный сброс (вешается на отдельную «X (0.0)» кнопку). */
+                clearAll() {
+                    this.draft = 0;
+                    this.actions = [];
+                    this.resetCats();
+                    this.error = null;
+                },
+                resetCats() { Object.keys(this.cat).forEach(k => { this.cat[k] = 0; }); },
+
+                workingTotal() { return this.draft; },
+                finalScore() {
+                    if (this.mode === 'add') return this.draft;
+                    if (this.mode === 'subtract') {
+                        const r = this.round3(this.base - this.draft);
+                        return r < 0 ? 0 : r;
+                    }
+                    return this.draft;
+                },
+                submitValue() {
+                    if (this.mode === 'penalty') return this.draft.toFixed(3);
+                    return this.finalScore().toFixed(3);
+                },
+
+                /** ОТПРАВИТЬ — fetch на route('judge.submit-score'). */
+                async submit() {
+                    if (this.busy) return;
+                    this.busy = true;
+                    this.error = null;
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                    const body = new FormData();
+                    body.append('_token', csrfToken);
+                    body.append('tournament_id', String(this.tournamentId));
+                    body.append('panel', this.panel);
+                    if (this.subpanel)    body.append('subpanel', this.subpanel);
+                    if (this.penaltyType) body.append('penalty_type', this.penaltyType);
+                    body.append('score', this.submitValue());
+                    try {
+                        const r = await fetch(this.submitUrl, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'X-CSRF-TOKEN': csrfToken,
+                                'Accept': 'application/json',
+                            },
+                            body,
+                        });
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok || data.ok === false) {
+                            this.error = data.error || data.message || ('Ошибка ' + r.status);
+                            this.busy = false;
+                            return;
+                        }
+                        // Перезагружаем — попадём в состояние "оценка отправлена"
+                        window.location.href = data.redirect_url || this.tabletUrl;
+                    } catch (err) {
+                        this.error = 'Сеть: ' + (err.message || err);
+                        this.busy = false;
+                    }
+                },
+
+                // ====== Numpad ======
+                openNumpad() { this.numpadOpen = true; this.numpadValue = ''; },
+                closeNumpad() { this.numpadOpen = false; this.numpadValue = ''; },
+                numpadAppend(c) {
+                    if (c === '.') {
+                        if (this.numpadValue.includes('.')) return;
+                        if (this.numpadValue === '') this.numpadValue = '0';
+                        this.numpadValue += '.';
+                        return;
+                    }
+                    if (this.numpadValue === '0') this.numpadValue = '';
+                    if (this.numpadValue.length >= 6) return;
+                    this.numpadValue += c;
+                },
+                numpadBackspace() { this.numpadValue = this.numpadValue.slice(0, -1); },
+                applyNumpad() {
+                    const v = parseFloat(this.numpadValue || '0');
+                    if (isNaN(v) || v <= 0) { this.closeNumpad(); return; }
+                    this.add(this.round3(v), null);
+                    this.closeNumpad();
+                },
+
+                // ====== Helpers ======
+                can(cat) {
+                    if (!cat) return true;
+                    if (this.catMax[cat] === undefined) return true;
+                    return this.cat[cat] < this.catMax[cat];
+                },
+                left(cat) {
+                    if (this.catMax[cat] === undefined) return null;
+                    return Math.max(0, this.catMax[cat] - this.cat[cat]);
+                },
+                sumOf(cat) {
+                    return this.round3(this.actions.filter(a => a.cat === cat).reduce((s, a) => s + a.v, 0));
+                },
+                isLimitCat(cat) { return cat === 'dance' || cat === 'dynamic'; },
+            };
+        }
+
         (function () {
             const pingUrl = @json(route('judge.tournament.tablet.ping', $tournament));
             let lastPid = @json($current?->id);
             let lastCid = @json($category->id);
-            const intervalMs = 3500;
             setInterval(async function () {
                 try {
                     const r = await fetch(pingUrl, {
@@ -205,15 +295,13 @@
                     if (!r.ok) return;
                     const j = await r.json();
                     if (!j.resolved) return;
-                    const pid = j.performance_id ?? null;
-                    const cid = j.category_id ?? null;
-                    if (pid !== lastPid || cid !== lastCid) {
-                        lastPid = pid;
-                        lastCid = cid;
+                    if (j.performance_id !== lastPid || j.category_id !== lastCid) {
+                        lastPid = j.performance_id;
+                        lastCid = j.category_id;
                         window.location.reload();
                     }
                 } catch (e) {}
-            }, intervalMs);
+            }, 3500);
         })();
     </script>
 @endpush

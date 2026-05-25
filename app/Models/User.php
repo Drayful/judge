@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'role'])]
+#[Fillable(['name', 'email', 'password', 'role', 'slot'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -50,7 +50,7 @@ class User extends Authenticatable
 
     public function judgePanel(): ?array
     {
-        return match ($this->role) {
+        $panel = match ($this->role) {
             // ТЗ: judge_d / judge_a / judge_e (планшет бригад)
             'judge_d' => ['panel' => 'd', 'subpanel' => 'db'],
             'judge_a' => ['panel' => 'a', 'subpanel' => null],
@@ -66,6 +66,26 @@ class User extends Authenticatable
             'time_judge' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'time'],
             'music_operator' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'music'],
 
+            default => null,
+        };
+
+        if ($panel !== null) {
+            $panel['slot'] = $this->slot ?: $this->defaultSlotForRole();
+        }
+
+        return $panel;
+    }
+
+    private function defaultSlotForRole(): ?string
+    {
+        return match ($this->role) {
+            'judge_d', 'judge_d_db' => 'DB1',
+            'judge_d_da' => 'DA1',
+            'judge_a', 'judge' => 'A1',
+            'judge_e' => 'E1',
+            'line_judge' => 'LINE1',
+            'time_judge' => 'TIME',
+            'music_operator' => 'RESP',
             default => null,
         };
     }

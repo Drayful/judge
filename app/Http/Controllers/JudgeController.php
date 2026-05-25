@@ -154,6 +154,58 @@ class JudgeController extends Controller
     }
 
     /**
+     * AJAX-сабмит со страницы планшета (route name: judge.submit-score).
+     * Body: { tournament_id, panel?, subpanel?, penalty_type?, score }
+     * Response: { ok, message?, score?, slot?, error?, redirect_url? }
+     */
+    public function submitScoreAjax(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'tournament_id' => ['required', 'integer'],
+            'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'panel' => ['nullable', Rule::in(['d', 'a', 'e', 'penalty'])],
+            'subpanel' => ['nullable', 'string', 'max:32'],
+            'penalty_type' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        $tournament = Tournament::query()->findOrFail($data['tournament_id']);
+        $category = $this->resolveJudgeCategoryForTournament($tournament);
+        if ($category === null) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'Поток не выбран секретарём.',
+            ], 422);
+        }
+
+        $performances = Performance::query()
+            ->where('category_id', $category->id)
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get();
+        $ordered = SecretaryLiveUi::orderedPerformances($performances);
+        $current = SecretaryLiveUi::currentPerformance($ordered);
+
+        if (! $current) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'Нет активного выступления.',
+            ], 422);
+        }
+
+        $message = $this->saveJudgeScore($current, $request);
+
+        $user = $request->user();
+
+        return response()->json([
+            'ok' => true,
+            'message' => $message,
+            'slot' => $user->slot,
+            'score' => (float) $data['score'],
+            'redirect_url' => route('judge.tournament.tablet', $tournament),
+        ]);
+    }
+
+    /**
      * Сохранение оценки судьи (десктоп / планшет).
      */
     private function saveJudgeScore(Performance $performance, Request $request): string
@@ -281,12 +333,26 @@ class JudgeController extends Controller
                 'panel' => $request->query('panel', 'a'),
                 'subpanel' => $request->query('subpanel') ?: null,
                 'penalty_type' => $request->query('penalty_type') ?: null,
+                'slot' => $request->query('slot') ?: null,
             ];
             if (($panel['panel'] ?? '') === 'd' && empty($panel['subpanel'])) {
                 $panel['subpanel'] = $request->query('subpanel', 'db');
             }
             if (($panel['panel'] ?? '') === 'penalty' && empty($panel['penalty_type'])) {
                 $panel['penalty_type'] = $request->query('penalty_type', 'line');
+            }
+            if (empty($panel['slot'])) {
+                $panel['slot'] = match ($panel['panel'] ?? null) {
+                    'd' => strtoupper(($panel['subpanel'] ?? 'db')).'1',
+                    'a' => 'A1',
+                    'e' => 'E1',
+                    'penalty' => match ($panel['penalty_type'] ?? null) {
+                        'time' => 'TIME',
+                        'music' => 'RESP',
+                        default => 'LINE1',
+                    },
+                    default => null,
+                };
             }
         }
 

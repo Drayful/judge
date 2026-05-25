@@ -8,7 +8,7 @@ use Illuminate\Support\Collection;
 class SecretaryLiveUi
 {
     /** Слоты, после заполнения которых считаем «все основные судьи выставили» (LINE/RESP не обязательны). */
-    public const AUTO_ADVANCE_REQUIRED_LABELS = ['DB1', 'DA1', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4'];
+    public const AUTO_ADVANCE_REQUIRED_LABELS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4'];
 
     /**
      * @return Collection<int, Performance>
@@ -59,35 +59,71 @@ class SecretaryLiveUi
     /**
      * Слоты судей как на табло: зелёная точка = оценка отправлена (есть submitted_at).
      *
+     * Сопоставление по user.slot, а не по порядку записей (DB2 может отправить раньше DB1).
+     *
      * @return array<int, array{label: string, ok: bool}>
      */
     public static function judgeSlots(?Performance $perf): array
     {
-        $scores = $perf?->judgeScores ?? collect();
+        $labels = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
 
-        $a = $scores->where('panel', 'a')->sortBy('id')->values();
-        $e = $scores->where('panel', 'e')->sortBy('id')->values();
+        if (! $perf) {
+            return array_map(fn ($l) => ['label' => $l, 'ok' => false], $labels);
+        }
 
-        $ok = static function ($predicate) use ($scores): bool {
-            $row = $scores->first($predicate);
+        $perf->loadMissing('judgeScores.judge');
+        $scores = $perf->judgeScores ?? collect();
+
+        $slotMap = [];
+        foreach ($scores as $s) {
+            $slot = $s->judge?->slot;
+            if ($slot && $s->submitted_at !== null) {
+                $slotMap[$slot] = true;
+            }
+        }
+
+        // Fallback по позиции: если slot у пользователя не задан, считаем порядком пришедших оценок.
+        $aSorted = $scores->where('panel', 'a')->sortBy('id')->values();
+        $eSorted = $scores->where('panel', 'e')->sortBy('id')->values();
+        $dbSorted = $scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values();
+        $daSorted = $scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values();
+        $lineSorted = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
+
+        $byPosition = function ($coll, int $i): bool {
+            $row = $coll->get($i);
 
             return $row !== null && $row->submitted_at !== null;
         };
 
-        return [
-            ['label' => 'DB1', 'ok' => $ok(fn ($s) => $s->panel === 'd' && $s->subpanel === 'db')],
-            ['label' => 'DA1', 'ok' => $ok(fn ($s) => $s->panel === 'd' && $s->subpanel === 'da')],
-            ['label' => 'A1', 'ok' => isset($a[0]) && $a[0]->submitted_at],
-            ['label' => 'A2', 'ok' => isset($a[1]) && $a[1]->submitted_at],
-            ['label' => 'A3', 'ok' => isset($a[2]) && $a[2]->submitted_at],
-            ['label' => 'A4', 'ok' => isset($a[3]) && $a[3]->submitted_at],
-            ['label' => 'E1', 'ok' => isset($e[0]) && $e[0]->submitted_at],
-            ['label' => 'E2', 'ok' => isset($e[1]) && $e[1]->submitted_at],
-            ['label' => 'E3', 'ok' => isset($e[2]) && $e[2]->submitted_at],
-            ['label' => 'E4', 'ok' => isset($e[3]) && $e[3]->submitted_at],
-            ['label' => 'LINE1', 'ok' => $ok(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'line')],
-            ['label' => 'RESP1', 'ok' => $ok(fn ($s) => $s->panel === 'penalty' && in_array($s->penalty_type, ['time', 'music'], true))],
-        ];
+        $out = [];
+        foreach ($labels as $label) {
+            if (isset($slotMap[$label])) {
+                $out[] = ['label' => $label, 'ok' => true];
+                continue;
+            }
+            $ok = match ($label) {
+                'DB1' => $byPosition($dbSorted, 0),
+                'DB2' => $byPosition($dbSorted, 1),
+                'DA1' => $byPosition($daSorted, 0),
+                'DA2' => $byPosition($daSorted, 1),
+                'A1' => $byPosition($aSorted, 0),
+                'A2' => $byPosition($aSorted, 1),
+                'A3' => $byPosition($aSorted, 2),
+                'A4' => $byPosition($aSorted, 3),
+                'E1' => $byPosition($eSorted, 0),
+                'E2' => $byPosition($eSorted, 1),
+                'E3' => $byPosition($eSorted, 2),
+                'E4' => $byPosition($eSorted, 3),
+                'LINE1' => $byPosition($lineSorted, 0),
+                'LINE2' => $byPosition($lineSorted, 1),
+                'TIME' => $scores->contains(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time' && $s->submitted_at !== null),
+                'RESP' => $scores->contains(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music' && $s->submitted_at !== null),
+                default => false,
+            };
+            $out[] = ['label' => $label, 'ok' => $ok];
+        }
+
+        return $out;
     }
 
     /**
@@ -117,7 +153,7 @@ class SecretaryLiveUi
      */
     public static function fixedScoreMatrix(?Performance $perf): array
     {
-        $columns = ['DB1', 'DA1', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
+        $columns = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
         $values = array_fill_keys($columns, '—');
         $penalty = array_fill_keys($columns, false);
 
@@ -125,54 +161,58 @@ class SecretaryLiveUi
             return compact('columns', 'values', 'penalty');
         }
 
+        $perf->loadMissing('judgeScores.judge');
         $scores = $perf->judgeScores;
 
         $fmt = static fn ($v) => $v !== null && $v !== '' ? number_format((float) $v, 3, '.', '') : '—';
 
-        $db = $scores->first(fn ($s) => $s->panel === 'd' && $s->subpanel === 'db');
-        if ($db) {
-            $values['DB1'] = $fmt($db->score);
-        }
-
-        $da = $scores->first(fn ($s) => $s->panel === 'd' && $s->subpanel === 'da');
-        if ($da) {
-            $values['DA1'] = $fmt($da->score);
-        }
-
-        $aList = $scores->where('panel', 'a')->sortBy('id')->values();
-        foreach (range(0, 3) as $i) {
-            $key = 'A'.($i + 1);
-            if (isset($aList[$i])) {
-                $values[$key] = $fmt($aList[$i]->score);
+        // 1) Сначала пробуем по слоту судьи (надёжно).
+        foreach ($scores as $s) {
+            $slot = $s->judge?->slot;
+            if ($slot && array_key_exists($slot, $values) && $s->score !== null) {
+                $values[$slot] = $fmt($s->score);
+                if ($s->panel === 'penalty') {
+                    $penalty[$slot] = true;
+                }
             }
         }
 
-        $eList = $scores->where('panel', 'e')->sortBy('id')->values();
-        foreach (range(0, 3) as $i) {
-            $key = 'E'.($i + 1);
-            if (isset($eList[$i])) {
-                $values[$key] = $fmt($eList[$i]->score);
+        // 2) Резерв: незаполненные слоты — добиваем по порядку id (как раньше).
+        $fillByOrder = function (string $prefix, $coll, int $count) use (&$values, $fmt) {
+            $i = 0;
+            foreach ($coll as $row) {
+                if ($i >= $count) {
+                    break;
+                }
+                $key = $prefix.($i + 1);
+                if ($values[$key] === '—' && $row->score !== null) {
+                    $values[$key] = $fmt($row->score);
+                }
+                $i++;
             }
-        }
+        };
 
-        $lines = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
-        if (isset($lines[0])) {
-            $values['LINE1'] = $fmt($lines[0]->score);
-            $penalty['LINE1'] = true;
-        }
-        if (isset($lines[1])) {
-            $values['LINE2'] = $fmt($lines[1]->score);
-            $penalty['LINE2'] = true;
+        $fillByOrder('DB', $scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values(), 2);
+        $fillByOrder('DA', $scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values(), 2);
+        $fillByOrder('A', $scores->where('panel', 'a')->sortBy('id')->values(), 4);
+        $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
+
+        $lineList = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
+        foreach ([0 => 'LINE1', 1 => 'LINE2'] as $i => $key) {
+            if (isset($lineList[$i]) && $values[$key] === '—') {
+                $values[$key] = $fmt($lineList[$i]->score);
+                $penalty[$key] = true;
+            }
         }
 
         $time = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');
-        if ($time) {
+        if ($time && $values['TIME'] === '—') {
             $values['TIME'] = $fmt($time->score);
             $penalty['TIME'] = true;
         }
 
         $resp = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music');
-        if ($resp) {
+        if ($resp && $values['RESP'] === '—') {
             $values['RESP'] = $fmt($resp->score);
             $penalty['RESP'] = true;
         }

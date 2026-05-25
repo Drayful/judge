@@ -27,10 +27,44 @@ class DemoSeeder extends Seeder
             ['name' => 'Secretary', 'password' => Hash::make('password'), 'role' => 'secretary'],
         );
 
+        // Универсальный «judge_a» — используется во многих местах как «общий судья».
         User::query()->updateOrCreate(
             ['email' => 'judge@local.test'],
-            ['name' => 'Judge A', 'password' => Hash::make('password'), 'role' => 'judge_a'],
+            ['name' => 'Judge A1', 'password' => Hash::make('password'), 'role' => 'judge_a', 'slot' => 'A1'],
         );
+
+        // Полная бригада 12 + доп. судьи (LINE×2, TIME, RESP).
+        // Логины: db1@..., db2@..., da1@..., da2@..., a1..a4@..., e1..e4@..., line1/2@..., time@..., resp@...
+        $brigade = [
+            ['email' => 'db1@local.test',   'name' => 'Judge DB1', 'role' => 'judge_d_db', 'slot' => 'DB1'],
+            ['email' => 'db2@local.test',   'name' => 'Judge DB2', 'role' => 'judge_d_db', 'slot' => 'DB2'],
+            ['email' => 'da1@local.test',   'name' => 'Judge DA1', 'role' => 'judge_d_da', 'slot' => 'DA1'],
+            ['email' => 'da2@local.test',   'name' => 'Judge DA2', 'role' => 'judge_d_da', 'slot' => 'DA2'],
+            ['email' => 'a1@local.test',    'name' => 'Judge A1',  'role' => 'judge_a',    'slot' => 'A1'],
+            ['email' => 'a2@local.test',    'name' => 'Judge A2',  'role' => 'judge_a',    'slot' => 'A2'],
+            ['email' => 'a3@local.test',    'name' => 'Judge A3',  'role' => 'judge_a',    'slot' => 'A3'],
+            ['email' => 'a4@local.test',    'name' => 'Judge A4',  'role' => 'judge_a',    'slot' => 'A4'],
+            ['email' => 'e1@local.test',    'name' => 'Judge E1',  'role' => 'judge_e',    'slot' => 'E1'],
+            ['email' => 'e2@local.test',    'name' => 'Judge E2',  'role' => 'judge_e',    'slot' => 'E2'],
+            ['email' => 'e3@local.test',    'name' => 'Judge E3',  'role' => 'judge_e',    'slot' => 'E3'],
+            ['email' => 'e4@local.test',    'name' => 'Judge E4',  'role' => 'judge_e',    'slot' => 'E4'],
+            ['email' => 'line1@local.test', 'name' => 'Line Judge 1', 'role' => 'line_judge', 'slot' => 'LINE1'],
+            ['email' => 'line2@local.test', 'name' => 'Line Judge 2', 'role' => 'line_judge', 'slot' => 'LINE2'],
+            ['email' => 'time@local.test',  'name' => 'Time Judge',   'role' => 'time_judge', 'slot' => 'TIME'],
+            ['email' => 'resp@local.test',  'name' => 'Resp Judge',   'role' => 'head_judge', 'slot' => 'RESP'],
+        ];
+
+        foreach ($brigade as $row) {
+            User::query()->updateOrCreate(
+                ['email' => $row['email']],
+                [
+                    'name' => $row['name'],
+                    'password' => Hash::make('password'),
+                    'role' => $row['role'],
+                    'slot' => $row['slot'],
+                ],
+            );
+        }
 
         $athleteUser = User::query()->updateOrCreate(
             ['email' => 'athlete@local.test'],

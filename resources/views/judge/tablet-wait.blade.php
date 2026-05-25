@@ -1,22 +1,20 @@
-@extends('layouts.tablet')
+@extends('layouts.judging')
 
 @section('title', 'Ожидание потока')
 
 @section('content')
-    <div class="max-w-lg mx-auto px-4 py-10 space-y-6 text-center">
+    <div class="h-screen overflow-hidden flex flex-col items-center justify-center px-4 text-center gap-4">
         <a href="{{ route('judge.tournaments') }}" class="text-sm text-emerald-400 hover:text-emerald-300">← Турниры</a>
 
-        <div class="rounded-2xl border border-amber-800/50 bg-amber-950/30 p-6">
-            <h1 class="text-lg font-semibold text-amber-100">Поток не выбран</h1>
+        <div class="rounded-2xl border border-amber-800/50 bg-amber-950/30 p-8 max-w-lg">
+            <h1 class="text-xl font-semibold text-amber-100">Поток не выбран</h1>
             <p class="mt-3 text-sm text-amber-100/80">
                 Секретарь должен открыть Live турнира <span class="font-medium text-white">«{{ $tournament->name }}»</span> и выбрать поток в списке — тогда здесь появится текущая гимнастка.
             </p>
         </div>
 
         <a href="{{ route('judge.tournament.tablet', $tournament) }}"
-            class="inline-block text-sm text-emerald-400 hover:text-emerald-300">
-            Обновить
-        </a>
+            class="text-sm text-emerald-400 hover:text-emerald-300">Обновить</a>
     </div>
 @endsection
 
