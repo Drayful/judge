@@ -34,7 +34,7 @@
         </a>
     @endif
 
-    <a href="{{ route('scoreboard.category', 1) }}" class="{{ request()->routeIs('scoreboard.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
+    <a href="{{ route('scoreboard.index') }}" class="{{ request()->routeIs('scoreboard.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
         Табло
     </a>
 </nav>

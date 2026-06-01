@@ -4,13 +4,34 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use App\Models\Performance;
+use App\Models\Tournament;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 class ScoreboardController extends Controller
 {
+    /**
+     * Публичная «точка входа» — подбирает разумную категорию для табло
+     * (последний опубликованный турнир и его первая опубликованная категория).
+     * Используется в welcome / dashboard / sidebar, чтобы не было битых
+     * ссылок на category=1.
+     */
+    public function index(): View|RedirectResponse
+    {
+        $category = $this->defaultPublicCategory();
+
+        if ($category !== null) {
+            return redirect()->route('scoreboard.category', $category);
+        }
+
+        return view('scoreboard.empty');
+    }
+
     public function category(Category $category): View
     {
+        $this->ensurePublic($category);
+
         $rows = Performance::query()
             ->with(['athlete', 'inquiries' => function ($q) {
                 $q->orderByDesc('id');
@@ -31,6 +52,8 @@ class ScoreboardController extends Controller
 
     public function categoryLive(Category $category): JsonResponse
     {
+        $this->ensurePublic($category);
+
         $rows = Performance::query()
             ->with(['athlete', 'inquiries' => function ($q) {
                 $q->orderByDesc('id');
@@ -68,5 +91,33 @@ class ScoreboardController extends Controller
             'updated_at' => now()->toIso8601String(),
             'rows' => $rows,
         ]);
+    }
+
+    private function defaultPublicCategory(): ?Category
+    {
+        $tournament = Tournament::query()
+            ->where('is_published', true)
+            ->whereHas('categories', fn ($q) => $q->where('is_published', true))
+            ->orderByDesc('id')
+            ->first();
+
+        if ($tournament === null) {
+            return null;
+        }
+
+        return Category::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('is_published', true)
+            ->orderBy('id')
+            ->first();
+    }
+
+    private function ensurePublic(Category $category): void
+    {
+        $category->loadMissing('tournament');
+
+        if (! $category->is_published || ! $category->tournament?->is_published) {
+            abort(404);
+        }
     }
 }

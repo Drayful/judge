@@ -19,6 +19,7 @@ class Category extends Model
         'music_deadline_at',
         'scoring_rules',
         'auto_advance',
+        'inactive_judge_slots',
     ];
 
     protected $casts = [
@@ -26,7 +27,31 @@ class Category extends Model
         'auto_advance' => 'bool',
         'music_deadline_at' => 'datetime',
         'scoring_rules' => 'array',
+        'inactive_judge_slots' => 'array',
     ];
+
+    /**
+     * Список неактивных слотов судей (DB1, A4, E2 и т. п.).
+     *
+     * @return array<int, string>
+     */
+    public function inactiveJudgeSlotList(): array
+    {
+        $raw = $this->inactive_judge_slots;
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn ($v) => is_string($v) ? strtoupper(trim($v)) : null,
+            $raw,
+        ))));
+    }
+
+    public function isJudgeSlotActive(string $slot): bool
+    {
+        return ! in_array(strtoupper($slot), $this->inactiveJudgeSlotList(), true);
+    }
 
     public function tournament(): BelongsTo
     {

@@ -174,35 +174,42 @@
                 </ul>
             </div>
 
-            {{-- Принудительный вызов --}}
-            <div class="live-panel p-5">
-                <h2 class="text-base font-semibold text-white">Принудительный вызов гимнастки</h2>
-                <p class="mt-1 text-xs text-slate-500">Быстрый поиск и вызов в текущий поток (интеграция с API — в разработке).</p>
-                <div class="mt-4 space-y-3 opacity-60 pointer-events-none">
-                    <x-text-input class="w-full" placeholder="Поиск по ФИО (например: Иванова)" disabled />
-                    <div class="flex flex-wrap gap-2">
-                        <select class="rounded-lg border-slate-700 bg-slate-950/50 text-slate-400 text-sm" disabled>
-                            <option>{{ $apparatusLabel }}</option>
-                        </select>
-                        <x-secondary-button class="opacity-50" type="button" disabled>Вызвать</x-secondary-button>
+            {{-- Активные судьи --}}
+            <div class="live-panel p-5" id="judge-slots-panel">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h2 class="text-base font-semibold text-white">Состав бригады</h2>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Ожидание: <span id="judge-slots-waiting">{{ $waitingJudges }}</span>/<span id="judge-slots-active">{{ $activeJudgeSlots }}</span> активных (всего слотов {{ $totalJudgeSlots }}).
+                            Нажмите на слот, чтобы выключить его, если судьи в этой позиции нет.
+                        </p>
                     </div>
                 </div>
-                <p class="mt-3 text-xs text-slate-600">Работает даже если гимнастки нет в потоке — при появлении API она будет добавлена в конец как StreamEntry.</p>
-            </div>
-
-            {{-- Активные судьи --}}
-            <div class="live-panel p-5">
-                <h2 class="text-base font-semibold text-white">Активные судьи</h2>
-                <p class="mt-1 text-xs text-slate-500">Ожидание: {{ $waitingJudges }}/{{ $totalJudgeSlots }} (по текущей гимнастке)</p>
-                <div class="mt-4 flex flex-wrap gap-2">
+                <div class="mt-4 flex flex-wrap gap-2" id="judge-slots-grid">
                     @foreach($judgeSlots as $slot)
-                        <span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-xs font-mono text-slate-200">
-                            <span class="h-2 w-2 rounded-full {{ $slot['ok'] ? 'bg-emerald-400' : 'bg-amber-400' }}"></span>
-                            {{ $slot['label'] }}
-                        </span>
+                        @php
+                            $inactive = (bool) ($slot['inactive'] ?? false);
+                            $ok = (bool) $slot['ok'];
+                        @endphp
+                        <button
+                            type="button"
+                            data-slot="{{ $slot['label'] }}"
+                            data-inactive="{{ $inactive ? '1' : '0' }}"
+                            data-ok="{{ $ok ? '1' : '0' }}"
+                            class="judge-slot-toggle inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-mono transition focus:outline-none focus:ring-2 focus:ring-emerald-500/50 {{ $inactive ? 'border-slate-800 bg-slate-950/40 text-slate-500 line-through opacity-70 hover:opacity-100' : 'border-slate-700 bg-slate-950/50 text-slate-200 hover:border-slate-500' }}"
+                            title="{{ $inactive ? 'Слот отключён — клик, чтобы включить' : 'Активный слот — клик, чтобы отключить (нет судьи)' }}"
+                        >
+                            <span class="h-2 w-2 rounded-full {{ $inactive ? 'bg-slate-600' : ($ok ? 'bg-emerald-400' : 'bg-amber-400') }}"></span>
+                            <span class="slot-label">{{ $slot['label'] }}</span>
+                            <span class="slot-suffix text-[10px] {{ $inactive ? 'text-slate-500' : 'text-slate-500' }}">{{ $inactive ? 'off' : '' }}</span>
+                        </button>
                     @endforeach
                 </div>
-                <p class="mt-4 text-xs text-slate-500">Точки: <span class="text-emerald-400">зелёный</span> — оценка пришла, <span class="text-amber-400">жёлтый</span> — ещё нет.</p>
+                <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>оценка пришла</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-amber-400"></span>ждём</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-slate-600"></span>отключён (не нужен для автоперехода)</span>
+                </div>
             </div>
         </div>
 
@@ -222,7 +229,7 @@
                             Автопереход: {{ $category->auto_advance ? 'Вкл' : 'Выкл' }}
                         </button>
                     </form>
-                    <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Ожидание: <span class="text-amber-200 font-mono">{{ $waitingJudges }}/{{ $totalJudgeSlots }}</span></span>
+                    <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Ожидание: <span class="text-amber-200 font-mono">{{ $waitingJudges }}/{{ $activeJudgeSlots }}</span></span>
                     <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Итого: <span class="text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($sumDisplay !== null ? (float) $sumDisplay : null) }}</span></span>
                 </div>
             </div>
@@ -255,16 +262,22 @@
                     <thead>
                         <tr>
                             @foreach($scoreMatrix['columns'] as $col)
-                                @php $isPen = $scoreMatrix['penalty'][$col] ?? false; @endphp
-                                <th class="px-2 py-3 font-semibold {{ $isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200' }} border-b border-slate-900">{{ $col }}</th>
+                                @php
+                                    $isPen = $scoreMatrix['penalty'][$col] ?? false;
+                                    $isOff = $scoreMatrix['inactive'][$col] ?? false;
+                                @endphp
+                                <th class="px-2 py-3 font-semibold {{ $isOff ? 'bg-slate-900/80 text-slate-500 line-through' : ($isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200') }} border-b border-slate-900">{{ $col }}</th>
                             @endforeach
                         </tr>
                     </thead>
                     <tbody>
                         <tr class="bg-slate-950/80">
                             @foreach($scoreMatrix['columns'] as $col)
-                                @php $isPen = $scoreMatrix['penalty'][$col] ?? false; @endphp
-                                <td class="px-2 py-3 font-mono text-sm {{ $isPen ? 'text-rose-100' : 'text-slate-100' }} border-t border-slate-800">{{ $scoreMatrix['values'][$col] }}</td>
+                                @php
+                                    $isPen = $scoreMatrix['penalty'][$col] ?? false;
+                                    $isOff = $scoreMatrix['inactive'][$col] ?? false;
+                                @endphp
+                                <td class="px-2 py-3 font-mono text-sm {{ $isOff ? 'text-slate-500 italic' : ($isPen ? 'text-rose-100' : 'text-slate-100') }} border-t border-slate-800">{{ $scoreMatrix['values'][$col] }}</td>
                             @endforeach
                         </tr>
                     </tbody>
@@ -395,11 +408,12 @@
 
                 <div class="flex items-center justify-between gap-3">
                     <x-badge tone="violet">{{ $performances->count() }} выходов</x-badge>
-                    <span class="text-xs text-slate-500">Перетаскивание строк сохраняет порядок.</span>
+                    <span class="text-xs text-slate-500">Перетаскивание строк сохраняет порядок. На мобильных — кнопки ↑ / ↓.</span>
                 </div>
 
                 <div class="-mx-2 px-2">
-                    <div class="hidden lg:block overflow-x-auto">
+                    {{-- Десктоп / планшет: таблица с drag-and-drop --}}
+                    <div class="hidden sm:block overflow-x-auto">
                         <table class="w-full text-sm table-fixed min-w-[900px]">
                             <thead class="text-left text-slate-400">
                                 <tr class="border-b border-slate-800">
@@ -440,16 +454,78 @@
                                             <a href="#secretary-music-upload" class="block mt-1 text-violet-400/90 hover:underline">загрузить</a>
                                         </td>
                                         <td class="py-3 text-right">
-                                            <form method="POST" action="{{ route('secretary.queue.remove', $p) }}" class="inline" onsubmit="return confirm('Удалить из очереди?');">
-                                                @csrf
-                                                <button type="submit" class="text-xs text-rose-300 hover:underline">Удалить</button>
-                                            </form>
+                                            <div class="inline-flex items-center gap-2">
+                                                <form method="POST" action="{{ route('secretary.queue.move', $p) }}" class="inline">
+                                                    @csrf
+                                                    <input type="hidden" name="dir" value="up">
+                                                    <button type="submit" class="text-xs rounded-md border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800" title="Выше">↑</button>
+                                                </form>
+                                                <form method="POST" action="{{ route('secretary.queue.move', $p) }}" class="inline">
+                                                    @csrf
+                                                    <input type="hidden" name="dir" value="down">
+                                                    <button type="submit" class="text-xs rounded-md border border-slate-700 px-2 py-1 text-slate-300 hover:bg-slate-800" title="Ниже">↓</button>
+                                                </form>
+                                                <form method="POST" action="{{ route('secretary.queue.remove', $p) }}" class="inline" onsubmit="return confirm('Удалить «{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}» из очереди?');">
+                                                    @csrf
+                                                    <button type="submit" class="text-xs rounded-md border border-rose-800/80 bg-rose-950/40 px-2 py-1 text-rose-200 hover:bg-rose-900/60">Удалить</button>
+                                                </form>
+                                            </div>
                                         </td>
                                     </tr>
                                 @endforeach
                             </tbody>
                         </table>
                     </div>
+
+                    {{-- Мобильный список — карточки с кнопками ↑ / ↓ / удалить (drag тяжело на touch) --}}
+                    <ul id="queue-body-mobile" class="sm:hidden mt-2 space-y-2">
+                        @foreach($performances as $p)
+                            @php($t = $p->track)
+                            @php($tone =
+                                $p->status === 'on_deck' ? 'amber' :
+                                ($p->status === 'performing' ? 'blue' :
+                                ($p->status === 'done' ? 'green' : 'gray'))
+                            )
+                            <li class="rounded-xl border border-slate-800 bg-slate-950/40 p-3" data-performance-id="{{ $p->id }}">
+                                <div class="flex items-start gap-2">
+                                    <button type="button" class="drag-handle shrink-0 cursor-grab select-none rounded-md border border-slate-700 px-2 py-1 text-slate-500 hover:bg-slate-800" title="Перетащить">⋮⋮</button>
+                                    <div class="min-w-0 flex-1">
+                                        <div class="text-sm font-medium text-slate-100 truncate">
+                                            № {{ $p->start_number ?? '—' }} · {{ $p->athlete->last_name }} {{ $p->athlete->first_name }}
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                                            <x-badge :tone="$tone === 'gray' ? 'violet' : $tone">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</x-badge>
+                                            <x-badge :tone="$tone">{{ $p->status }}</x-badge>
+                                            <span class="text-slate-500 truncate">{{ $p->athlete->club ?? '—' }}</span>
+                                        </div>
+                                        <div class="mt-1 text-xs">
+                                            @if($t)
+                                                <a class="text-emerald-400 hover:underline" href="{{ route('tracks.download', $t) }}">Музыка: файл</a>
+                                            @else
+                                                <a href="#secretary-music-upload" class="text-violet-400/90 hover:underline">Загрузить музыку</a>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex items-center justify-end gap-2">
+                                    <form method="POST" action="{{ route('secretary.queue.move', $p) }}" class="inline">
+                                        @csrf
+                                        <input type="hidden" name="dir" value="up">
+                                        <button type="submit" class="text-xs rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-slate-800" title="Выше">↑</button>
+                                    </form>
+                                    <form method="POST" action="{{ route('secretary.queue.move', $p) }}" class="inline">
+                                        @csrf
+                                        <input type="hidden" name="dir" value="down">
+                                        <button type="submit" class="text-xs rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-slate-800" title="Ниже">↓</button>
+                                    </form>
+                                    <form method="POST" action="{{ route('secretary.queue.remove', $p) }}" class="inline" onsubmit="return confirm('Удалить «{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}» из очереди?');">
+                                        @csrf
+                                        <button type="submit" class="text-xs rounded-md border border-rose-800/80 bg-rose-950/40 px-3 py-1.5 text-rose-200 hover:bg-rose-900/60">Удалить</button>
+                                    </form>
+                                </div>
+                            </li>
+                        @endforeach
+                    </ul>
                 </div>
             </div>
         </details>
@@ -459,10 +535,7 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script>
 (() => {
-    if (typeof Sortable === 'undefined') return;
-    const tableBody = document.getElementById('queue-body');
     const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-    const saveUrl = @json(route('secretary.queue.reorder', $category));
 
     const toast = (tone, text) => {
         let el = document.getElementById('queue-save-status');
@@ -480,53 +553,139 @@
         el.classList.remove('hidden');
         if (tone !== 'saving') {
             clearTimeout(el._t);
-            el._t = setTimeout(() => { el.classList.add('hidden'); }, 1600);
+            el._t = setTimeout(() => { el.classList.add('hidden'); }, 1800);
         }
     };
 
-    let saving = false;
-    let beforeIds = [];
-    const idsNow = (root) => Array.from(root.querySelectorAll('[data-performance-id]')).map((el) => Number(el.dataset.performanceId)).filter(Number.isFinite);
-    const restoreOrder = (root, ids) => {
-        const map = new Map();
-        root.querySelectorAll('[data-performance-id]').forEach((el) => map.set(Number(el.dataset.performanceId), el));
-        ids.forEach((id) => { const el = map.get(id); if (el) root.appendChild(el); });
-    };
+    // --- Drag-and-drop for athletes (desktop table + mobile list) ---
+    if (typeof Sortable !== 'undefined') {
+        const saveUrl = @json(route('secretary.queue.reorder', $category));
+        const containers = [document.getElementById('queue-body'), document.getElementById('queue-body-mobile')].filter(Boolean);
 
-    const persist = async () => {
-        if (!tableBody || saving) return;
-        saving = true;
-        toast('saving', 'Сохраняю порядок…');
-        const ids = idsNow(tableBody);
-        try {
-            const res = await fetch(saveUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) },
-                body: JSON.stringify({ ids }),
-            });
-            if (!res.ok) {
-                restoreOrder(tableBody, beforeIds);
-                toast('err', 'Ошибка сохранения.');
-                return;
+        const idsNow = (root) => Array.from(root.querySelectorAll('[data-performance-id]')).map((el) => Number(el.dataset.performanceId)).filter(Number.isFinite);
+        const restoreOrder = (root, ids) => {
+            const map = new Map();
+            root.querySelectorAll('[data-performance-id]').forEach((el) => map.set(Number(el.dataset.performanceId), el));
+            ids.forEach((id) => { const el = map.get(id); if (el) root.appendChild(el); });
+        };
+
+        const state = new WeakMap();
+        let saving = false;
+
+        const persist = async (root) => {
+            if (saving) return;
+            saving = true;
+            toast('saving', 'Сохраняю порядок…');
+            const ids = idsNow(root);
+            try {
+                const res = await fetch(saveUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) },
+                    body: JSON.stringify({ ids }),
+                });
+                if (!res.ok) {
+                    restoreOrder(root, state.get(root) || []);
+                    toast('err', 'Ошибка сохранения порядка.');
+                    return;
+                }
+                state.set(root, idsNow(root));
+                // Sync the other container (table ↔ mobile list).
+                containers.filter((c) => c !== root).forEach((c) => restoreOrder(c, idsNow(root)));
+                toast('ok', 'Порядок сохранён');
+            } catch (e) {
+                restoreOrder(root, state.get(root) || []);
+                toast('err', 'Нет связи.');
+            } finally {
+                saving = false;
             }
-            beforeIds = idsNow(tableBody);
-            toast('ok', 'Сохранено');
-        } catch (e) {
-            restoreOrder(tableBody, beforeIds);
-            toast('err', 'Нет связи.');
-        } finally {
-            saving = false;
+        };
+
+        containers.forEach((root) => {
+            state.set(root, idsNow(root));
+            new Sortable(root, {
+                animation: 150,
+                handle: '.drag-handle',
+                ghostClass: 'bg-emerald-950/40',
+                onStart: () => { state.set(root, idsNow(root)); },
+                onEnd: () => persist(root),
+            });
+        });
+    }
+
+    // --- Toggle judge slots (на случай неполного состава бригады) ---
+    const toggleUrl = @json(route('secretary.category.judgeSlot.toggle', $category));
+    const grid = document.getElementById('judge-slots-grid');
+    const waitingEl = document.getElementById('judge-slots-waiting');
+    const activeCountEl = document.getElementById('judge-slots-active');
+
+    const styleButton = (btn) => {
+        const inactive = btn.dataset.inactive === '1';
+        const ok = btn.dataset.ok === '1';
+        btn.classList.remove(
+            'border-slate-800', 'bg-slate-950/40', 'text-slate-500', 'line-through', 'opacity-70',
+            'border-slate-700', 'bg-slate-950/50', 'text-slate-200',
+        );
+        if (inactive) {
+            btn.classList.add('border-slate-800', 'bg-slate-950/40', 'text-slate-500', 'line-through', 'opacity-70');
+            btn.title = 'Слот отключён — клик, чтобы включить';
+        } else {
+            btn.classList.add('border-slate-700', 'bg-slate-950/50', 'text-slate-200');
+            btn.title = 'Активный слот — клик, чтобы отключить (нет судьи)';
         }
+        const dot = btn.querySelector('span.h-2.w-2');
+        if (dot) {
+            dot.classList.remove('bg-emerald-400', 'bg-amber-400', 'bg-slate-600');
+            dot.classList.add(inactive ? 'bg-slate-600' : (ok ? 'bg-emerald-400' : 'bg-amber-400'));
+        }
+        const suffix = btn.querySelector('.slot-suffix');
+        if (suffix) suffix.textContent = inactive ? 'off' : '';
     };
 
-    if (tableBody) {
-        beforeIds = idsNow(tableBody);
-        new Sortable(tableBody, {
-            animation: 150,
-            handle: '.drag-handle',
-            ghostClass: 'bg-emerald-950/40',
-            onStart: () => { beforeIds = idsNow(tableBody); },
-            onEnd: persist,
+    const updateCounters = () => {
+        if (!grid || !waitingEl || !activeCountEl) return;
+        const buttons = Array.from(grid.querySelectorAll('.judge-slot-toggle'));
+        const active = buttons.filter((b) => b.dataset.inactive !== '1');
+        const waiting = active.filter((b) => b.dataset.ok !== '1');
+        waitingEl.textContent = waiting.length;
+        activeCountEl.textContent = active.length;
+    };
+
+    if (grid) {
+        grid.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('.judge-slot-toggle');
+            if (!btn) return;
+            ev.preventDefault();
+            const slot = btn.dataset.slot;
+            const willBeActive = btn.dataset.inactive === '1' ? 1 : 0;
+            btn.disabled = true;
+            toast('saving', `Сохраняю слот ${slot}…`);
+            try {
+                const res = await fetch(toggleUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+                    },
+                    body: JSON.stringify({ slot, active: willBeActive }),
+                });
+                if (!res.ok) {
+                    toast('err', 'Не удалось сохранить.');
+                    return;
+                }
+                const data = await res.json();
+                btn.dataset.inactive = data.active ? '0' : '1';
+                styleButton(btn);
+                updateCounters();
+                toast('ok', data.message || 'Сохранено');
+                // Refresh score matrix and waiting counters on the page by triggering reload via ping rev change.
+                // No full reload here — keep secretary's UX snappy; the periodic ping below will pick up the change.
+            } catch (e) {
+                toast('err', 'Нет связи.');
+            } finally {
+                btn.disabled = false;
+            }
         });
     }
 })();

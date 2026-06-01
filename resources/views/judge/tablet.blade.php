@@ -20,6 +20,11 @@
     $aBaseFloat = (float) $aBase;
     $eBaseFloat = (float) $eBase;
     $panelBase = $pKey === 'e' ? $eBaseFloat : ($pKey === 'a' ? $aBaseFloat : 0.0);
+
+    $authUser = auth()->user();
+    $isHeadJudge = $authUser && in_array($authUser->role, ['head_judge', 'superior_jury', 'admin', 'super_admin'], true);
+    $ageMin = $category->age_min;
+    $ageMax = $category->age_max;
 @endphp
 
 @section('content')
@@ -39,17 +44,23 @@
                     @endif
                 </div>
 
-                <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2">
-                    <span class="text-[10px] uppercase text-slate-400">Юн.</span>
-                    <span class="text-base font-bold text-cyan-200 tabular-nums">13</span>
-                </div>
-                <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2">
-                    <span class="text-[10px] uppercase text-slate-400">Сен.</span>
-                    <span class="text-base font-bold text-cyan-200 tabular-nums">16</span>
-                </div>
-                <div class="rounded-lg bg-[#0e5a3f] border border-emerald-700 px-3 h-full flex items-center">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-emerald-50">Ответственный судья</span>
-                </div>
+                @if($ageMin !== null)
+                    <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2" title="Минимальный возраст в категории">
+                        <span class="text-[10px] uppercase text-slate-400">Мин.</span>
+                        <span class="text-base font-bold text-cyan-200 tabular-nums">{{ $ageMin }}</span>
+                    </div>
+                @endif
+                @if($ageMax !== null)
+                    <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2" title="Максимальный возраст в категории">
+                        <span class="text-[10px] uppercase text-slate-400">Макс.</span>
+                        <span class="text-base font-bold text-cyan-200 tabular-nums">{{ $ageMax }}</span>
+                    </div>
+                @endif
+                @if($isHeadJudge)
+                    <div class="rounded-lg bg-[#0e5a3f] border border-emerald-700 px-3 h-full flex items-center">
+                        <span class="text-xs font-semibold uppercase tracking-wider text-emerald-50">Ответственный судья</span>
+                    </div>
+                @endif
                 <div class="rounded-lg bg-[#0f1830] border border-slate-800 px-3 h-full flex items-center">
                     <span class="text-[10px] uppercase text-slate-400 mr-1">Слот</span>
                     <span class="text-sm font-mono text-emerald-300">{{ $slot ?? '—' }}</span>

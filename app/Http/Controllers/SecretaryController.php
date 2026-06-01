@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\JudgeScore;
+use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Services\MusicTrackUploadService;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -134,6 +136,91 @@ class SecretaryController extends Controller
         return redirect()
             ->to(route('secretary.tournament.live', $tournament) . '?category=' . $category->id)
             ->with('status', 'Категория создана. Можно добавлять атлетов в очередь.');
+    }
+
+    /**
+     * Удалить одну категорию (поток) внутри турнира. Cascade удалит выступления,
+     * оценки судей и запросы; музыкальные файлы и записи music_tracks чистим вручную
+     * (FK у этой таблицы намеренно отсутствует — см. миграцию music_tracks).
+     */
+    public function destroyCategory(Tournament $tournament, Category $category): RedirectResponse
+    {
+        if ((int) $category->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        $name = $category->name;
+
+        DB::transaction(function () use ($tournament, $category) {
+            $this->purgeCategoryMusic($category);
+
+            if ((int) ($tournament->active_category_id ?? 0) === (int) $category->id) {
+                $tournament->update(['active_category_id' => null]);
+            }
+
+            $category->delete();
+        });
+
+        return redirect()->route('secretary.tournament', $tournament)
+            ->with('status', "Поток «{$name}» удалён вместе с выступлениями и оценками.");
+    }
+
+    /**
+     * Очистить турнир от всех потоков (категорий) разом.
+     */
+    public function clearTournamentCategories(Tournament $tournament): RedirectResponse
+    {
+        $deleted = 0;
+
+        DB::transaction(function () use ($tournament, &$deleted) {
+            $categories = Category::query()
+                ->where('tournament_id', $tournament->id)
+                ->get();
+
+            foreach ($categories as $cat) {
+                $this->purgeCategoryMusic($cat);
+                $cat->delete();
+                $deleted++;
+            }
+
+            $tournament->update(['active_category_id' => null]);
+        });
+
+        $msg = $deleted > 0
+            ? "Турнир очищен: удалено потоков — {$deleted}."
+            : 'В турнире не было потоков для удаления.';
+
+        return redirect()->route('secretary.tournament', $tournament)->with('status', $msg);
+    }
+
+    /**
+     * Снести все music_tracks, относящиеся к performances данной категории,
+     * включая попытку удалить файлы из хранилища (best-effort, ошибки игнорируем —
+     * запись всё равно уйдёт, орфанной не останется).
+     */
+    private function purgeCategoryMusic(Category $category): void
+    {
+        $performanceIds = Performance::query()
+            ->where('category_id', $category->id)
+            ->pluck('id');
+
+        if ($performanceIds->isEmpty()) {
+            return;
+        }
+
+        MusicTrack::query()
+            ->whereIn('performance_id', $performanceIds)
+            ->get(['id', 'disk', 'path'])
+            ->each(function (MusicTrack $track) {
+                if ($track->disk && $track->path) {
+                    try {
+                        Storage::disk($track->disk)->delete($track->path);
+                    } catch (\Throwable $e) {
+                        // best-effort
+                    }
+                }
+                $track->delete();
+            });
     }
 
     public function athletes(): View
@@ -259,7 +346,9 @@ class SecretaryController extends Controller
                 ->implode(';');
         }
 
-        $rev = md5($perfSig."\n".$scoresDigest);
+        $catSig = $category->id.':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
+
+        $rev = md5($perfSig."\n".$scoresDigest."\n".$catSig);
 
         return response()->json([
             'rev' => $rev,
@@ -298,9 +387,10 @@ class SecretaryController extends Controller
         $currentPerformance = SecretaryLiveUi::currentPerformance($ordered);
         $nextPerformance = SecretaryLiveUi::nextAfter($ordered, $currentPerformance);
         $streamStatus = SecretaryLiveUi::streamStatus($currentPerformance);
-        $judgeSlots = SecretaryLiveUi::judgeSlots($currentPerformance);
-        $scoreMatrix = SecretaryLiveUi::fixedScoreMatrix($currentPerformance);
-        $waitingJudges = collect($judgeSlots)->where('ok', false)->count();
+        $judgeSlots = SecretaryLiveUi::judgeSlots($currentPerformance, $category);
+        $scoreMatrix = SecretaryLiveUi::fixedScoreMatrix($currentPerformance, $category);
+        $waitingJudges = collect($judgeSlots)->filter(fn ($s) => ! $s['ok'] && ! ($s['inactive'] ?? false))->count();
+        $activeJudgeSlots = collect($judgeSlots)->filter(fn ($s) => ! ($s['inactive'] ?? false))->count();
         $totalJudgeSlots = count($judgeSlots);
 
         $category->loadMissing('tournament');
@@ -325,6 +415,7 @@ class SecretaryController extends Controller
             'scoreMatrix' => $scoreMatrix,
             'waitingJudges' => $waitingJudges,
             'totalJudgeSlots' => $totalJudgeSlots,
+            'activeJudgeSlots' => $activeJudgeSlots,
             'athletes' => $athletes,
         ];
     }
@@ -474,6 +565,47 @@ class SecretaryController extends Controller
         return back()->with('status', $category->auto_advance
             ? 'Автопереход включён: после всех основных оценок поток перейдёт к следующей гимнастке.'
             : 'Автопереход выключен.');
+    }
+
+    /**
+     * Включает/выключает слот судьи (на случай неполного состава бригады).
+     */
+    public function toggleJudgeSlot(Request $request, Category $category)
+    {
+        $data = $request->validate([
+            'slot' => ['required', 'string', Rule::in(\App\Support\SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'active' => ['required', 'in:0,1'],
+        ]);
+
+        $slot = strtoupper((string) $data['slot']);
+        $shouldBeActive = (int) $data['active'] === 1;
+
+        $current = $category->inactiveJudgeSlotList();
+
+        if ($shouldBeActive) {
+            $current = array_values(array_filter($current, static fn ($s) => $s !== $slot));
+        } elseif (! in_array($slot, $current, true)) {
+            $current[] = $slot;
+        }
+
+        $category->inactive_judge_slots = $current;
+        $category->save();
+
+        $message = $shouldBeActive
+            ? "Слот {$slot} включён."
+            : "Слот {$slot} отключён — оценки этой позиции не требуются.";
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'ok' => true,
+                'slot' => $slot,
+                'active' => $shouldBeActive,
+                'inactive_slots' => $current,
+                'message' => $message,
+            ]);
+        }
+
+        return back()->with('status', $message);
     }
 
     public function start(Performance $performance): RedirectResponse

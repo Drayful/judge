@@ -263,14 +263,14 @@ class JudgeController extends Controller
         if (
             $category?->auto_advance
             && $performance->status === 'performing'
-            && SecretaryLiveUi::scoresCompleteForAutoAdvance($performance)
+            && SecretaryLiveUi::scoresCompleteForAutoAdvance($performance, $category)
         ) {
             $moved = false;
             DB::transaction(function () use ($performance, &$moved) {
                 $performance->refresh();
-                $performance->load('judgeScores');
+                $performance->load(['judgeScores', 'category']);
 
-                if (! SecretaryLiveUi::scoresCompleteForAutoAdvance($performance)) {
+                if (! SecretaryLiveUi::scoresCompleteForAutoAdvance($performance, $performance->category)) {
                     return;
                 }
 

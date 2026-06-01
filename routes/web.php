@@ -70,6 +70,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/categories', [SecretaryController::class, 'storeCategory'])
         ->middleware('role:secretary,admin')
         ->name('secretary.tournament.categories.store');
+    Route::delete('/secretary/tournaments/{tournament}/categories', [SecretaryController::class, 'clearTournamentCategories'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.categories.clear');
+    Route::delete('/secretary/tournaments/{tournament}/categories/{category}', [SecretaryController::class, 'destroyCategory'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.categories.destroy');
     Route::get('/secretary/athletes', [SecretaryController::class, 'athletes'])
         ->middleware('role:secretary,admin')
         ->name('secretary.athletes');
@@ -82,6 +88,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/categories/{category}/auto-advance', [SecretaryController::class, 'setAutoAdvance'])
         ->middleware('role:secretary,admin')
         ->name('secretary.category.autoAdvance');
+    Route::post('/secretary/categories/{category}/judge-slots', [SecretaryController::class, 'toggleJudgeSlot'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.category.judgeSlot.toggle');
     Route::post('/secretary/performances/{performance}/start', [SecretaryController::class, 'start'])
         ->middleware('role:secretary,admin')
         ->name('secretary.start');
@@ -139,6 +148,9 @@ Route::middleware('auth')->group(function () {
 });
 
 require __DIR__.'/auth.php';
+
+Route::get('/scoreboard', [ScoreboardController::class, 'index'])
+    ->name('scoreboard.index');
 
 Route::get('/scoreboard/categories/{category}', [ScoreboardController::class, 'category'])
     ->name('scoreboard.category');

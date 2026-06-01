@@ -108,15 +108,19 @@ class Performance extends Model
             ->whereNotNull('submitted_at')
             ->get();
 
-        $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter()->values();
-        $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter()->values();
+        // ВАЖНО: ->filter() без аргумента вырезает все falsy-значения,
+        // в т.ч. валидные 0.0. Используем явное «не null».
+        $notNull = static fn ($v) => $v !== null;
+
+        $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter($notNull)->values();
+        $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter($notNull)->values();
 
         $db = $dDb->count() ? (float) $dDb->avg() : null;
         $da = $dDa->count() ? (float) $dDa->avg() : null;
         $d = ($db !== null && $da !== null) ? ($db + $da) : null;
 
-        $aVals = $scores->where('panel', 'a')->pluck('score')->filter()->sort()->values();
-        $eVals = $scores->where('panel', 'e')->pluck('score')->filter()->sort()->values();
+        $aVals = $scores->where('panel', 'a')->pluck('score')->filter($notNull)->sort()->values();
+        $eVals = $scores->where('panel', 'e')->pluck('score')->filter($notNull)->sort()->values();
 
         $a = null;
         if ($aVals->count() >= 4) {
@@ -134,16 +138,19 @@ class Performance extends Model
             $e = (float) $eVals->avg();
         }
 
-        // penalties can come from multiple panels; keep it simple for now: panel == penalty
-        $pen = (float) $scores->where('panel', 'penalty')->sum('score');
+        // penalties: суммируем только реально пришедшие записи penalty-судей,
+        // чтобы отсутствие записей сохранило penalty=null (а не 0.0), и в табло
+        // не печаталось «−0.000» по неустановленной бригаде.
+        $penaltyScores = $scores->where('panel', 'penalty')->pluck('score')->filter($notNull);
+        $pen = $penaltyScores->count() ? (float) $penaltyScores->sum() : null;
 
         $this->d_score = $d !== null ? round($d, $round) : null;
         $this->a_score = $a !== null ? round($a, $round) : null;
         $this->e_score = $e !== null ? round($e, $round) : null;
-        $this->penalty = $pen ? round($pen, $round) : 0.0;
+        $this->penalty = $pen !== null ? round($pen, $round) : null;
 
         if ($d !== null && $a !== null && $e !== null) {
-            $total = $d + $a + $e - $pen;
+            $total = $d + $a + $e - ($pen ?? 0.0);
             $this->total = round($total, $round);
         } else {
             $this->total = null;

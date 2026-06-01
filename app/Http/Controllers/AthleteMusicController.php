@@ -3,15 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Models\Athlete;
+use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Services\MusicTrackUploadService;
 use DomainException;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class AthleteMusicController extends Controller
 {
+    use AuthorizesRequests;
+
     public function index(Request $request): View
     {
         $athlete = Athlete::query()->where('user_id', $request->user()->id)->firstOrFail();

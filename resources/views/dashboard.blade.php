@@ -39,7 +39,7 @@
                             <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('judge.tournaments') }}">Судейство · Турниры</a>
                         @endif
 
-                        <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('scoreboard.category', 1) }}">Табло</a>
+                        <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('scoreboard.index') }}">Табло</a>
                     </div>
                 </x-card>
             </div>

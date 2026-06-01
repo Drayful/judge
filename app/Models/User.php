@@ -66,6 +66,9 @@ class User extends Authenticatable
             'time_judge' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'time'],
             'music_operator' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'music'],
 
+            // Ответственный судья: координирует поток, фиксирует «музыкальные» снятия (RESP).
+            'head_judge' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'music'],
+
             default => null,
         };
 
@@ -85,7 +88,7 @@ class User extends Authenticatable
             'judge_e' => 'E1',
             'line_judge' => 'LINE1',
             'time_judge' => 'TIME',
-            'music_operator' => 'RESP',
+            'music_operator', 'head_judge' => 'RESP',
             default => null,
         };
     }

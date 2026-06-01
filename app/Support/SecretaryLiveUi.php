@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Category;
 use App\Models\Performance;
 use Illuminate\Support\Collection;
 
@@ -9,6 +10,24 @@ class SecretaryLiveUi
 {
     /** Слоты, после заполнения которых считаем «все основные судьи выставили» (LINE/RESP не обязательны). */
     public const AUTO_ADVANCE_REQUIRED_LABELS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4'];
+
+    /** Полный список слотов бригады в порядке отображения. */
+    public const ALL_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
+
+    /**
+     * Список неактивных слотов для категории (или пустой массив).
+     *
+     * @return array<int, string>
+     */
+    public static function inactiveSlots(?Category $category): array
+    {
+        return $category?->inactiveJudgeSlotList() ?? [];
+    }
+
+    public static function isSlotInactive(?Category $category, string $slot): bool
+    {
+        return in_array(strtoupper($slot), self::inactiveSlots($category), true);
+    }
 
     /**
      * @return Collection<int, Performance>
@@ -61,14 +80,20 @@ class SecretaryLiveUi
      *
      * Сопоставление по user.slot, а не по порядку записей (DB2 может отправить раньше DB1).
      *
-     * @return array<int, array{label: string, ok: bool}>
+     * @return array<int, array{label: string, ok: bool, inactive: bool}>
      */
-    public static function judgeSlots(?Performance $perf): array
+    public static function judgeSlots(?Performance $perf, ?Category $category = null): array
     {
-        $labels = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
+        $labels = self::ALL_JUDGE_SLOTS;
+        $category = $category ?? $perf?->category;
+        $inactive = self::inactiveSlots($category);
 
         if (! $perf) {
-            return array_map(fn ($l) => ['label' => $l, 'ok' => false], $labels);
+            return array_map(fn ($l) => [
+                'label' => $l,
+                'ok' => false,
+                'inactive' => in_array($l, $inactive, true),
+            ], $labels);
         }
 
         $perf->loadMissing('judgeScores.judge');
@@ -97,8 +122,10 @@ class SecretaryLiveUi
 
         $out = [];
         foreach ($labels as $label) {
+            $isInactive = in_array($label, $inactive, true);
+
             if (isset($slotMap[$label])) {
-                $out[] = ['label' => $label, 'ok' => true];
+                $out[] = ['label' => $label, 'ok' => true, 'inactive' => $isInactive];
                 continue;
             }
             $ok = match ($label) {
@@ -120,45 +147,64 @@ class SecretaryLiveUi
                 'RESP' => $scores->contains(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music' && $s->submitted_at !== null),
                 default => false,
             };
-            $out[] = ['label' => $label, 'ok' => $ok];
+            $out[] = ['label' => $label, 'ok' => $ok, 'inactive' => $isInactive];
         }
 
         return $out;
     }
 
     /**
-     * Готовность к автопереходу: все основные слоты (D-DB/DA, A×4, E×4) получили submitted_at.
+     * Готовность к автопереходу: все активные основные слоты (D-DB/DA, A×4, E×4) получили submitted_at.
+     * Неактивные слоты пропускаются — бригаду можно собрать неполным составом.
      */
-    public static function scoresCompleteForAutoAdvance(?Performance $perf): bool
+    public static function scoresCompleteForAutoAdvance(?Performance $perf, ?Category $category = null): bool
     {
         if (! $perf) {
             return false;
         }
 
-        $slots = self::judgeSlots($perf);
+        $category = $category ?? $perf->category;
+        $inactive = self::inactiveSlots($category);
+        $slots = self::judgeSlots($perf, $category);
+
+        $hasAtLeastOneActive = false;
         foreach (self::AUTO_ADVANCE_REQUIRED_LABELS as $label) {
+            if (in_array($label, $inactive, true)) {
+                continue;
+            }
+            $hasAtLeastOneActive = true;
             $row = collect($slots)->firstWhere('label', $label);
             if (! $row || ! $row['ok']) {
                 return false;
             }
         }
 
-        return true;
+        // Если ВСЕ обязательные слоты выключены — поведение автоперехода теряет смысл, считаем «не готово».
+        return $hasAtLeastOneActive;
     }
 
     /**
      * Фиксированные колонки как на макете + значения из judge_scores.
      *
-     * @return array{columns: array<int, string>, values: array<string, string>, penalty: array<string, bool>}
+     * @return array{columns: array<int, string>, values: array<string, string>, penalty: array<string, bool>, inactive: array<string, bool>}
      */
-    public static function fixedScoreMatrix(?Performance $perf): array
+    public static function fixedScoreMatrix(?Performance $perf, ?Category $category = null): array
     {
-        $columns = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
+        $columns = self::ALL_JUDGE_SLOTS;
         $values = array_fill_keys($columns, '—');
         $penalty = array_fill_keys($columns, false);
+        $category = $category ?? $perf?->category;
+        $inactiveList = self::inactiveSlots($category);
+        $inactive = array_fill_keys($columns, false);
+        foreach ($inactiveList as $slot) {
+            if (array_key_exists($slot, $inactive)) {
+                $inactive[$slot] = true;
+                $values[$slot] = 'off';
+            }
+        }
 
         if (! $perf) {
-            return compact('columns', 'values', 'penalty');
+            return compact('columns', 'values', 'penalty', 'inactive');
         }
 
         $perf->loadMissing('judgeScores.judge');
@@ -166,10 +212,10 @@ class SecretaryLiveUi
 
         $fmt = static fn ($v) => $v !== null && $v !== '' ? number_format((float) $v, 3, '.', '') : '—';
 
-        // 1) Сначала пробуем по слоту судьи (надёжно).
+        // 1) Сначала пробуем по слоту судьи (надёжно). Неактивные слоты не перезаписываются.
         foreach ($scores as $s) {
             $slot = $s->judge?->slot;
-            if ($slot && array_key_exists($slot, $values) && $s->score !== null) {
+            if ($slot && array_key_exists($slot, $values) && ! $inactive[$slot] && $s->score !== null) {
                 $values[$slot] = $fmt($s->score);
                 if ($s->panel === 'penalty') {
                     $penalty[$slot] = true;
@@ -177,18 +223,25 @@ class SecretaryLiveUi
             }
         }
 
-        // 2) Резерв: незаполненные слоты — добиваем по порядку id (как раньше).
-        $fillByOrder = function (string $prefix, $coll, int $count) use (&$values, $fmt) {
+        // 2) Резерв: незаполненные слоты — добиваем по порядку id (как раньше),
+        // пропуская неактивные позиции — оценки сдвигаются на следующие активные слоты.
+        $fillByOrder = function (string $prefix, $coll, int $count) use (&$values, $fmt, $inactive) {
             $i = 0;
             foreach ($coll as $row) {
+                if ($row->score === null) {
+                    continue;
+                }
+                while ($i < $count) {
+                    $key = $prefix.($i + 1);
+                    $i++;
+                    if (! ($inactive[$key] ?? false) && $values[$key] === '—') {
+                        $values[$key] = $fmt($row->score);
+                        break;
+                    }
+                }
                 if ($i >= $count) {
                     break;
                 }
-                $key = $prefix.($i + 1);
-                if ($values[$key] === '—' && $row->score !== null) {
-                    $values[$key] = $fmt($row->score);
-                }
-                $i++;
             }
         };
 
@@ -199,25 +252,25 @@ class SecretaryLiveUi
 
         $lineList = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
         foreach ([0 => 'LINE1', 1 => 'LINE2'] as $i => $key) {
-            if (isset($lineList[$i]) && $values[$key] === '—') {
+            if (isset($lineList[$i]) && ! $inactive[$key] && $values[$key] === '—') {
                 $values[$key] = $fmt($lineList[$i]->score);
                 $penalty[$key] = true;
             }
         }
 
         $time = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');
-        if ($time && $values['TIME'] === '—') {
+        if ($time && ! $inactive['TIME'] && $values['TIME'] === '—') {
             $values['TIME'] = $fmt($time->score);
             $penalty['TIME'] = true;
         }
 
         $resp = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music');
-        if ($resp && $values['RESP'] === '—') {
+        if ($resp && ! $inactive['RESP'] && $values['RESP'] === '—') {
             $values['RESP'] = $fmt($resp->score);
             $penalty['RESP'] = true;
         }
 
-        return compact('columns', 'values', 'penalty');
+        return compact('columns', 'values', 'penalty', 'inactive');
     }
 
     public static function formatScore(?float $v): string

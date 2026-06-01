@@ -17,6 +17,17 @@
                         href="{{ route('secretary.tournament.live', $tr) }}?category={{ $tr->categories->sortBy('id')->first()->id }}">
                         Live — Секретарь
                     </a>
+                    <form method="POST"
+                          action="{{ route('secretary.tournament.categories.clear', $tr) }}"
+                          onsubmit="return confirm('Удалить ВСЕ потоки этого турнира?\n\nВместе с потоками будут удалены выступления, оценки судей, запросы и загруженная музыка.\n\nДействие необратимо. Продолжить?');"
+                          class="inline-block">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit"
+                                class="rounded-lg border border-rose-700/60 bg-rose-950/40 px-3 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-900/60 hover:border-rose-600 transition">
+                            Очистить все потоки
+                        </button>
+                    </form>
                 @endif
                 <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium" href="{{ route('secretary.tournaments') }}">← Все турниры</a>
                 <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium" href="{{ route('secretary.athletes') }}">Атлеты →</a>
@@ -126,8 +137,23 @@
                                 </div>
                             </div>
 
-                            <div class="mt-3 flex justify-end">
-                                <a class="text-emerald-400 hover:text-emerald-300 hover:underline font-medium" href="{{ route('secretary.tournament.live', $tr) }}?category={{ $c->id }}">
+                            <div class="mt-3 flex items-center justify-between gap-3">
+                                <form method="POST"
+                                      action="{{ route('secretary.tournament.categories.destroy', [$tr, $c]) }}"
+                                      onsubmit="return confirm('Удалить поток «{{ $c->name }}»?\n\nВместе с потоком будут удалены все его выступления, оценки и музыка.\n\nДействие необратимо.');"
+                                      class="inline-block">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit"
+                                            class="inline-flex items-center gap-1.5 rounded-md border border-rose-800/60 bg-rose-950/40 px-2.5 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-900/60 hover:border-rose-600 transition"
+                                            title="Удалить поток">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                            <path fill-rule="evenodd" d="M9 2a1 1 0 0 0-.894.553L7.382 4H4a1 1 0 0 0 0 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a1 1 0 1 0 0-2h-3.382l-.724-1.447A1 1 0 0 0 11 2H9zM7 8a1 1 0 0 1 2 0v6a1 1 0 1 1-2 0V8zm4-1a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0V8a1 1 0 0 0-1-1z" clip-rule="evenodd" />
+                                        </svg>
+                                        Удалить
+                                    </button>
+                                </form>
+                                <a class="text-emerald-400 hover:text-emerald-300 hover:underline font-medium text-sm" href="{{ route('secretary.tournament.live', $tr) }}?category={{ $c->id }}">
                                     Открыть очередь →
                                 </a>
                             </div>
