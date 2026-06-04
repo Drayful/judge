@@ -23,11 +23,25 @@
     <x-slot name="header">
         <div class="flex flex-wrap items-center justify-between gap-3 w-full">
             <a class="text-sm text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.tournament', $category->tournament_id) }}">← {{ $category->tournament?->name ?? 'Турнир' }}</a>
+            @if($category->tournament)
+                <a class="text-sm font-medium text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.tournament', $category->tournament) }}#protocols">
+                    Итоговые протоколы →
+                </a>
+            @endif
         </div>
     </x-slot>
 
     <div class="py-6 space-y-6 max-w-[1600px] mx-auto">
         <x-flash />
+
+        @if($category->tournament && ($protocolGroups ?? collect())->isNotEmpty())
+            <x-card>
+                @include('secretary.partials.protocol-downloads', [
+                    'tournament' => $category->tournament,
+                    'protocolGroups' => $protocolGroups,
+                ])
+            </x-card>
+        @endif
 
         @if($category->tournament)
             <x-card>

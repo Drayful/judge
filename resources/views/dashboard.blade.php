@@ -31,8 +31,9 @@
                             <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('athlete.music') }}">Музыка</a>
                         @endif
 
-                        @if(in_array($role, ['secretary', 'admin'], true))
-                            <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.categories') }}">Секретарь · Категории</a>
+                        @if(Auth::user()->isSecretary() || Auth::user()->isAdmin())
+                            <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.tournaments') }}">Секретарь · Турниры и протоколы</a>
+                            <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.categories') }}">Секретарь · Категории / Live</a>
                         @endif
 
                         @if(in_array($role, ['judge', 'admin'], true))

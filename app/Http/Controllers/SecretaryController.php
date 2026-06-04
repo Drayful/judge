@@ -447,9 +447,14 @@ class SecretaryController extends Controller
                 ->get()
             : collect();
 
+        $protocolGroups = $tournament
+            ? app(FinalProtocolService::class)->groups($tournament)
+            : collect();
+
         return [
             'category' => $category,
             'tournamentCategories' => $tournamentCategories,
+            'protocolGroups' => $protocolGroups,
             'performances' => $performances,
             'orderedPerformances' => $ordered,
             'currentPerformance' => $currentPerformance,
