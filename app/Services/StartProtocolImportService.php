@@ -6,6 +6,7 @@ use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Support\CategoryMeta;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -121,6 +122,8 @@ class StartProtocolImportService
                             'name' => $categoryName,
                             'program' => 'individual',
                             'apparatus' => $groupApparatus,
+                            'birth_year' => $groupBirthYear,
+                            'division' => CategoryMeta::extractDivision($currentGroup),
                             'age_min' => $groupBirthYear,
                             'age_max' => $groupBirthYear,
                             'is_published' => false,

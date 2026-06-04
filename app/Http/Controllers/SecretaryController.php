@@ -8,6 +8,8 @@ use App\Models\JudgeScore;
 use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Services\FinalProtocolExporter;
+use App\Services\FinalProtocolService;
 use App\Services\MusicTrackUploadService;
 use App\Services\StartProtocolImportService;
 use App\Services\StreamAdvanceService;
@@ -20,6 +22,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SecretaryController extends Controller
 {
@@ -57,7 +61,7 @@ class SecretaryController extends Controller
             ->with('status', 'Турнир создан.');
     }
 
-    public function tournament(Tournament $tournament): View
+    public function tournament(Tournament $tournament, FinalProtocolService $protocols): View
     {
         $tournament->load(['categories' => function ($q) {
             $q->orderByDesc('id');
@@ -77,6 +81,46 @@ class SecretaryController extends Controller
         return view('secretary.tournament', [
             'tournament' => $tournament,
             'athletes' => $athletes,
+            'protocolGroups' => $protocols->groups($tournament),
+        ]);
+    }
+
+    /**
+     * Скачать итоговый протокол одной группы (год рождения + категория) в XLSX.
+     */
+    public function downloadProtocol(
+        Request $request,
+        Tournament $tournament,
+        FinalProtocolService $protocols,
+        FinalProtocolExporter $exporter,
+    ): StreamedResponse {
+        $data = $request->validate([
+            'birth_year' => ['nullable', 'integer'],
+            'division' => ['nullable', 'string', 'max:16'],
+        ]);
+
+        $birthYear = isset($data['birth_year']) ? (int) $data['birth_year'] : null;
+        $division = $data['division'] ?? null;
+
+        $built = $protocols->build($tournament, $birthYear, $division);
+
+        if ($built['rows'] === []) {
+            abort(404, 'Нет завершённых результатов для этой категории.');
+        }
+
+        $spreadsheet = $exporter->build($tournament, $built);
+
+        $fileName = 'protocol_'.$tournament->id.'_'
+            .($birthYear ?? 'na').'_'
+            .($division !== null && $division !== '' ? strtoupper($division) : 'na')
+            .'.xlsx';
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            $writer = new XlsxWriter($spreadsheet);
+            $writer->save('php://output');
+        }, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
         ]);
     }
 

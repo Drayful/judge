@@ -64,6 +64,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/secretary/tournaments/{tournament}/live', [SecretaryController::class, 'tournamentLive'])
         ->middleware('role:secretary,admin')
         ->name('secretary.tournament.live');
+    Route::get('/secretary/tournaments/{tournament}/protocol', [SecretaryController::class, 'downloadProtocol'])
+        ->middleware('role:secretary,admin')
+        ->name('secretary.tournament.protocol');
     Route::post('/secretary/tournaments/{tournament}/import-start-protocol', [SecretaryController::class, 'importStartProtocol'])
         ->middleware('role:secretary,admin')
         ->name('secretary.tournament.importStartProtocol');

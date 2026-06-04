@@ -13,6 +13,8 @@ class Category extends Model
         'name',
         'program',
         'apparatus',
+        'birth_year',
+        'division',
         'age_min',
         'age_max',
         'is_published',
@@ -25,10 +27,46 @@ class Category extends Model
     protected $casts = [
         'is_published' => 'bool',
         'auto_advance' => 'bool',
+        'birth_year' => 'integer',
         'music_deadline_at' => 'datetime',
         'scoring_rules' => 'array',
         'inactive_judge_slots' => 'array',
     ];
+
+    /**
+     * Год рождения категории: структурное поле, иначе разбор названия.
+     */
+    public function resolvedBirthYear(): ?int
+    {
+        if ($this->birth_year) {
+            return (int) $this->birth_year;
+        }
+
+        return \App\Support\CategoryMeta::extractBirthYear($this->name);
+    }
+
+    /**
+     * Буква категории (A/B/C…): структурное поле, иначе разбор названия.
+     */
+    public function resolvedDivision(): ?string
+    {
+        if (is_string($this->division) && trim($this->division) !== '') {
+            return strtoupper(trim($this->division));
+        }
+
+        return \App\Support\CategoryMeta::extractDivision($this->name);
+    }
+
+    /**
+     * Ключ группировки для итогового протокола: «2015 / A» (или «2015» без буквы).
+     */
+    public function protocolGroupKey(): string
+    {
+        $year = $this->resolvedBirthYear();
+        $division = $this->resolvedDivision();
+
+        return trim(($year ?? '—').' / '.($division ?? '—'));
+    }
 
     /**
      * Список неактивных слотов судей (DB1, A4, E2 и т. п.).
