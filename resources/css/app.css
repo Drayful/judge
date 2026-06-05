@@ -7,3 +7,30 @@
         @apply rounded-2xl border border-slate-700/90 bg-slate-900/75 shadow-xl shadow-black/35 backdrop-blur-sm;
     }
 }
+
+@layer utilities {
+    .scoreboard-total {
+        font-size: clamp(1.5rem, 2.8vw, 3rem);
+        line-height: 1.05;
+    }
+    .scoreboard-podium-total {
+        font-size: clamp(2.25rem, 4vw, 4.5rem);
+        line-height: 1;
+    }
+    .flash-update {
+        animation: flash-update 1.6s ease-out;
+    }
+    .live-pulse {
+        animation: live-pulse 1.8s ease-in-out infinite;
+    }
+}
+
+@keyframes flash-update {
+    0%   { background-color: rgba(16, 185, 129, 0.35); }
+    100% { background-color: transparent; }
+}
+
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.45; transform: scale(1.35); }
+}

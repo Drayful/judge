@@ -69,6 +69,7 @@ class ScoreboardController extends Controller
             ->map(function (Performance $p, int $idx): array {
                 $inq = $p->inquiries->first();
                 return [
+                    'id' => $p->id,
                     'place' => $idx + 1,
                     'start_number' => $p->start_number,
                     'athlete' => trim(($p->athlete?->last_name ?? '').' '.($p->athlete?->first_name ?? '')),
