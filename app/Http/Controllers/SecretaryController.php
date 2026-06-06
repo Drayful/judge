@@ -433,6 +433,7 @@ class SecretaryController extends Controller
         $streamStatus = SecretaryLiveUi::streamStatus($currentPerformance);
         $judgeSlots = SecretaryLiveUi::judgeSlots($currentPerformance, $category);
         $scoreMatrix = SecretaryLiveUi::fixedScoreMatrix($currentPerformance, $category);
+        $panelSpread = SecretaryLiveUi::panelSpreadReport($currentPerformance, $category);
         $waitingJudges = collect($judgeSlots)->filter(fn ($s) => ! $s['ok'] && ! ($s['inactive'] ?? false))->count();
         $activeJudgeSlots = collect($judgeSlots)->filter(fn ($s) => ! ($s['inactive'] ?? false))->count();
         $totalJudgeSlots = count($judgeSlots);
@@ -462,6 +463,7 @@ class SecretaryController extends Controller
             'streamStatus' => $streamStatus,
             'judgeSlots' => $judgeSlots,
             'scoreMatrix' => $scoreMatrix,
+            'panelSpread' => $panelSpread,
             'waitingJudges' => $waitingJudges,
             'totalJudgeSlots' => $totalJudgeSlots,
             'activeJudgeSlots' => $activeJudgeSlots,

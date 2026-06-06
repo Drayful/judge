@@ -15,6 +15,18 @@ class SecretaryLiveUi
     public const ALL_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
 
     /**
+     * Панели, для которых проверяется максимальный разброс оценок судей (FIG: конференция при > 1.0).
+     *
+     * @var array<string, array{key: string, label: string, slots: array<int, string>}>
+     */
+    public const SPREAD_PANELS = [
+        ['key' => 'db', 'label' => 'DB (трудность тела)', 'slots' => ['DB1', 'DB2']],
+        ['key' => 'da', 'label' => 'DA (трудность предмета)', 'slots' => ['DA1', 'DA2']],
+        ['key' => 'a', 'label' => 'A (артистизм)', 'slots' => ['A1', 'A2', 'A3', 'A4']],
+        ['key' => 'e', 'label' => 'E (исполнение)', 'slots' => ['E1', 'E2', 'E3', 'E4']],
+    ];
+
+    /**
      * Список неактивных слотов для категории (или пустой массив).
      *
      * @return array<int, string>
@@ -154,10 +166,9 @@ class SecretaryLiveUi
     }
 
     /**
-     * Готовность к автопереходу: все активные основные слоты (D-DB/DA, A×4, E×4) получили submitted_at.
-     * Неактивные слоты пропускаются — бригаду можно собрать неполным составом.
+     * Все активные основные слоты (D-DB/DA, A×4, E×4) получили submitted_at.
      */
-    public static function scoresCompleteForAutoAdvance(?Performance $perf, ?Category $category = null): bool
+    public static function requiredScoresSubmitted(?Performance $perf, ?Category $category = null): bool
     {
         if (! $perf) {
             return false;
@@ -179,8 +190,147 @@ class SecretaryLiveUi
             }
         }
 
-        // Если ВСЕ обязательные слоты выключены — поведение автоперехода теряет смысл, считаем «не готово».
         return $hasAtLeastOneActive;
+    }
+
+    /**
+     * @deprecated alias — используйте requiredScoresSubmitted() или readyToFinalize()
+     */
+    public static function scoresCompleteForAutoAdvance(?Performance $perf, ?Category $category = null): bool
+    {
+        return self::requiredScoresSubmitted($perf, $category);
+    }
+
+    /**
+     * Максимально допустимый разброс оценок внутри одной панели (по умолчанию 1.0).
+     */
+    public static function maxPanelSpread(?Category $category): float
+    {
+        $rules = $category?->scoring_rules ?? [];
+
+        return (float) ($rules['max_panel_spread'] ?? 1.0);
+    }
+
+    /**
+     * Отчёт о разбросе оценок по панелям A/E/DB/DA.
+     *
+     * @return array{
+     *     max_spread: float,
+     *     has_violation: bool,
+     *     violations: list<array{key: string, label: string, slots: array<int, string>, min: float, max: float, spread: float}>,
+     *     violating_slots: array<int, string>,
+     *     panels: list<array{key: string, label: string, slots: array<int, string>, active_slots: array<int, string>, complete: bool, min: ?float, max: ?float, spread: ?float, violation: bool}>
+     * }
+     */
+    public static function panelSpreadReport(?Performance $perf, ?Category $category = null): array
+    {
+        $category = $category ?? $perf?->category;
+        $maxSpread = self::maxPanelSpread($category);
+        $inactive = self::inactiveSlots($category);
+        $scoresBySlot = self::numericScoresBySlot($perf, $category);
+        $slotStatus = collect(self::judgeSlots($perf, $category))->keyBy('label');
+
+        $violations = [];
+        $violatingSlots = [];
+        $panels = [];
+
+        foreach (self::SPREAD_PANELS as $panel) {
+            $activeSlots = array_values(array_filter(
+                $panel['slots'],
+                fn (string $slot) => ! in_array($slot, $inactive, true),
+            ));
+
+            $complete = count($activeSlots) >= 2
+                && collect($activeSlots)->every(fn (string $slot) => (bool) ($slotStatus->get($slot)['ok'] ?? false));
+
+            $numericScores = [];
+            foreach ($activeSlots as $slot) {
+                if ($scoresBySlot[$slot] !== null) {
+                    $numericScores[$slot] = $scoresBySlot[$slot];
+                }
+            }
+
+            $min = $max = $spread = null;
+            $violation = false;
+
+            if ($complete && count($numericScores) >= 2) {
+                $values = array_values($numericScores);
+                $min = min($values);
+                $max = max($values);
+                $spread = round($max - $min, 3);
+                $violation = $spread > $maxSpread + 0.0005;
+
+                if ($violation) {
+                    $violations[] = [
+                        'key' => $panel['key'],
+                        'label' => $panel['label'],
+                        'slots' => $activeSlots,
+                        'min' => $min,
+                        'max' => $max,
+                        'spread' => $spread,
+                    ];
+                    foreach ($activeSlots as $slot) {
+                        $violatingSlots[] = $slot;
+                    }
+                }
+            }
+
+            $panels[] = [
+                'key' => $panel['key'],
+                'label' => $panel['label'],
+                'slots' => $panel['slots'],
+                'active_slots' => $activeSlots,
+                'complete' => $complete,
+                'min' => $min,
+                'max' => $max,
+                'spread' => $spread,
+                'violation' => $violation,
+            ];
+        }
+
+        return [
+            'max_spread' => $maxSpread,
+            'has_violation' => $violations !== [],
+            'violations' => $violations,
+            'violating_slots' => array_values(array_unique($violatingSlots)),
+            'panels' => $panels,
+        ];
+    }
+
+    public static function hasPanelSpreadViolation(?Performance $perf, ?Category $category = null): bool
+    {
+        return self::panelSpreadReport($perf, $category)['has_violation'];
+    }
+
+    /**
+     * Числовые оценки по слотам (null = нет / off / неактивен).
+     *
+     * @return array<string, ?float>
+     */
+    public static function numericScoresBySlot(?Performance $perf, ?Category $category = null): array
+    {
+        $matrix = self::fixedScoreMatrix($perf, $category);
+        $out = [];
+
+        foreach ($matrix['columns'] as $col) {
+            if ($matrix['inactive'][$col] ?? false) {
+                $out[$col] = null;
+                continue;
+            }
+            $v = $matrix['values'][$col];
+            $out[$col] = ($v === '—' || $v === 'off') ? null : (float) $v;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Готовность к финализации / автопереходу: все слоты заполнены и нет нарушения разброса.
+     */
+    public static function readyToFinalize(?Performance $perf, ?Category $category = null): bool
+    {
+        return self::requiredScoresSubmitted($perf, $category)
+            && ! self::hasPanelSpreadViolation($perf, $category);
     }
 
     /**

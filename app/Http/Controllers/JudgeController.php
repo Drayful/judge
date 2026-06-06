@@ -260,17 +260,25 @@ class JudgeController extends Controller
         $status = 'Оценка сохранена.';
         $category = $performance->category;
 
+        if ($category && SecretaryLiveUi::requiredScoresSubmitted($performance, $category)) {
+            if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $category)) {
+                $report = SecretaryLiveUi::panelSpreadReport($performance, $category);
+                $labels = collect($report['violations'])->pluck('label')->implode(', ');
+                $status .= ' Конференция судей: разброс > '.$report['max_spread'].' ('.$labels.'). Автопереход заблокирован.';
+            }
+        }
+
         if (
             $category?->auto_advance
             && $performance->status === 'performing'
-            && SecretaryLiveUi::scoresCompleteForAutoAdvance($performance, $category)
+            && SecretaryLiveUi::readyToFinalize($performance, $category)
         ) {
             $moved = false;
             DB::transaction(function () use ($performance, &$moved) {
                 $performance->refresh();
                 $performance->load(['judgeScores', 'category']);
 
-                if (! SecretaryLiveUi::scoresCompleteForAutoAdvance($performance, $performance->category)) {
+                if (! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
                     return;
                 }
 
@@ -294,7 +302,17 @@ class JudgeController extends Controller
 
     public function finalize(Performance $performance): RedirectResponse
     {
-        $performance->load('judgeScores');
+        $performance->load(['judgeScores', 'category']);
+
+        if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $performance->category)) {
+            $report = SecretaryLiveUi::panelSpreadReport($performance, $performance->category);
+            $labels = collect($report['violations'])->pluck('label')->implode(', ');
+
+            return back()->withErrors([
+                'finalize' => 'Нельзя зафиксировать итог: разброс оценок > '.$report['max_spread'].' ('.$labels.'). Нужна конференция судей.',
+            ]);
+        }
+
         $performance->recalculateTotals();
         $performance->finalized_at = now();
         $performance->save();

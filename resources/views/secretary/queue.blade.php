@@ -232,7 +232,7 @@
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
                     <h2 class="text-base font-semibold text-white">Оценки (текущая гимнастка)</h2>
-                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. При включённом автопереходе после слотов <span class="text-slate-400">DB1, DA1, A1–A4, E1–E4</span> поток сам перейдёт к следующей (LINE/RESP не обязательны).</p>
+                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. При включённом автопереходе после слотов <span class="text-slate-400">DB1, DA1, A1–A4, E1–E4</span> поток сам перейдёт к следующей (LINE/RESP не обязательны). Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <form method="POST" action="{{ route('secretary.category.autoAdvance', $category) }}" class="inline">
@@ -243,10 +243,30 @@
                             Автопереход: {{ $category->auto_advance ? 'Вкл' : 'Выкл' }}
                         </button>
                     </form>
+                    <span class="rounded-lg border px-2.5 py-1 {{ ($panelSpread['has_violation'] ?? false) ? 'border-rose-700/60 bg-rose-950/40 text-rose-100' : 'border-emerald-800/60 bg-emerald-950/40 text-emerald-100' }}">
+                        Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}:
+                        {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
+                    </span>
                     <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Ожидание: <span class="text-amber-200 font-mono">{{ $waitingJudges }}/{{ $activeJudgeSlots }}</span></span>
                     <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Итого: <span class="text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($sumDisplay !== null ? (float) $sumDisplay : null) }}</span></span>
                 </div>
             </div>
+
+            @if(($panelSpread['has_violation'] ?? false) && !empty($panelSpread['violations']))
+                <div class="mt-4 rounded-xl border border-rose-700/60 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
+                    <div class="font-semibold">Нужна конференция судей</div>
+                    <p class="mt-1 text-rose-100/90 text-xs">Разброс оценок превышает {{ number_format($panelSpread['max_spread'], 1) }}. Автопереход и фиксация итога заблокированы, пока судьи не согласуют оценки.</p>
+                    <ul class="mt-2 space-y-1 text-xs font-mono">
+                        @foreach($panelSpread['violations'] as $v)
+                            <li>
+                                {{ $v['label'] }}:
+                                min {{ number_format($v['min'], 3) }} · max {{ number_format($v['max'], 3) }}
+                                · разброс <span class="text-rose-200 font-bold">{{ number_format($v['spread'], 3) }}</span>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
 
             <div class="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div class="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-center">
@@ -279,8 +299,9 @@
                                 @php
                                     $isPen = $scoreMatrix['penalty'][$col] ?? false;
                                     $isOff = $scoreMatrix['inactive'][$col] ?? false;
+                                    $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
                                 @endphp
-                                <th class="px-2 py-3 font-semibold {{ $isOff ? 'bg-slate-900/80 text-slate-500 line-through' : ($isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200') }} border-b border-slate-900">{{ $col }}</th>
+                                <th class="px-2 py-3 font-semibold border-b border-slate-900 {{ $isOff ? 'bg-slate-900/80 text-slate-500 line-through' : ($isSpread ? 'bg-rose-950/90 text-rose-100 ring-1 ring-inset ring-rose-500/50' : ($isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200')) }}">{{ $col }}</th>
                             @endforeach
                         </tr>
                     </thead>
@@ -290,8 +311,9 @@
                                 @php
                                     $isPen = $scoreMatrix['penalty'][$col] ?? false;
                                     $isOff = $scoreMatrix['inactive'][$col] ?? false;
+                                    $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
                                 @endphp
-                                <td class="px-2 py-3 font-mono text-sm {{ $isOff ? 'text-slate-500 italic' : ($isPen ? 'text-rose-100' : 'text-slate-100') }} border-t border-slate-800">{{ $scoreMatrix['values'][$col] }}</td>
+                                <td class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ $isOff ? 'text-slate-500 italic' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100')) }}">{{ $scoreMatrix['values'][$col] }}</td>
                             @endforeach
                         </tr>
                     </tbody>
@@ -306,7 +328,9 @@
                     <h2 class="text-base font-semibold text-white">История гимнасток потока</h2>
                     <p class="mt-1 text-xs text-slate-500">Итоги по выступлениям в этом потоке (после расчёта).</p>
                 </div>
-                <span class="text-xs rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-1 text-emerald-100">Расхождение: Вкл</span>
+                <span class="text-xs rounded-lg border px-3 py-1 {{ ($panelSpread['has_violation'] ?? false) ? 'border-rose-700/60 bg-rose-950/40 text-rose-100' : 'border-emerald-800/60 bg-emerald-950/40 text-emerald-100' }}">
+                    Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}: {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
+                </span>
             </div>
             <div class="overflow-x-auto rounded-xl border border-slate-800">
                 <table class="w-full min-w-[640px] text-sm">
