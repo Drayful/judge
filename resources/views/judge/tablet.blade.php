@@ -242,6 +242,21 @@
                     this.acroPending = ! this.acroPending;
                     this.error = null;
                 },
+                /** «Х» (DA) — несделанная акробатика: занимает слот (если < 3), но даёт 0 баллов. */
+                markAcroNotDone() {
+                    this.acroPending = false;
+                    const counted = this.acroCount < this.acroMax;
+                    if (counted) this.acroCount += 1;
+                    this.actions.unshift({
+                        v: 0,
+                        acro: true,
+                        counted: counted,
+                        notDone: true,
+                        label: 'Акробатика',
+                        inTotal: false,
+                    });
+                    if (this.actions.length > 40) this.actions.pop();
+                },
 
                 /** Присвоить значение: DB — выбранному символу; DA — акробатике или простому элементу. */
                 assignValue(v) {
