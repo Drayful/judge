@@ -121,15 +121,29 @@
                 // Стейт
                 page: 1,
                 draft: 0,
-                actions: [],                 // [{v, cat, label}]
+                actions: [],                 // [{v, cat, label}] или [{v, symbol, label, notDone}]
                 busy: false,
                 error: null,
                 numpadOpen: false,
                 numpadValue: '',
+                // D-бригада: выбранный символ элемента (сначала символ, потом значение/«не выполнен»)
+                pendingSymbol: null,         // { symbol, label }
+                _hintT: null,
+                symbolFlow: opts.panel === 'd' && opts.subpanel === 'db', // DB: символ → значение
+                acroPending: false,          // DA: следующий балл — акробатика
+                acroCount: 0,                // DA: сколько акробатик уже засчитано
+                acroMax: 3,                  // DA: максимум засчитываемых акробатик
 
                 // Лимиты по категориям (A1: dance, dynamic — макс. 2)
                 cat: { dance: 0, dynamic: 0 },
                 catMax: { dance: 2, dynamic: 2 },
+                // Блок A: «танц. шаги» и «дин. изменения» — авто-сбавка 0.6 за каждый блок
+                // (итого −1.2). Нажатие на 0.3 даёт «кредит» и уменьшает сбавку блока;
+                // максимум (2×0.3=0.6) полностью убирает сбавку блока. Применяется только к панели A.
+                hasCombo: opts.panel === 'a',
+                comboAuto: 0.6,
+                comboStep: 0.3,
+                comboCats: ['dance', 'dynamic'],
                 catLabel: {
                     dance: 'Танц. шаги',
                     dynamic: 'Дин./эфф.',
@@ -158,6 +172,23 @@
                 /** Добавить значение (всегда положительное; mode определяет, прибавлять или вычитать на итог). */
                 add(v, cat) {
                     cat = cat || null;
+
+                    // Блок «танц. шаги / дин. изменения»: нажатие = кредит, который уменьшает
+                    // авто-сбавку блока. На draft не влияет — вклад считается в comboPenalty().
+                    if (cat && this.isComboCat(cat)) {
+                        if (this.cat[cat] >= this.catMax[cat]) return;
+                        this.cat[cat] += 1;
+                        this.actions.unshift({
+                            v: this.comboStep,
+                            cat: cat,
+                            label: this.catLabel[cat] || cat,
+                            combo: true,
+                            inTotal: false,
+                        });
+                        if (this.actions.length > 40) this.actions.pop();
+                        return;
+                    }
+
                     if (cat && this.catMax[cat] !== undefined) {
                         if (this.cat[cat] >= this.catMax[cat]) return;
                         this.cat[cat] += 1;
@@ -169,6 +200,7 @@
                         v: v,
                         cat: cat,
                         label: cat ? (this.catLabel[cat] || cat) : '',
+                        inTotal: true,
                     });
                     if (this.actions.length > 40) this.actions.pop();
                 },
@@ -177,19 +209,125 @@
 
                 set(v) {
                     this.draft = this.round3(v);
-                    this.actions = v === 0 ? [] : [{ v: v, cat: null, label: '' }];
+                    this.actions = v === 0 ? [] : [{ v: v, cat: null, label: '', inTotal: true }];
                     this.resetCats();
                 },
 
-                /** «ОТМЕНА» — по новому ТЗ: удаляет ПОСЛЕДНЕЕ действие из истории и пересчитывает сумму. */
+                // ====== DB-бригада: символ → значение / «не выполнен» ======
+                /** Выбрать символ элемента (прыжок, равновесие, поворот, риск). Значения пока нет. */
+                selectSymbol(symbol, label) {
+                    this.pendingSymbol = { symbol: symbol, label: label };
+                    this.error = null;
+                },
+                /** «Х» (DB) — элемент не выполнен: в историю символ с 0 баллов, на итог не влияет. */
+                markNotDone() {
+                    if (! this.pendingSymbol) {
+                        this.flashHint('Сначала выберите символ элемента');
+                        return;
+                    }
+                    this.actions.unshift({
+                        v: 0,
+                        symbol: this.pendingSymbol.symbol,
+                        label: this.pendingSymbol.label,
+                        notDone: true,
+                        inTotal: false,
+                    });
+                    if (this.actions.length > 40) this.actions.pop();
+                    this.pendingSymbol = null;
+                },
+
+                // ====== DA-бригада: акробатика (макс. 3) + значения ======
+                /** Включить/выключить режим «следующий балл — акробатика». */
+                toggleAcro() {
+                    this.acroPending = ! this.acroPending;
+                    this.error = null;
+                },
+
+                /** Присвоить значение: DB — выбранному символу; DA — акробатике или простому элементу. */
+                assignValue(v) {
+                    if (this.mode !== 'add') { return this.add(v, null); }
+
+                    // DB: требуется выбранный символ
+                    if (this.symbolFlow) {
+                        if (! this.pendingSymbol) {
+                            this.flashHint('Сначала выберите символ элемента');
+                            return;
+                        }
+                        const next = this.round3(this.draft + v);
+                        if (next < 0 || next > 99.999) return;
+                        this.draft = next;
+                        this.actions.unshift({
+                            v: v,
+                            symbol: this.pendingSymbol.symbol,
+                            label: this.pendingSymbol.label,
+                            notDone: false,
+                            inTotal: true,
+                        });
+                        if (this.actions.length > 40) this.actions.pop();
+                        this.pendingSymbol = null;
+                        return;
+                    }
+
+                    // DA: акробатика (засчитывается только первые 3)
+                    if (this.acroPending) {
+                        this.acroPending = false;
+                        const counted = this.acroCount < this.acroMax;
+                        if (counted) {
+                            const next = this.round3(this.draft + v);
+                            if (next > 99.999) return;
+                            this.draft = next;
+                            this.acroCount += 1;
+                        }
+                        this.actions.unshift({
+                            v: v,
+                            acro: true,
+                            counted: counted,
+                            label: 'Акробатика',
+                            inTotal: counted,
+                        });
+                        if (this.actions.length > 40) this.actions.pop();
+                        return;
+                    }
+
+                    // DA: простое значение
+                    const next = this.round3(this.draft + v);
+                    if (next < 0 || next > 99.999) return;
+                    this.draft = next;
+                    this.actions.unshift({ v: v, acro: false, label: '', inTotal: true });
+                    if (this.actions.length > 40) this.actions.pop();
+                },
+
+                flashHint(msg) {
+                    this.error = msg;
+                    clearTimeout(this._hintT);
+                    this._hintT = setTimeout(() => { if (this.error === msg) this.error = null; }, 1600);
+                },
+
+                /** «ОТМЕНА» — удаляет последнее действие (или снимает выбор символа/акробатики). */
                 cancel() {
+                    // DB: символ выбран, но значение не присвоено — снимаем выбор.
+                    if (this.symbolFlow && this.pendingSymbol) {
+                        this.pendingSymbol = null;
+                        return;
+                    }
+                    // DA: режим акробатики включён, но значение не выбрано — выключаем.
+                    if (this.acroPending) {
+                        this.acroPending = false;
+                        return;
+                    }
                     if (this.actions.length === 0) return;
                     const last = this.actions.shift();
                     if (last.cat && this.cat[last.cat] !== undefined) {
                         this.cat[last.cat] = Math.max(0, this.cat[last.cat] - 1);
                     }
-                    this.draft = this.round3(this.draft - last.v);
-                    if (this.draft < 0) this.draft = 0;
+                    if (last.acro && last.counted) {
+                        this.acroCount = Math.max(0, this.acroCount - 1);
+                    }
+                    // Вычитаем из суммы только то, что в неё попадало.
+                    if (last.inTotal) {
+                        this.draft = this.round3(this.draft - last.v);
+                        if (this.draft < 0) this.draft = 0;
+                    }
                 },
 
                 /** Полный сброс (вешается на отдельную «X (0.0)» кнопку). */
@@ -197,18 +335,37 @@
                     this.draft = 0;
                     this.actions = [];
                     this.resetCats();
+                    this.acroCount = 0;
+                    this.acroPending = false;
+                    this.pendingSymbol = null;
                     this.error = null;
                 },
                 resetCats() { Object.keys(this.cat).forEach(k => { this.cat[k] = 0; }); },
 
-                workingTotal() { return this.draft; },
+                /** Авто-сбавка одного блока с учётом «кредитов» (нажатий). */
+                blockPenalty(cat) {
+                    return this.round3(Math.max(0, this.comboAuto - this.comboStep * (this.cat[cat] || 0)));
+                },
+                /** Суммарная авто-сбавка блоков (танц. шаги + дин. изменения). */
+                comboPenalty() {
+                    if (! this.hasCombo) return 0;
+                    let sum = 0;
+                    for (const c of this.comboCats) {
+                        sum += Math.max(0, this.comboAuto - this.comboStep * (this.cat[c] || 0));
+                    }
+                    return this.round3(sum);
+                },
+                /** Итоговая сбавка = ручные сбавки + авто-сбавка блоков. */
+                totalDeduction() { return this.round3(this.draft + this.comboPenalty()); },
+
+                workingTotal() { return this.totalDeduction(); },
                 finalScore() {
-                    if (this.mode === 'add') return this.draft;
+                    if (this.mode === 'add') return this.totalDeduction();
                     if (this.mode === 'subtract') {
-                        const r = this.round3(this.base - this.draft);
+                        const r = this.round3(this.base - this.totalDeduction());
                         return r < 0 ? 0 : r;
                     }
-                    return this.draft;
+                    return this.totalDeduction();
                 },
                 submitValue() {
                     if (this.mode === 'penalty') return this.draft.toFixed(3);
@@ -271,7 +428,11 @@
                 applyNumpad() {
                     const v = parseFloat(this.numpadValue || '0');
                     if (isNaN(v) || v <= 0) { this.closeNumpad(); return; }
-                    this.add(this.round3(v), null);
+                    if (this.mode === 'add') {
+                        this.assignValue(this.round3(v));
+                    } else {
+                        this.add(this.round3(v), null);
+                    }
                     this.closeNumpad();
                 },
 
@@ -289,6 +450,7 @@
                     return this.round3(this.actions.filter(a => a.cat === cat).reduce((s, a) => s + a.v, 0));
                 },
                 isLimitCat(cat) { return cat === 'dance' || cat === 'dynamic'; },
+                isComboCat(cat) { return this.hasCombo && this.comboCats.includes(cat); },
             };
         }
 

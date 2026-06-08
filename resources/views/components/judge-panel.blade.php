@@ -31,7 +31,9 @@
     })"
     class="flex-1 min-h-0 grid grid-cols-12 gap-2 relative"
 >
-    @if ($type === 'd')
+    @if ($type === 'd' && $subpanel === 'da')
+        @include('judge.partials._tablet_da', ['slot' => $slot, 'subpanel' => $subpanel])
+    @elseif ($type === 'd')
         @include('judge.partials._tablet_d', ['slot' => $slot, 'subpanel' => $subpanel])
     @elseif ($type === 'e')
         @include('judge.partials._tablet_e', ['slot' => $slot, 'base' => $base])

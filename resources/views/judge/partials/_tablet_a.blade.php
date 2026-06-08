@@ -25,13 +25,13 @@
         </div>
 
         <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-            <div class="shrink-0 flex justify-between gap-2">
+            <div class="shrink-0 flex items-stretch gap-2">
                 <button type="button" @click="cancel()"
-                    class="rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-1.5 text-xs font-semibold text-white">
+                    class="shrink-0 rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-2 text-xs font-semibold text-white">
                     ОТМЕНА
                 </button>
                 <button type="button" @click="page = 2"
-                    class="rounded-lg bg-[#0e5a3f] hover:bg-[#117a52] border border-emerald-700/40 px-3 py-1.5 text-xs font-semibold text-emerald-50">
+                    class="flex-1 rounded-lg bg-[#0e5a3f] hover:bg-[#117a52] border border-emerald-700/40 px-4 py-3 text-base font-bold text-emerald-50 active:scale-[0.98]">
                     Следующая стр. →
                 </button>
             </div>
@@ -54,21 +54,21 @@
             </div>
 
             <div class="shrink-0 rounded-xl border border-slate-800 bg-[#0c1429] p-2">
-                <div class="text-[9px] uppercase tracking-wider text-slate-400 mb-1">Сбавка за танц. шаги и дин./эффекты</div>
+                <div class="text-[9px] uppercase tracking-wider text-slate-400 mb-1">Авто-сбавка: танц. шаги + дин./эффекты (по −0.6, нажатия убирают)</div>
                 <div class="grid grid-cols-3 gap-1 text-center font-mono tabular-nums text-xs">
                     <div class="rounded-md bg-[#0e3d4a]/70 border border-cyan-900/40 px-1 py-1">
                         <div class="text-[9px] uppercase text-cyan-200/70">Танц. шаги</div>
-                        <div class="text-sm text-white" x-text="'-' + sumOf('dance').toFixed(2)"></div>
-                        <div class="text-[9px]" :class="cat.dance >= catMax.dance ? 'text-rose-400 font-bold' : 'text-slate-400'" x-text="cat.dance + '/' + catMax.dance"></div>
+                        <div class="text-sm" :class="blockPenalty('dance') === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + blockPenalty('dance').toFixed(2)"></div>
+                        <div class="text-[9px]" :class="cat.dance >= catMax.dance ? 'text-emerald-400 font-bold' : 'text-slate-400'" x-text="cat.dance + '/' + catMax.dance"></div>
                     </div>
                     <div class="rounded-md bg-[#7a4a1f]/70 border border-amber-900/40 px-1 py-1">
                         <div class="text-[9px] uppercase text-amber-200/80">Дин./эфф.</div>
-                        <div class="text-sm text-white" x-text="'-' + sumOf('dynamic').toFixed(2)"></div>
-                        <div class="text-[9px]" :class="cat.dynamic >= catMax.dynamic ? 'text-rose-400 font-bold' : 'text-slate-400'" x-text="cat.dynamic + '/' + catMax.dynamic"></div>
+                        <div class="text-sm" :class="blockPenalty('dynamic') === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + blockPenalty('dynamic').toFixed(2)"></div>
+                        <div class="text-[9px]" :class="cat.dynamic >= catMax.dynamic ? 'text-emerald-400 font-bold' : 'text-slate-400'" x-text="cat.dynamic + '/' + catMax.dynamic"></div>
                     </div>
                     <div class="rounded-md bg-[#1c2547] border border-indigo-900/40 px-1 py-1">
                         <div class="text-[9px] uppercase text-indigo-200/80">Итого</div>
-                        <div class="text-sm text-white" x-text="'-' + (sumOf('dance') + sumOf('dynamic')).toFixed(2)"></div>
+                        <div class="text-sm" :class="comboPenalty() === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + comboPenalty().toFixed(2)"></div>
                         <div class="text-[9px] text-slate-400">&nbsp;</div>
                     </div>
                 </div>
@@ -84,33 +84,38 @@
             <button type="button"
                 @click="add(0.3, 'dance')"
                 :disabled="!can('dance')"
-                :class="can('dance')
-                    ? 'border-cyan-700/40 hover:brightness-110 active:scale-[0.98]'
-                    : 'opacity-40 cursor-not-allowed border-slate-700 grayscale'"
+                :class="can('dance') ? 'hover:brightness-110 active:scale-[0.98]' : 'cursor-not-allowed'"
                 style="background-color: #0e3d4a"
-                class="flex-1 min-h-0 rounded-2xl border px-3 py-2 text-left text-white shadow-md relative transition flex flex-col justify-center">
-                <div class="absolute top-2 right-2 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
-                     :class="cat.dance >= catMax.dance ? 'bg-rose-700 text-white' : 'bg-black/40 text-slate-200'"
+                class="flex-1 min-h-0 rounded-2xl border border-cyan-700/40 px-3 py-2 text-left text-white shadow-md relative overflow-hidden transition flex flex-col justify-center">
+                {{-- Визуальное заполнение: каждое нажатие закрашивает часть кнопки --}}
+                <div class="absolute inset-y-0 left-0 bg-slate-500/55 transition-all duration-150 pointer-events-none"
+                     :style="'width:' + (cat.dance / catMax.dance * 100) + '%'"></div>
+                <div class="absolute top-2 right-2 z-10 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
+                     :class="cat.dance >= catMax.dance ? 'bg-emerald-600 text-white' : 'bg-black/40 text-slate-200'"
                      x-text="cat.dance + '/' + catMax.dance"></div>
-                <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">−0.3</div>
-                <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Танцевальные шаги</div>
-                <div class="mt-0.5 text-[10px] opacity-70" x-text="can('dance') ? ('Доступно: ' + left('dance')) : 'Лимит (2/2)'"></div>
+                <div class="relative z-10">
+                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">0.3</div>
+                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Танцевальные шаги</div>
+                    <div class="mt-0.5 text-[10px] opacity-80" x-text="'Сбавка блока: −' + blockPenalty('dance').toFixed(1)"></div>
+                </div>
             </button>
 
             <button type="button"
                 @click="add(0.3, 'dynamic')"
                 :disabled="!can('dynamic')"
-                :class="can('dynamic')
-                    ? 'border-amber-700/40 hover:brightness-110 active:scale-[0.98]'
-                    : 'opacity-40 cursor-not-allowed border-slate-700 grayscale'"
+                :class="can('dynamic') ? 'hover:brightness-110 active:scale-[0.98]' : 'cursor-not-allowed'"
                 style="background-color: #7a4a1f"
-                class="flex-1 min-h-0 rounded-2xl border px-3 py-2 text-left text-white shadow-md relative transition flex flex-col justify-center">
-                <div class="absolute top-2 right-2 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
-                     :class="cat.dynamic >= catMax.dynamic ? 'bg-rose-700 text-white' : 'bg-black/40 text-slate-200'"
+                class="flex-1 min-h-0 rounded-2xl border border-amber-700/40 px-3 py-2 text-left text-white shadow-md relative overflow-hidden transition flex flex-col justify-center">
+                <div class="absolute inset-y-0 left-0 bg-slate-500/55 transition-all duration-150 pointer-events-none"
+                     :style="'width:' + (cat.dynamic / catMax.dynamic * 100) + '%'"></div>
+                <div class="absolute top-2 right-2 z-10 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
+                     :class="cat.dynamic >= catMax.dynamic ? 'bg-emerald-600 text-white' : 'bg-black/40 text-slate-200'"
                      x-text="cat.dynamic + '/' + catMax.dynamic"></div>
-                <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">−0.3</div>
-                <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Динамические изменения и эффекты</div>
-                <div class="mt-0.5 text-[10px] opacity-70" x-text="can('dynamic') ? ('Доступно: ' + left('dynamic')) : 'Лимит (2/2)'"></div>
+                <div class="relative z-10">
+                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">0.3</div>
+                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Динамические изменения и эффекты</div>
+                    <div class="mt-0.5 text-[10px] opacity-80" x-text="'Сбавка блока: −' + blockPenalty('dynamic').toFixed(1)"></div>
+                </div>
             </button>
         </div>
     </div>
@@ -137,13 +142,13 @@
             </div>
 
             <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-                <div class="shrink-0 flex justify-between gap-2">
+                <div class="shrink-0 flex items-stretch gap-2">
                     <button type="button" @click="page = 1"
-                        class="rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs font-semibold text-white">
+                        class="flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-3 text-base font-bold text-white active:scale-[0.98]">
                         ← Предыдущая стр.
                     </button>
                     <button type="button" @click="cancel()"
-                        class="rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-1.5 text-xs font-semibold text-white">
+                        class="shrink-0 rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-2 text-xs font-semibold text-white">
                         ОТМЕНА
                     </button>
                 </div>
@@ -201,7 +206,7 @@
                          :class="a.cat === 'dance' ? 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50'
                                 : a.cat === 'dynamic' ? 'bg-amber-900/40 border-amber-800/40 text-amber-50'
                                 : 'bg-slate-800/60 border-slate-700 text-slate-100'">
-                        <div class="font-mono tabular-nums" x-text="'-' + Number(a.v).toFixed(2)"></div>
+                        <div class="font-mono tabular-nums" x-text="(a.combo ? '+' : '-') + Number(a.v).toFixed(2)"></div>
                         <div class="text-[9px] opacity-75 truncate" x-text="a.label || '—'"></div>
                     </div>
                 </template>
