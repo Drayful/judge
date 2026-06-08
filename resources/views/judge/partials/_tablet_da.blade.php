@@ -3,22 +3,31 @@
      Засчитываются только первые ТРИ акробатики — 4-я и далее уходят в историю,
      но в итог не попадают («не учтено»). «Х» — несделанная акробатика (0 баллов). --}}
 
-{{-- ====== ЛЕВАЯ ЗОНА: Х (несделанная акробатика) + значения ====== --}}
+{{-- ====== ЛЕВАЯ ЗОНА: Х (несделанная акробатика) + 0.2 + Акробатика ====== --}}
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
     {{-- «Х» — несделанная акробатика: занимает слот, в итог 0 (размер как у цифр) --}}
     <button type="button" @click="markAcroNotDone()"
         class="flex-1 min-h-0 rounded-2xl bg-[#5a1d28] hover:bg-[#74232f] border border-rose-800/60 text-white font-bold active:scale-[0.98] flex flex-col items-center justify-center shadow-md transition">
         <div class="text-4xl xl:text-5xl leading-none font-black">Х</div>
-        <div class="mt-1 text-[10px] text-rose-200/80">акробатика не сделана · 0</div>
+        <div class="mt-1 text-[10px] text-rose-200/80">не сделана · 0</div>
     </button>
 
-    @foreach ([0.2, 0.3, 0.4] as $v)
-        <button type="button" @click="assignValue({{ $v }})"
-            :class="acroPending ? 'ring-2 ring-amber-400 brightness-110' : ''"
-            class="flex-1 min-h-0 rounded-2xl bg-[#1e6a85] hover:bg-[#247c9b] border border-cyan-800/40 text-4xl xl:text-5xl font-bold text-white tabular-nums shadow-md active:scale-[0.98] flex items-center justify-center transition">
-            {{ number_format($v, 1) }}
-        </button>
-    @endforeach
+    <button type="button" @click="assignValue(0.2)"
+        :class="acroPending ? 'ring-2 ring-amber-400 brightness-110' : ''"
+        class="flex-1 min-h-0 rounded-2xl bg-[#1e6a85] hover:bg-[#247c9b] border border-cyan-800/40 text-4xl xl:text-5xl font-bold text-white tabular-nums shadow-md active:scale-[0.98] flex items-center justify-center transition">
+        0.2
+    </button>
+
+    {{-- Акробатика — переключатель режима «следующий балл = акробатика» --}}
+    <button type="button" @click="toggleAcro()"
+        :class="acroPending ? 'ring-2 ring-amber-400 brightness-125 bg-[#6b4cc0]' : 'bg-[#4a3d8a] hover:bg-[#5a4ca6]'"
+        class="flex-1 min-h-0 rounded-2xl border border-indigo-700/60 text-white shadow-md active:scale-[0.98] flex flex-col items-center justify-center transition">
+        <div class="text-4xl xl:text-5xl font-black leading-none">A</div>
+        <div class="mt-1 text-[11px] uppercase tracking-wider text-indigo-100/80">Акробатика</div>
+        <div class="mt-0.5 text-sm font-mono tabular-nums"
+             :class="acroCount >= acroMax ? 'text-rose-300' : 'text-amber-200'"
+             x-text="acroCount + '/' + acroMax"></div>
+    </button>
 </div>
 
 {{-- ====== ЦЕНТР ====== --}}
@@ -74,21 +83,22 @@
     </button>
 </div>
 
-{{-- ====== ПРАВАЯ ЗОНА: отмена + акробатика ====== --}}
+{{-- ====== ПРАВАЯ ЗОНА: ОТМЕНА + 0.3 + 0.4 ====== --}}
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
     <button type="button" @click="cancel()"
-        class="shrink-0 h-16 rounded-2xl bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 text-base font-bold text-white shadow-md active:scale-[0.98]">
+        class="flex-1 min-h-0 rounded-2xl bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 text-lg xl:text-xl font-bold text-white shadow-md active:scale-[0.98] flex items-center justify-center">
         ОТМЕНА
     </button>
 
-    {{-- Акробатика — переключатель режима «следующий балл = акробатика» --}}
-    <button type="button" @click="toggleAcro()"
-        :class="acroPending ? 'ring-2 ring-amber-400 brightness-125 bg-[#6b4cc0]' : 'bg-[#4a3d8a] hover:bg-[#5a4ca6]'"
-        class="flex-1 min-h-0 rounded-2xl border border-indigo-700/60 text-white shadow-md active:scale-[0.98] flex flex-col items-center justify-center transition">
-        <div class="text-4xl xl:text-5xl font-black leading-none">A</div>
-        <div class="mt-1 text-[11px] uppercase tracking-wider text-indigo-100/80">Акробатика</div>
-        <div class="mt-0.5 text-sm font-mono tabular-nums"
-             :class="acroCount >= acroMax ? 'text-rose-300' : 'text-amber-200'"
-             x-text="acroCount + '/' + acroMax"></div>
+    <button type="button" @click="assignValue(0.3)"
+        :class="acroPending ? 'ring-2 ring-amber-400 brightness-110' : ''"
+        class="flex-1 min-h-0 rounded-2xl bg-[#1e6a85] hover:bg-[#247c9b] border border-cyan-800/40 text-4xl xl:text-5xl font-bold text-white tabular-nums shadow-md active:scale-[0.98] flex items-center justify-center transition">
+        0.3
+    </button>
+
+    <button type="button" @click="assignValue(0.4)"
+        :class="acroPending ? 'ring-2 ring-amber-400 brightness-110' : ''"
+        class="flex-1 min-h-0 rounded-2xl bg-[#9a7b1e] hover:bg-[#b69226] border border-amber-700/40 text-4xl xl:text-5xl font-bold text-white tabular-nums shadow-md active:scale-[0.98] flex items-center justify-center transition">
+        0.4
     </button>
 </div>
