@@ -238,6 +238,18 @@ class JudgeController extends Controller
             $score = (float) $request->input('score');
         }
 
+        // История нажатий с планшета (для просмотра секретарём / главным судьёй).
+        $entries = null;
+        $rawEntries = $request->input('entries');
+        if (is_string($rawEntries) && $rawEntries !== '') {
+            $decoded = json_decode($rawEntries, true);
+            if (is_array($decoded)) {
+                $entries = array_slice($decoded, 0, 60);
+            }
+        }
+        $ageGroup = $request->input('age_group');
+        $ageGroup = in_array($ageGroup, ['junior', 'senior'], true) ? $ageGroup : null;
+
         JudgeScore::query()->updateOrCreate(
             [
                 'performance_id' => $performance->id,
@@ -248,6 +260,8 @@ class JudgeController extends Controller
             ],
             [
                 'score' => $score,
+                'entries' => $entries,
+                'age_group' => $ageGroup,
                 'submitted_at' => now(),
             ],
         );
@@ -264,7 +278,7 @@ class JudgeController extends Controller
             if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $category)) {
                 $report = SecretaryLiveUi::panelSpreadReport($performance, $category);
                 $labels = collect($report['violations'])->pluck('label')->implode(', ');
-                $status .= ' Конференция судей: разброс > '.$report['max_spread'].' ('.$labels.'). Автопереход заблокирован.';
+                $status .= ' Разброс > '.$report['max_spread'].' ('.$labels.'). Оценка принята — итог подтверждает секретарь или главный судья.';
             }
         }
 

@@ -431,4 +431,69 @@ class SecretaryLiveUi
 
         return number_format($v, 3, '.', '');
     }
+
+    /**
+     * Записи judge_scores, сопоставленные со слотами (как fixedScoreMatrix, но с моделями).
+     * Нужно для истории выставления оценки и редактирования секретарём.
+     *
+     * @return array<string, ?\App\Models\JudgeScore>
+     */
+    public static function scoreRowsBySlot(?Performance $perf, ?Category $category = null): array
+    {
+        $rows = array_fill_keys(self::ALL_JUDGE_SLOTS, null);
+        $category = $category ?? $perf?->category;
+        $inactive = self::inactiveSlots($category);
+
+        if (! $perf) {
+            return $rows;
+        }
+
+        $perf->loadMissing('judgeScores.judge');
+        $scores = $perf->judgeScores;
+
+        // 1) По слоту судьи.
+        foreach ($scores as $s) {
+            $slot = $s->judge?->slot;
+            if ($slot && array_key_exists($slot, $rows) && ! in_array($slot, $inactive, true) && $rows[$slot] === null) {
+                $rows[$slot] = $s;
+            }
+        }
+
+        // 2) Резерв: по порядку id для слотов без явной привязки.
+        $fillByOrder = function (string $prefix, $coll, int $count) use (&$rows, $inactive) {
+            $assigned = collect($rows)->filter()->map(fn ($s) => $s->id)->values()->all();
+            $i = 0;
+            foreach ($coll as $row) {
+                if (in_array($row->id, $assigned, true)) {
+                    continue;
+                }
+                while ($i < $count) {
+                    $key = $prefix.($i + 1);
+                    $i++;
+                    if (! in_array($key, $inactive, true) && $rows[$key] === null) {
+                        $rows[$key] = $row;
+                        break;
+                    }
+                }
+                if ($i >= $count) {
+                    break;
+                }
+            }
+        };
+
+        $fillByOrder('DB', $scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values(), 2);
+        $fillByOrder('DA', $scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values(), 2);
+        $fillByOrder('A', $scores->where('panel', 'a')->sortBy('id')->values(), 4);
+        $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
+        $fillByOrder('LINE', $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values(), 2);
+
+        if ($rows['TIME'] === null) {
+            $rows['TIME'] = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');
+        }
+        if ($rows['RESP'] === null) {
+            $rows['RESP'] = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music');
+        }
+
+        return $rows;
+    }
 }

@@ -452,6 +452,22 @@ class SecretaryController extends Controller
             ? app(FinalProtocolService::class)->groups($tournament)
             : collect();
 
+        // История выставления оценок по слотам (для модалки по клику на оценку).
+        $scoreHistory = [];
+        foreach (SecretaryLiveUi::scoreRowsBySlot($currentPerformance, $category) as $slot => $row) {
+            if ($row === null) {
+                continue;
+            }
+            $scoreHistory[$slot] = [
+                'slot' => $slot,
+                'judge' => $row->judge?->name ?? '—',
+                'score' => $row->score !== null ? number_format((float) $row->score, 3, '.', '') : '—',
+                'age_group' => $row->age_group,
+                'submitted_at' => $row->submitted_at?->format('H:i:s'),
+                'entries' => $row->entries ?? [],
+            ];
+        }
+
         return [
             'category' => $category,
             'tournamentCategories' => $tournamentCategories,
@@ -468,7 +484,126 @@ class SecretaryController extends Controller
             'totalJudgeSlots' => $totalJudgeSlots,
             'activeJudgeSlots' => $activeJudgeSlots,
             'athletes' => $athletes,
+            'scoreHistory' => $scoreHistory,
         ];
+    }
+
+    /**
+     * Подтвердить итог несмотря на расхождение оценок (секретарь / главный судья).
+     */
+    public function confirmScore(Performance $performance): RedirectResponse
+    {
+        $performance->load(['judgeScores', 'category']);
+        $category = $performance->category;
+
+        if (! SecretaryLiveUi::requiredScoresSubmitted($performance, $category)) {
+            return back()->withErrors(['confirm' => 'Не все обязательные оценки выставлены — подтверждать пока нечего.']);
+        }
+
+        $moved = false;
+        DB::transaction(function () use ($performance, $category, &$moved) {
+            $performance->recalculateTotals();
+            $performance->finalized_at = now();
+            $performance->save();
+
+            if ($category?->auto_advance) {
+                $moved = StreamAdvanceService::advanceToNextInCategory($category);
+            }
+        });
+
+        $msg = 'Итог подтверждён и зафиксирован.';
+        if ($moved) {
+            $msg .= ' Вызвана следующая гимнастка.';
+        }
+
+        return back()->with('status', $msg);
+    }
+
+    /**
+     * Вернуть оценку на доработку: один слот, панель (db/da/a/e/penalty) или все сразу.
+     */
+    public function returnScores(Performance $performance, Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'panel' => ['nullable', Rule::in(['db', 'da', 'a', 'e', 'penalty', 'all'])],
+            'slot' => ['nullable', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+        ]);
+
+        if (empty($data['panel']) && empty($data['slot'])) {
+            return back()->withErrors(['return' => 'Укажите слот или панель для возврата на доработку.']);
+        }
+
+        $deleted = 0;
+        $label = '';
+
+        if (! empty($data['slot'])) {
+            $performance->load(['judgeScores.judge', 'category']);
+            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+            $row = $rows[$data['slot']] ?? null;
+
+            if ($row === null) {
+                return back()->withErrors(['return' => 'Для слота '.$data['slot'].' нет оценки — возвращать нечего.']);
+            }
+
+            $row->delete();
+            $deleted = 1;
+            $label = $data['slot'];
+        } else {
+            $key = $data['panel'];
+            $query = JudgeScore::query()->where('performance_id', $performance->id);
+
+            if (in_array($key, ['db', 'da'], true)) {
+                $query->where('panel', 'd')->where('subpanel', $key);
+                $label = strtoupper($key);
+            } elseif ($key === 'penalty') {
+                $query->where('panel', 'penalty');
+                $label = 'штрафы (LINE/TIME/RESP)';
+            } elseif ($key === 'all') {
+                $label = 'все оценки';
+            } else {
+                $query->where('panel', $key);
+                $label = strtoupper($key);
+            }
+
+            $deleted = $query->delete();
+        }
+
+        $performance->refresh();
+        $performance->load(['judgeScores', 'category']);
+        $performance->recalculateTotals();
+        $performance->finalized_at = null;
+        $performance->save();
+
+        return back()->with('status', 'На доработку возвращено: '.$label.' ('.$deleted.' шт.). Судьи увидят планшет ввода снова.');
+    }
+
+    /**
+     * Исправить оценку конкретного судьи (секретарь / главный судья).
+     */
+    public function updateJudgeScore(Performance $performance, Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+        ]);
+
+        $performance->load(['judgeScores.judge', 'category']);
+        $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+        $row = $rows[$data['slot']] ?? null;
+
+        if ($row === null) {
+            return back()->withErrors(['edit' => 'Для слота '.$data['slot'].' нет оценки — исправлять нечего.']);
+        }
+
+        $row->score = (float) $data['score'];
+        $row->save();
+
+        $performance->refresh();
+        $performance->load(['judgeScores', 'category']);
+        $performance->recalculateTotals();
+        $performance->save();
+
+        return back()->with('status', 'Оценка '.$data['slot'].' исправлена на '.number_format((float) $data['score'], 3, '.', '').'.');
     }
 
     public function addToQueue(Request $request, Category $category): RedirectResponse

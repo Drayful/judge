@@ -41,6 +41,15 @@ class User extends Authenticatable
     }
 
     /**
+     * Главный судья: видит и может всё то же, что секретарь
+     * (подтверждение итога, исправление и возврат оценок).
+     */
+    public function isChiefJudge(): bool
+    {
+        return $this->role === 'chief_judge';
+    }
+
+    /**
      * Замена музыки после дедлайна категории (секретариат / админ).
      */
     public function canUploadMusicAfterDeadline(): bool
@@ -95,6 +104,6 @@ class User extends Authenticatable
 
     public function isAnyJudge(): bool
     {
-        return $this->judgePanel() !== null || in_array($this->role, ['head_judge', 'superior_jury'], true) || $this->isAdmin();
+        return $this->judgePanel() !== null || in_array($this->role, ['head_judge', 'superior_jury', 'chief_judge'], true) || $this->isAdmin();
     }
 }

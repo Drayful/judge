@@ -14,12 +14,15 @@ class JudgeScore extends Model
         'subpanel',
         'penalty_type',
         'score',
+        'entries',
+        'age_group',
         'notes',
         'submitted_at',
     ];
 
     protected $casts = [
         'submitted_at' => 'datetime',
+        'entries' => 'array',
     ];
 
     public function performance(): BelongsTo

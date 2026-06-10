@@ -248,14 +248,21 @@
                         {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
                     </span>
                     <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Ожидание: <span class="text-amber-200 font-mono">{{ $waitingJudges }}/{{ $activeJudgeSlots }}</span></span>
-                    <span class="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-300">Итого: <span class="text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($sumDisplay !== null ? (float) $sumDisplay : null) }}</span></span>
+                    <button type="button" id="total-score-badge"
+                        class="rounded-lg border border-teal-700/60 bg-teal-950/40 px-2.5 py-1 text-teal-100 hover:bg-teal-900/50 transition"
+                        title="Нажмите — вся история выставления оценок">
+                        Итого: <span class="text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($sumDisplay !== null ? (float) $sumDisplay : null) }}</span>
+                    </button>
                 </div>
             </div>
 
-            @if(($panelSpread['has_violation'] ?? false) && !empty($panelSpread['violations']))
+            @if(($panelSpread['has_violation'] ?? false) && !empty($panelSpread['violations']) && $currentPerformance)
                 <div class="mt-4 rounded-xl border border-rose-700/60 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
-                    <div class="font-semibold">Нужна конференция судей</div>
-                    <p class="mt-1 text-rose-100/90 text-xs">Разброс оценок превышает {{ number_format($panelSpread['max_spread'], 1) }}. Автопереход и фиксация итога заблокированы, пока судьи не согласуют оценки.</p>
+                    <div class="font-semibold">Расхождение оценок — нужно решение секретаря / главного судьи</div>
+                    <p class="mt-1 text-rose-100/90 text-xs">
+                        Разброс превышает {{ number_format($panelSpread['max_spread'], 1) }}. Оценки приняты, автопереход приостановлен.
+                        Исправьте или верните на доработку в блоке ниже, либо подтвердите итог как есть.
+                    </p>
                     <ul class="mt-2 space-y-1 text-xs font-mono">
                         @foreach($panelSpread['violations'] as $v)
                             <li>
@@ -265,6 +272,13 @@
                             </li>
                         @endforeach
                     </ul>
+                    <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="mt-3"
+                          onsubmit="return confirm('Подтвердить итог несмотря на расхождение оценок?');">
+                        @csrf
+                        <button type="submit" class="rounded-lg bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow">
+                            Подтвердить итог (расхождение согласовано)
+                        </button>
+                    </form>
                 </div>
             @endif
 
@@ -313,12 +327,103 @@
                                     $isOff = $scoreMatrix['inactive'][$col] ?? false;
                                     $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
                                 @endphp
-                                <td class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ $isOff ? 'text-slate-500 italic' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100')) }}">{{ $scoreMatrix['values'][$col] }}</td>
+                                <td data-history-slot="{{ $col }}"
+                                    class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ isset($scoreHistory[$col]) ? 'cursor-pointer hover:bg-slate-800/60' : '' }} {{ $isOff ? 'text-slate-500 italic' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100')) }}"
+                                    title="{{ isset($scoreHistory[$col]) ? 'Нажмите — история выставления оценки '.$col : '' }}">{{ $scoreMatrix['values'][$col] }}</td>
                             @endforeach
                         </tr>
                     </tbody>
                 </table>
             </div>
+
+            {{-- Управление оценками: редактирование и возврат на доработку (любой слот) --}}
+            @if($currentPerformance)
+                @php
+                    $editableSlots = collect($scoreMatrix['columns'])->filter(function ($col) use ($scoreMatrix) {
+                        if ($scoreMatrix['inactive'][$col] ?? false) return false;
+                        $v = $scoreMatrix['values'][$col] ?? '—';
+                        return $v !== '—' && $v !== 'off';
+                    })->values();
+                @endphp
+                <div class="mt-4 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
+                    <h3 class="text-sm font-semibold text-white">Управление оценками</h3>
+                    <p class="mt-1 text-xs text-slate-500">
+                        Исправить оценку секретарём / главным судьёй или вернуть судье на доработку — для любого слота, не только при расхождении.
+                        Клик по оценке в таблице выше — история выставления.
+                    </p>
+
+                    @if($editableSlots->isEmpty())
+                        <p class="mt-3 text-sm text-slate-500">Пока нет выставленных оценок для редактирования.</p>
+                    @else
+                        <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            @foreach($editableSlots as $col)
+                                @php
+                                    $isPen = $scoreMatrix['penalty'][$col] ?? false;
+                                    $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
+                                    $cur = $scoreMatrix['values'][$col];
+                                @endphp
+                                <div class="rounded-lg border px-3 py-2.5 {{ $isSpread ? 'border-rose-700/60 bg-rose-950/20' : ($isPen ? 'border-rose-900/40 bg-rose-950/10' : 'border-slate-800 bg-slate-900/40') }}">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="font-mono text-xs font-bold {{ $isSpread ? 'text-rose-200' : 'text-emerald-300' }}">{{ $col }}</span>
+                                        <span class="font-mono text-sm text-white tabular-nums">{{ $cur }}</span>
+                                    </div>
+                                    @if(isset($scoreHistory[$col]['judge']))
+                                        <div class="mt-0.5 text-[10px] text-slate-500 truncate">{{ $scoreHistory[$col]['judge'] }}</div>
+                                    @endif
+                                    <form method="POST" action="{{ route('secretary.performance.updateJudgeScore', $currentPerformance) }}" class="mt-2 flex items-center gap-1.5">
+                                        @csrf
+                                        <input type="hidden" name="slot" value="{{ $col }}">
+                                        <input type="number" name="score" step="0.001" min="0" max="99.999" value="{{ $cur }}" required
+                                               class="flex-1 min-w-0 rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-xs py-1 px-2 font-mono tabular-nums">
+                                        <button type="submit" class="shrink-0 rounded-md border border-amber-700/60 bg-amber-900/30 px-2 py-1 text-[10px] text-amber-100 hover:bg-amber-800/40" title="Сохранить исправление">
+                                            ✓
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="{{ route('secretary.performance.returnScores', $currentPerformance) }}" class="mt-1.5"
+                                          onsubmit="return confirm('Вернуть оценку {{ $col }} судье на доработку?');">
+                                        @csrf
+                                        <input type="hidden" name="slot" value="{{ $col }}">
+                                        <button type="submit" class="w-full rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 hover:text-slate-100">
+                                            ↩ На доработку судье
+                                        </button>
+                                    </form>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+
+                    <div class="mt-4 flex flex-wrap gap-2 border-t border-slate-800 pt-3">
+                        <span class="w-full text-[10px] uppercase tracking-wider text-slate-500 mb-1">Вернуть панель целиком</span>
+                        @foreach(['db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Штрафы'] as $pKey => $pLabel)
+                            <form method="POST" action="{{ route('secretary.performance.returnScores', $currentPerformance) }}" class="inline"
+                                  onsubmit="return confirm('Вернуть все оценки панели {{ $pLabel }} судьям?');">
+                                @csrf
+                                <input type="hidden" name="panel" value="{{ $pKey }}">
+                                <button type="submit" class="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white">
+                                    ↩ {{ $pLabel }}
+                                </button>
+                            </form>
+                        @endforeach
+                        <form method="POST" action="{{ route('secretary.performance.returnScores', $currentPerformance) }}" class="inline"
+                              onsubmit="return confirm('Вернуть ВСЕ оценки всем судьям? Итог будет сброшен.');">
+                            @csrf
+                            <input type="hidden" name="panel" value="all">
+                            <button type="submit" class="rounded-md border border-rose-800/70 bg-rose-950/50 px-2.5 py-1.5 text-xs text-rose-200 hover:bg-rose-900/60">
+                                ↩ Все оценки
+                            </button>
+                        </form>
+                        @if($currentPerformance->finalized_at === null && \App\Support\SecretaryLiveUi::requiredScoresSubmitted($currentPerformance, $category))
+                            <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="inline ml-auto"
+                                  onsubmit="return confirm('Подтвердить и зафиксировать итог?');">
+                                @csrf
+                                <button type="submit" class="rounded-md border border-emerald-700/70 bg-emerald-900/40 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800/50">
+                                    ✓ Подтвердить итог
+                                </button>
+                            </form>
+                        @endif
+                    </div>
+                </div>
+            @endif
         </div>
 
         {{-- История потока --}}
@@ -570,7 +675,110 @@
     </div>
 </x-app-layout>
 
+{{-- ===== Модалка: история выставления оценки ===== --}}
+<div id="score-history-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/60" data-history-close></div>
+    <div class="relative mx-auto mt-16 w-[min(92vw,760px)] max-h-[75vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+            <h3 id="score-history-title" class="text-base font-semibold text-white">История выставления оценки</h3>
+            <button type="button" data-history-close class="rounded-lg border border-slate-700 px-2.5 py-1 text-sm text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+        <div id="score-history-body" class="mt-4 space-y-4 text-sm text-slate-200"></div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(() => {
+    const history = @json($scoreHistory ?? []);
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const updateUrl = @json($currentPerformance ? route('secretary.performance.updateJudgeScore', $currentPerformance) : null);
+    const returnUrl = @json($currentPerformance ? route('secretary.performance.returnScores', $currentPerformance) : null);
+    const modal = document.getElementById('score-history-modal');
+    const title = document.getElementById('score-history-title');
+    const body = document.getElementById('score-history-body');
+    if (! modal) return;
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    const slotActions = (slot, score) => {
+        if (! updateUrl || ! returnUrl) return '';
+        return `
+            <div class="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-800 pt-3">
+                <form method="POST" action="${esc(updateUrl)}" class="flex items-center gap-2 flex-1 min-w-[200px]">
+                    <input type="hidden" name="_token" value="${esc(csrf)}">
+                    <input type="hidden" name="slot" value="${esc(slot)}">
+                    <label class="text-[10px] text-slate-500 shrink-0">Исправить</label>
+                    <input type="number" name="score" step="0.001" min="0" max="99.999" value="${esc(score)}" required
+                           class="flex-1 rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-xs py-1.5 px-2 font-mono">
+                    <button type="submit" class="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-800/40">Сохранить</button>
+                </form>
+                <form method="POST" action="${esc(returnUrl)}" onsubmit="return confirm('Вернуть оценку ${esc(slot)} судье на доработку?');">
+                    <input type="hidden" name="_token" value="${esc(csrf)}">
+                    <input type="hidden" name="slot" value="${esc(slot)}">
+                    <button type="submit" class="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">↩ На доработку</button>
+                </form>
+            </div>`;
+    };
+
+    const entryLine = (e) => {
+        const sym = e.symbol ? `<span class="font-black">${esc(e.symbol)}</span> ` : (e.acro ? '<span class="font-black text-indigo-300">A</span> ' : '');
+        const label = e.label ? `<span class="text-slate-400">${esc(e.label)}</span> ` : '';
+        const val = e.notDone ? '<span class="text-rose-300">Х · 0 (не выполнен)</span>' : `<span class="font-mono tabular-nums">${Number(e.v).toFixed(1)}</span>`;
+        const counted = e.notDone ? '' : (e.counted === false ? ' <span class="text-[10px] text-rose-300">не в зачёте</span>' : '');
+        return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
+    };
+
+    const slotBlock = (slot, withActions = false) => {
+        const h = history[slot];
+        if (! h) return '';
+        const ag = h.age_group === 'junior' ? 'Юниоры' : (h.age_group === 'senior' ? 'Сеньоры' : null);
+        const meta = [h.judge, ag, h.submitted_at ? 'отправлено ' + h.submitted_at : null].filter(Boolean).map(esc).join(' · ');
+        const entries = Array.isArray(h.entries) && h.entries.length
+            ? `<ul class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">${h.entries.map(entryLine).join('')}</ul>`
+            : '<div class="mt-2 text-xs text-slate-500">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
+        const actions = withActions ? slotActions(slot, h.score) : '';
+        return `
+            <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="font-mono font-bold text-emerald-300">${esc(slot)} <span class="text-white">${esc(h.score)}</span></div>
+                    <div class="text-[11px] text-slate-500">${meta}</div>
+                </div>
+                ${entries}
+                ${actions}
+            </div>`;
+    };
+
+    const open = (slots, heading, withActions = false) => {
+        const blocks = slots.map((s) => slotBlock(s, withActions && slots.length === 1)).filter(Boolean);
+        if (! blocks.length) return;
+        title.textContent = heading;
+        body.innerHTML = blocks.join('');
+        modal.classList.remove('hidden');
+    };
+
+    document.querySelectorAll('[data-history-slot]').forEach((td) => {
+        td.addEventListener('click', () => {
+            const slot = td.dataset.historySlot;
+            if (history[slot]) open([slot], 'История выставления — ' + slot, true);
+        });
+    });
+
+    const totalBadge = document.getElementById('total-score-badge');
+    if (totalBadge) {
+        totalBadge.addEventListener('click', () => {
+            open(Object.keys(history), 'История выставления оценок — все судьи');
+        });
+    }
+
+    modal.querySelectorAll('[data-history-close]').forEach((el) => {
+        el.addEventListener('click', () => modal.classList.add('hidden'));
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') modal.classList.add('hidden');
+    });
+})();
+</script>
 <script>
 (() => {
     const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');

@@ -53,9 +53,35 @@
 
 {{-- ====== ЦЕНТР ====== --}}
 <div class="col-span-3 flex flex-col gap-2 h-full min-h-0">
+    {{-- Переключатель возрастной группы: лимиты зачёта элементов --}}
+    <div class="shrink-0 grid grid-cols-2 gap-2">
+        <button type="button" @click="setAgeGroup('junior')"
+            :class="ageGroup === 'junior' ? 'bg-[#4a3d8a] border-indigo-500 ring-2 ring-indigo-400/60 text-white' : 'bg-[#101a36] border-slate-700 text-slate-400 hover:text-slate-200'"
+            class="rounded-xl border py-1.5 px-2 transition active:scale-[0.98]">
+            <div class="text-xs font-bold uppercase tracking-wider">Юниоры</div>
+            <div class="text-[10px] opacity-80">6 эл · 3 риска</div>
+        </button>
+        <button type="button" @click="setAgeGroup('senior')"
+            :class="ageGroup === 'senior' ? 'bg-[#4a3d8a] border-indigo-500 ring-2 ring-indigo-400/60 text-white' : 'bg-[#101a36] border-slate-700 text-slate-400 hover:text-slate-200'"
+            class="rounded-xl border py-1.5 px-2 transition active:scale-[0.98]">
+            <div class="text-xs font-bold uppercase tracking-wider">Сеньоры</div>
+            <div class="text-[10px] opacity-80">8 эл · 4 риска</div>
+        </button>
+    </div>
+
     <div class="flex-1 min-h-0 rounded-2xl border border-slate-700 bg-[#0f1830] p-3 flex flex-col items-center justify-center text-center">
         <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая оценка</div>
         <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="finalScore().toFixed(2)"></div>
+
+        {{-- Зачёт: элементы с наивысшей стоимостью + лимит рисков --}}
+        <div class="flex items-center gap-2 text-[10px] font-mono tabular-nums">
+            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+                  :class="dbComputed().used >= dbLim().elements ? 'text-amber-300' : 'text-slate-300'"
+                  x-text="'Элементов: ' + dbComputed().used + '/' + dbLim().elements"></span>
+            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+                  :class="dbComputed().risks >= dbLim().risks ? 'text-amber-300' : 'text-slate-300'"
+                  x-text="'Рисков: ' + dbComputed().risks + '/' + dbLim().risks"></span>
+        </div>
 
         {{-- Подсказка по шагу: выбран символ или нет --}}
         <div class="min-h-[20px]">
@@ -80,11 +106,13 @@
             </button>
         </div>
 
-        {{-- Лента шагов: символ + балл (или «не вып.») --}}
+        {{-- Лента шагов: символ + балл; тусклые — не попали в зачёт (лимит элементов/рисков) --}}
         <div class="mt-2 w-full grid grid-cols-4 gap-1">
             <template x-for="(a, i) in actions.slice(0, 12)" :key="i">
                 <div class="rounded-md border text-[11px] text-center py-0.5 px-1"
-                     :class="a.notDone ? 'bg-rose-900/40 border-rose-800/50 text-rose-100' : 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50'">
+                     :class="a.notDone
+                        ? 'bg-rose-900/40 border-rose-800/50 text-rose-100'
+                        : (isCounted(i) ? 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50' : 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through')">
                     <span class="font-black" x-text="a.symbol"></span>
                     <span class="font-mono tabular-nums" x-text="a.notDone ? ' Х·0' : ' ' + Number(a.v).toFixed(1)"></span>
                 </div>
@@ -103,7 +131,7 @@
 <div class="col-span-4 grid grid-cols-2 gap-2 h-full min-h-0">
     <div class="flex flex-col gap-2 h-full min-h-0">
         <button type="button" @click="cancel()"
-            class="shrink-0 h-12 rounded-2xl bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 text-base font-bold text-white shadow-md active:scale-[0.98]">
+            class="flex-1 min-h-0 rounded-2xl bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 text-lg xl:text-xl font-bold text-white shadow-md active:scale-[0.98] flex items-center justify-center">
             ОТМЕНА
         </button>
         @foreach ([0.5, 0.6, 0.7, 0.8, 0.9] as $v)
@@ -118,9 +146,9 @@
         {{-- «Х» — элемент НЕ выполнен: символ уходит в историю с 0 баллов --}}
         <button type="button" @click="markNotDone()"
             :class="pendingSymbol ? 'border-rose-600 ring-1 ring-rose-500/50' : 'opacity-60 border-slate-700'"
-            class="shrink-0 h-12 rounded-2xl bg-[#5a1d28] hover:bg-[#74232f] border text-white font-semibold active:scale-[0.98] flex flex-col items-center justify-center">
-            <div class="text-xl leading-none font-black">Х</div>
-            <div class="text-[9px] text-rose-200/80">не выполнен · 0</div>
+            class="flex-1 min-h-0 rounded-2xl bg-[#5a1d28] hover:bg-[#74232f] border text-white font-semibold active:scale-[0.98] flex flex-col items-center justify-center">
+            <div class="text-3xl xl:text-4xl leading-none font-black">Х</div>
+            <div class="mt-1 text-[10px] text-rose-200/80">не выполнен · 0</div>
         </button>
         @foreach ([0.1, 0.2, 0.3, 0.4] as $v)
             <button type="button" @click="assignValue({{ $v }})"

@@ -131,8 +131,19 @@
                 _hintT: null,
                 symbolFlow: opts.panel === 'd' && opts.subpanel === 'db', // DB: символ → значение
                 acroPending: false,          // DA: следующий балл — акробатика
-                acroCount: 0,                // DA: сколько акробатик уже засчитано
-                acroMax: 3,                  // DA: максимум засчитываемых акробатик
+
+                // Возрастная группа: лимиты зачёта элементов для бригад DB/DA
+                ageGroup: 'junior',          // 'junior' | 'senior'
+                limits: {
+                    db: {
+                        junior: { elements: 6, risks: 3 },
+                        senior: { elements: 8, risks: 4 },
+                    },
+                    da: {
+                        junior: { elements: 12, acro: 3 },
+                        senior: { elements: 15, acro: 3 },
+                    },
+                },
 
                 // Лимиты по категориям (A1: dance, dynamic — макс. 2)
                 cat: { dance: 0, dynamic: 0 },
@@ -236,24 +247,20 @@
                     this.pendingSymbol = null;
                 },
 
-                // ====== DA-бригада: акробатика (макс. 3) + значения ======
+                // ====== DA-бригада: акробатика + значения ======
                 /** Включить/выключить режим «следующий балл — акробатика». */
                 toggleAcro() {
                     this.acroPending = ! this.acroPending;
                     this.error = null;
                 },
-                /** «Х» (DA) — несделанная акробатика: занимает слот (если < 3), но даёт 0 баллов. */
+                /** «Х» (DA) — несделанная акробатика: занимает слот акробатики, даёт 0 баллов. */
                 markAcroNotDone() {
                     this.acroPending = false;
-                    const counted = this.acroCount < this.acroMax;
-                    if (counted) this.acroCount += 1;
                     this.actions.unshift({
                         v: 0,
                         acro: true,
-                        counted: counted,
                         notDone: true,
                         label: 'Акробатика',
-                        inTotal: false,
                     });
                     if (this.actions.length > 40) this.actions.pop();
                 },
@@ -268,48 +275,92 @@
                             this.flashHint('Сначала выберите символ элемента');
                             return;
                         }
-                        const next = this.round3(this.draft + v);
-                        if (next < 0 || next > 99.999) return;
-                        this.draft = next;
                         this.actions.unshift({
                             v: v,
                             symbol: this.pendingSymbol.symbol,
                             label: this.pendingSymbol.label,
                             notDone: false,
-                            inTotal: true,
                         });
                         if (this.actions.length > 40) this.actions.pop();
                         this.pendingSymbol = null;
                         return;
                     }
 
-                    // DA: акробатика (засчитывается только первые 3)
-                    if (this.acroPending) {
-                        this.acroPending = false;
-                        const counted = this.acroCount < this.acroMax;
-                        if (counted) {
-                            const next = this.round3(this.draft + v);
-                            if (next > 99.999) return;
-                            this.draft = next;
-                            this.acroCount += 1;
-                        }
-                        this.actions.unshift({
-                            v: v,
-                            acro: true,
-                            counted: counted,
-                            label: 'Акробатика',
-                            inTotal: counted,
-                        });
-                        if (this.actions.length > 40) this.actions.pop();
-                        return;
+                    // DA: акробатика или простое значение — зачёт решает daComputed()
+                    this.actions.unshift({
+                        v: v,
+                        acro: this.acroPending,
+                        notDone: false,
+                        label: this.acroPending ? 'Акробатика' : '',
+                    });
+                    this.acroPending = false;
+                    if (this.actions.length > 40) this.actions.pop();
+                },
+
+                // ====== Возрастная группа и зачёт элементов (DB/DA) ======
+                setAgeGroup(g) { this.ageGroup = g; },
+                dbLim() { return this.limits.db[this.ageGroup]; },
+                daLim() { return this.limits.da[this.ageGroup]; },
+
+                /**
+                 * DB: засчитываются только N элементов с наивысшей стоимостью
+                 * (юниоры 6 / сеньоры 8), рисков среди них не больше 3 / 4.
+                 */
+                dbComputed() {
+                    const lim = this.dbLim();
+                    const items = this.actions
+                        .map((a, i) => ({ a, i }))
+                        .filter(x => ! x.a.notDone);
+                    items.sort((x, y) => y.a.v - x.a.v);
+
+                    const counted = new Set();
+                    let risks = 0, used = 0, total = 0;
+                    for (const x of items) {
+                        if (used >= lim.elements) break;
+                        const isRisk = x.a.symbol === 'R';
+                        if (isRisk && risks >= lim.risks) continue;
+                        counted.add(x.i);
+                        if (isRisk) risks += 1;
+                        used += 1;
+                        total += x.a.v;
                     }
 
-                    // DA: простое значение
-                    const next = this.round3(this.draft + v);
-                    if (next < 0 || next > 99.999) return;
-                    this.draft = next;
-                    this.actions.unshift({ v: v, acro: false, label: '', inTotal: true });
-                    if (this.actions.length > 40) this.actions.pop();
+                    return { counted, total: this.round3(total), used, risks };
+                },
+
+                /**
+                 * DA: засчитываются максимум 12 (юниоры) / 15 (сеньоры) элементов
+                 * в порядке ввода; акробатик среди них не больше 3.
+                 * Несделанная акробатика («Х») занимает слот акробатики с 0 баллов.
+                 */
+                daComputed() {
+                    const lim = this.daLim();
+                    const counted = new Set();
+                    let acro = 0, used = 0, total = 0;
+                    // actions добавляются в начало — хронология идёт с конца массива.
+                    for (let i = this.actions.length - 1; i >= 0; i--) {
+                        const a = this.actions[i];
+                        const isAcro = !! a.acro;
+                        if (a.notDone) {
+                            if (isAcro && acro < lim.acro && used < lim.elements) { acro += 1; used += 1; }
+                            continue;
+                        }
+                        if (used >= lim.elements) continue;
+                        if (isAcro && acro >= lim.acro) continue;
+                        counted.add(i);
+                        if (isAcro) acro += 1;
+                        used += 1;
+                        total += a.v;
+                    }
+
+                    return { counted, total: this.round3(total), used, acro };
+                },
+
+                /** Зачтён ли элемент истории под индексом i (для подсветки ленты). */
+                isCounted(i) {
+                    if (this.panel !== 'd') return true;
+                    const c = this.symbolFlow ? this.dbComputed() : this.daComputed();
+                    return c.counted.has(i);
                 },
 
                 flashHint(msg) {
@@ -335,10 +386,7 @@
                     if (last.cat && this.cat[last.cat] !== undefined) {
                         this.cat[last.cat] = Math.max(0, this.cat[last.cat] - 1);
                     }
-                    if (last.acro && last.counted) {
-                        this.acroCount = Math.max(0, this.acroCount - 1);
-                    }
-                    // Вычитаем из суммы только то, что в неё попадало.
+                    // Вычитаем из суммы только то, что в неё попадало (для D итог считается из истории).
                     if (last.inTotal) {
                         this.draft = this.round3(this.draft - last.v);
                         if (this.draft < 0) this.draft = 0;
@@ -350,7 +398,6 @@
                     this.draft = 0;
                     this.actions = [];
                     this.resetCats();
-                    this.acroCount = 0;
                     this.acroPending = false;
                     this.pendingSymbol = null;
                     this.error = null;
@@ -375,7 +422,12 @@
 
                 workingTotal() { return this.totalDeduction(); },
                 finalScore() {
-                    if (this.mode === 'add') return this.totalDeduction();
+                    if (this.mode === 'add') {
+                        if (this.panel === 'd') {
+                            return this.symbolFlow ? this.dbComputed().total : this.daComputed().total;
+                        }
+                        return this.totalDeduction();
+                    }
                     if (this.mode === 'subtract') {
                         const r = this.round3(this.base - this.totalDeduction());
                         return r < 0 ? 0 : r;
@@ -385,6 +437,24 @@
                 submitValue() {
                     if (this.mode === 'penalty') return this.draft.toFixed(3);
                     return this.finalScore().toFixed(3);
+                },
+
+                /** История нажатий для сервера (хронологический порядок, с пометкой зачёта). */
+                historyForSubmit() {
+                    const list = [];
+                    for (let i = this.actions.length - 1; i >= 0; i--) {
+                        const a = this.actions[i];
+                        list.push({
+                            v: a.v,
+                            label: a.label || null,
+                            symbol: a.symbol || null,
+                            acro: !! a.acro,
+                            combo: !! a.combo,
+                            notDone: !! a.notDone,
+                            counted: this.panel === 'd' ? this.isCounted(i) : (a.inTotal !== false && ! a.combo),
+                        });
+                    }
+                    return list;
                 },
 
                 /** ОТПРАВИТЬ — fetch на route('judge.submit-score'). */
@@ -400,6 +470,8 @@
                     if (this.subpanel)    body.append('subpanel', this.subpanel);
                     if (this.penaltyType) body.append('penalty_type', this.penaltyType);
                     body.append('score', this.submitValue());
+                    body.append('entries', JSON.stringify(this.historyForSubmit()));
+                    body.append('age_group', this.ageGroup);
                     try {
                         const r = await fetch(this.submitUrl, {
                             method: 'POST',

@@ -27,6 +27,12 @@ class DemoSeeder extends Seeder
             ['name' => 'Secretary', 'password' => Hash::make('password'), 'role' => 'secretary'],
         );
 
+        // Главный судья: видит то же, что секретарь; подтверждает/исправляет/возвращает оценки.
+        User::query()->updateOrCreate(
+            ['email' => 'chief@local.test'],
+            ['name' => 'Chief Judge', 'password' => Hash::make('password'), 'role' => 'chief_judge'],
+        );
+
         // Универсальный «judge_a» — используется во многих местах как «общий судья».
         User::query()->updateOrCreate(
             ['email' => 'judge@local.test'],
