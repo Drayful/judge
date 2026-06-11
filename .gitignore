@@ -32,6 +32,7 @@ __pycache__/
 
 # local secrets / demo creds
 DEMO_CREDENTIALS.txt
+env.txt
 
 # local clone of empty remote (created by assistant)
 github-judge/

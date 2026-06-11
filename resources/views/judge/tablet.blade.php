@@ -89,6 +89,11 @@
                     </div>
                 </div>
             @else
+                @if($myScore && $myScore->submitted_at === null && is_array($myScore->entries) && count($myScore->entries) > 0)
+                    <div class="shrink-0 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-100">
+                        Оценка возвращена на доработку — исправьте при необходимости и отправьте снова.
+                    </div>
+                @endif
                 <x-judge-panel
                     :type="$pKey"
                     :subpanel="$panel['subpanel'] ?? null"
@@ -96,6 +101,8 @@
                     :slot="$slot"
                     :base="$panelBase"
                     :saved="$saved"
+                    :entries="$myScore?->entries ?? []"
+                    :age-group="$myScore?->age_group ?? 'junior'"
                     :tournament="$tournament"
                 />
             @endif
@@ -172,9 +179,50 @@
                 },
 
                 init() {
-                    if (opts.initial && opts.initial !== 0) {
+                    if (opts.initialAgeGroup) {
+                        this.ageGroup = opts.initialAgeGroup;
+                    }
+                    if (opts.initialEntries && opts.initialEntries.length > 0) {
+                        this.restoreFromEntries(opts.initialEntries);
+                    } else if (opts.initial && opts.initial !== 0) {
                         this.draft = opts.initial;
                         this.actions = [{ v: opts.initial, cat: null, label: '' }];
+                    }
+                },
+
+                catFromLabel(label) {
+                    if (! label) return null;
+                    for (const [k, v] of Object.entries(this.catLabel)) {
+                        if (v === label) return k;
+                    }
+                    return null;
+                },
+
+                /** Восстановить историю нажатий после возврата на доработку. */
+                restoreFromEntries(entries) {
+                    this.actions = [];
+                    this.resetCats();
+                    for (const e of entries) {
+                        const cat = e.cat || this.catFromLabel(e.label);
+                        const action = {
+                            v: e.v ?? 0,
+                            cat: cat,
+                            label: e.label || '',
+                            symbol: e.symbol || null,
+                            acro: !! e.acro,
+                            combo: !! e.combo,
+                            notDone: !! e.notDone,
+                            inTotal: e.combo ? false : (e.counted !== false),
+                        };
+                        this.actions.unshift(action);
+                        if (cat && this.cat[cat] !== undefined) {
+                            this.cat[cat] += 1;
+                        }
+                    }
+                    if (this.mode === 'subtract' || this.mode === 'penalty') {
+                        this.draft = this.round3(
+                            this.actions.filter(a => a.inTotal !== false && ! a.combo).reduce((s, a) => s + a.v, 0)
+                        );
                     }
                 },
 
@@ -545,6 +593,7 @@
             const pingUrl = @json(route('judge.tournament.tablet.ping', $tournament));
             let lastPid = @json($current?->id);
             let lastCid = @json($category->id);
+            let lastSubmitted = @json($alreadySubmitted);
             setInterval(async function () {
                 try {
                     const r = await fetch(pingUrl, {
@@ -555,9 +604,11 @@
                     if (!r.ok) return;
                     const j = await r.json();
                     if (!j.resolved) return;
-                    if (j.performance_id !== lastPid || j.category_id !== lastCid) {
+                    const submitted = !! j.score_submitted;
+                    if (j.performance_id !== lastPid || j.category_id !== lastCid || submitted !== lastSubmitted) {
                         lastPid = j.performance_id;
                         lastCid = j.category_id;
+                        lastSubmitted = submitted;
                         window.location.reload();
                     }
                 } catch (e) {}

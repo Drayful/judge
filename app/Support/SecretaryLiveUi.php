@@ -112,19 +112,24 @@ class SecretaryLiveUi
         $scores = $perf->judgeScores ?? collect();
 
         $slotMap = [];
+        $placedScoreIds = [];
         foreach ($scores as $s) {
             $slot = $s->judge?->slot;
             if ($slot && $s->submitted_at !== null) {
                 $slotMap[$slot] = true;
+                $placedScoreIds[] = $s->id;
             }
         }
 
-        // Fallback по позиции: если slot у пользователя не задан, считаем порядком пришедших оценок.
-        $aSorted = $scores->where('panel', 'a')->sortBy('id')->values();
-        $eSorted = $scores->where('panel', 'e')->sortBy('id')->values();
-        $dbSorted = $scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values();
-        $daSorted = $scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values();
-        $lineSorted = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
+        // Fallback по позиции: только оценки без привязки к слоту (user.slot).
+        $unplaced = static fn ($coll) => $coll
+            ->filter(fn ($s) => ! in_array($s->id, $placedScoreIds, true))
+            ->values();
+        $aSorted = $unplaced($scores->where('panel', 'a')->sortBy('id')->values());
+        $eSorted = $unplaced($scores->where('panel', 'e')->sortBy('id')->values());
+        $dbSorted = $unplaced($scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values());
+        $daSorted = $unplaced($scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values());
+        $lineSorted = $unplaced($scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values());
 
         $byPosition = function ($coll, int $i): bool {
             $row = $coll->get($i);
@@ -155,8 +160,14 @@ class SecretaryLiveUi
                 'E4' => $byPosition($eSorted, 3),
                 'LINE1' => $byPosition($lineSorted, 0),
                 'LINE2' => $byPosition($lineSorted, 1),
-                'TIME' => $scores->contains(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time' && $s->submitted_at !== null),
-                'RESP' => $scores->contains(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music' && $s->submitted_at !== null),
+                'TIME' => isset($slotMap['TIME']) || $scores->contains(fn ($s) => $s->panel === 'penalty'
+                    && $s->penalty_type === 'time'
+                    && $s->submitted_at !== null
+                    && ! in_array($s->id, $placedScoreIds, true)),
+                'RESP' => isset($slotMap['RESP']) || $scores->contains(fn ($s) => $s->panel === 'penalty'
+                    && $s->penalty_type === 'music'
+                    && $s->submitted_at !== null
+                    && ! in_array($s->id, $placedScoreIds, true)),
                 default => false,
             };
             $out[] = ['label' => $label, 'ok' => $ok, 'inactive' => $isInactive];
@@ -361,8 +372,9 @@ class SecretaryLiveUi
         $scores = $perf->judgeScores;
 
         $fmt = static fn ($v) => $v !== null && $v !== '' ? number_format((float) $v, 3, '.', '') : '—';
+        $placedScoreIds = [];
 
-        // 1) Сначала пробуем по слоту судьи (надёжно). Неактивные слоты не перезаписываются.
+        // 1) Сначала по слоту судьи (user.slot). Неактивные слоты не перезаписываются.
         foreach ($scores as $s) {
             $slot = $s->judge?->slot;
             if ($slot && array_key_exists($slot, $values) && ! $inactive[$slot] && $s->score !== null) {
@@ -370,15 +382,15 @@ class SecretaryLiveUi
                 if ($s->panel === 'penalty') {
                     $penalty[$slot] = true;
                 }
+                $placedScoreIds[] = $s->id;
             }
         }
 
-        // 2) Резерв: незаполненные слоты — добиваем по порядку id (как раньше),
-        // пропуская неактивные позиции — оценки сдвигаются на следующие активные слоты.
-        $fillByOrder = function (string $prefix, $coll, int $count) use (&$values, $fmt, $inactive) {
+        // 2) Резерв: только оценки без слота — в первые пустые позиции панели.
+        $fillByOrder = function (string $prefix, $coll, int $count) use (&$values, &$placedScoreIds, $fmt, $inactive) {
             $i = 0;
             foreach ($coll as $row) {
-                if ($row->score === null) {
+                if ($row->score === null || in_array($row->id, $placedScoreIds, true)) {
                     continue;
                 }
                 while ($i < $count) {
@@ -386,6 +398,7 @@ class SecretaryLiveUi
                     $i++;
                     if (! ($inactive[$key] ?? false) && $values[$key] === '—') {
                         $values[$key] = $fmt($row->score);
+                        $placedScoreIds[] = $row->id;
                         break;
                     }
                 }
@@ -400,21 +413,32 @@ class SecretaryLiveUi
         $fillByOrder('A', $scores->where('panel', 'a')->sortBy('id')->values(), 4);
         $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
 
-        $lineList = $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values();
+        $lineList = $scores->where('panel', 'penalty')
+            ->where('penalty_type', 'line')
+            ->sortBy('id')
+            ->values()
+            ->filter(fn ($s) => ! in_array($s->id, $placedScoreIds, true))
+            ->values();
         foreach ([0 => 'LINE1', 1 => 'LINE2'] as $i => $key) {
             if (isset($lineList[$i]) && ! $inactive[$key] && $values[$key] === '—') {
                 $values[$key] = $fmt($lineList[$i]->score);
                 $penalty[$key] = true;
+                $placedScoreIds[] = $lineList[$i]->id;
             }
         }
 
-        $time = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');
+        $time = $scores->first(fn ($s) => $s->panel === 'penalty'
+            && $s->penalty_type === 'time'
+            && ! in_array($s->id, $placedScoreIds, true));
         if ($time && ! $inactive['TIME'] && $values['TIME'] === '—') {
             $values['TIME'] = $fmt($time->score);
             $penalty['TIME'] = true;
+            $placedScoreIds[] = $time->id;
         }
 
-        $resp = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music');
+        $resp = $scores->first(fn ($s) => $s->panel === 'penalty'
+            && $s->penalty_type === 'music'
+            && ! in_array($s->id, $placedScoreIds, true));
         if ($resp && ! $inactive['RESP'] && $values['RESP'] === '—') {
             $values['RESP'] = $fmt($resp->score);
             $penalty['RESP'] = true;

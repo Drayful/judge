@@ -137,12 +137,19 @@ class JudgeController extends Controller
         $ordered = SecretaryLiveUi::orderedPerformances($performances);
         $current = SecretaryLiveUi::currentPerformance($ordered);
 
+        $user = request()->user();
+        $panel = $user?->judgePanel();
+        $myScore = ($current && $panel)
+            ? $this->findMyScore($current, $user, $panel)
+            : null;
+
         return response()->json([
             'resolved' => true,
             'category_id' => $category->id,
             'performance_id' => $current?->id,
             'performance_status' => $current?->status,
             'stream_status' => SecretaryLiveUi::streamStatus($current),
+            'score_submitted' => $myScore !== null && $myScore->submitted_at !== null,
         ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
@@ -407,19 +414,7 @@ class JudgeController extends Controller
         $current = SecretaryLiveUi::currentPerformance($ordered);
         $streamStatus = SecretaryLiveUi::streamStatus($current);
 
-        $myScore = null;
-        if ($current) {
-            $myScore = $current->judgeScores->first(function ($s) use ($user, $panel) {
-                if ($s->judge_id !== $user->id || $s->panel !== $panel['panel']) {
-                    return false;
-                }
-                if (($s->subpanel ?? null) !== ($panel['subpanel'] ?? null)) {
-                    return false;
-                }
-
-                return ($s->penalty_type ?? null) === ($panel['penalty_type'] ?? null);
-            });
-        }
+        $myScore = $current ? $this->findMyScore($current, $user, $panel) : null;
 
         $rules = $category->scoring_rules ?? [];
         $aBase = (float) ($rules['a_base'] ?? 10.0);
@@ -436,5 +431,24 @@ class JudgeController extends Controller
             'aBase' => $aBase,
             'eBase' => $eBase,
         ]);
+    }
+
+    /**
+     * Оценка текущего судьи для выступления (включая черновик после возврата на доработку).
+     */
+    private function findMyScore(Performance $performance, $user, array $panel): ?JudgeScore
+    {
+        $performance->loadMissing(['judgeScores' => fn ($q) => $q->where('judge_id', $user->id)]);
+
+        return $performance->judgeScores->first(function ($s) use ($user, $panel) {
+            if ($s->judge_id !== $user->id || $s->panel !== $panel['panel']) {
+                return false;
+            }
+            if (($s->subpanel ?? null) !== ($panel['subpanel'] ?? null)) {
+                return false;
+            }
+
+            return ($s->penalty_type ?? null) === ($panel['penalty_type'] ?? null);
+        });
     }
 }

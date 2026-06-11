@@ -533,7 +533,7 @@ class SecretaryController extends Controller
             return back()->withErrors(['return' => 'Укажите слот или панель для возврата на доработку.']);
         }
 
-        $deleted = 0;
+        $returned = 0;
         $label = '';
 
         if (! empty($data['slot'])) {
@@ -541,16 +541,19 @@ class SecretaryController extends Controller
             $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
             $row = $rows[$data['slot']] ?? null;
 
-            if ($row === null) {
-                return back()->withErrors(['return' => 'Для слота '.$data['slot'].' нет оценки — возвращать нечего.']);
+            if ($row === null || $row->submitted_at === null) {
+                return back()->withErrors(['return' => 'Для слота '.$data['slot'].' нет отправленной оценки — возвращать нечего.']);
             }
 
-            $row->delete();
-            $deleted = 1;
+            $row->submitted_at = null;
+            $row->save();
+            $returned = 1;
             $label = $data['slot'];
         } else {
             $key = $data['panel'];
-            $query = JudgeScore::query()->where('performance_id', $performance->id);
+            $query = JudgeScore::query()
+                ->where('performance_id', $performance->id)
+                ->whereNotNull('submitted_at');
 
             if (in_array($key, ['db', 'da'], true)) {
                 $query->where('panel', 'd')->where('subpanel', $key);
@@ -565,7 +568,7 @@ class SecretaryController extends Controller
                 $label = strtoupper($key);
             }
 
-            $deleted = $query->delete();
+            $returned = $query->update(['submitted_at' => null]);
         }
 
         $performance->refresh();
@@ -574,7 +577,7 @@ class SecretaryController extends Controller
         $performance->finalized_at = null;
         $performance->save();
 
-        return back()->with('status', 'На доработку возвращено: '.$label.' ('.$deleted.' шт.). Судьи увидят планшет ввода снова.');
+        return back()->with('status', 'На доработку возвращено: '.$label.' ('.$returned.' шт.). Судьи увидят планшет ввода снова.');
     }
 
     /**

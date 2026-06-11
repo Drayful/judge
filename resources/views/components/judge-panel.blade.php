@@ -5,6 +5,8 @@
     'slot',
     'base' => 10.0,
     'saved' => null,
+    'entries' => [],
+    'ageGroup' => 'junior',
     'tournament',
 ])
 
@@ -22,6 +24,8 @@
         mode: @js($mode),
         base: {{ json_encode((float) $base) }},
         initial: {{ json_encode($saved !== null ? (float) $saved : 0.0) }},
+        initialEntries: @js($entries),
+        initialAgeGroup: @js($ageGroup),
         submitUrl: @js(route('judge.submit-score')),
         tabletUrl: @js(route('judge.tournament.tablet', $tournament)),
         tournamentId: {{ (int) $tournament->id }},
