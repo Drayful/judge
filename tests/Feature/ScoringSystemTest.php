@@ -545,12 +545,34 @@ class ScoringSystemTest extends TestCase
         $this->assertFalse(PerformanceApparatus::isBodyOnly('Мяч'));
     }
 
-    public function test_body_only_from_stream_name_when_vid_empty(): void
+    public function test_mixed_stream_bp_and_apparatus_per_performance(): void
     {
-        $category = $this->makeCategory(['name' => '2018 г.р., Б.П. — Поток 1']);
-        $perf = $this->makePerformance($category, apparatus: 'Вид 1');
+        $category = $this->makeCategory(['name' => '2018 г.р., C, Б.П. — Поток 1']);
 
-        $this->assertTrue($perf->isBodyOnlyApparatus());
+        $bp = $this->makePerformance($category, apparatus: 'БП');
+        $ball = $this->makePerformance($category, apparatus: 'Мяч');
+        $generic = $this->makePerformance($category, apparatus: 'Вид 1');
+
+        $this->assertTrue($bp->isBodyOnlyApparatus());
+        $this->assertFalse($ball->isBodyOnlyApparatus());
+        $this->assertFalse($generic->isBodyOnlyApparatus(), '«Вид 1» в потоке с Б.П. — не БП без явной метки');
+
+        // БП: trimmed mean; с предметом: DB+DA
+        $this->addScore($bp, 'd', 4.0, 'db', null, 'DB1');
+        $this->addScore($bp, 'd', 5.0, 'db', null, 'DB2');
+        $this->addScore($bp, 'd', 6.0, 'db', null, 'DA1');
+        $this->addScore($bp, 'd', 7.0, 'db', null, 'DA2');
+        $bp->load('judgeScores', 'category');
+        $bp->recalculateTotals();
+        $this->assertEqualsWithDelta(5.5, $bp->d_score, 0.0005);
+
+        $this->addScore($ball, 'd', 5.0, 'db', null, 'DB1');
+        $this->addScore($ball, 'd', 5.0, 'db', null, 'DB2');
+        $this->addScore($ball, 'd', 2.0, 'da', null, 'DA1');
+        $this->addScore($ball, 'd', 2.0, 'da', null, 'DA2');
+        $ball->load('judgeScores', 'category');
+        $ball->recalculateTotals();
+        $this->assertEqualsWithDelta(7.0, $ball->d_score, 0.0005, 'Мяч: avg(DB)+avg(DA)');
     }
 
     public function test_body_only_stream_name_detection(): void

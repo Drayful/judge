@@ -21,24 +21,15 @@ class PerformanceApparatus
 
     /**
      * БП (без предмета): все DA-судьи работают как DB, D = trimmed mean по 4 оценкам.
-     * Учитывает apparatus выступления и название потока («… Б.П. …»).
+     * Только по apparatus конкретного выступления — в одном потоке могут быть и БП, и предмет.
      */
-    public static function isBodyOnly(?string $apparatus, ?string $streamName = null): bool
+    public static function isBodyOnly(?string $apparatus): bool
     {
-        if (self::isBodyOnlyLabel(self::baseLabel($apparatus))) {
-            return true;
-        }
-
-        $apparatus = trim((string) $apparatus);
-        if ($apparatus !== '' && ! self::isGenericVidLabel($apparatus)) {
-            return false;
-        }
-
-        return self::isBodyOnlyStream($streamName);
+        return self::isBodyOnlyLabel(self::baseLabel($apparatus));
     }
 
     /**
-     * «Б.П.» в строке группы / названии потока из стартового протокола.
+     * «Б.П.» в строке группы (справочно; не делает весь поток БП автоматически).
      */
     public static function isBodyOnlyStream(?string $text): bool
     {
@@ -79,8 +70,4 @@ class PerformanceApparatus
         return in_array($compact, ['бп', 'free', 'безпредмета', 'body', 'bp'], true);
     }
 
-    private static function isGenericVidLabel(string $apparatus): bool
-    {
-        return (bool) preg_match('/^Вид\s+\d+(?:\s*·\s*\d+)?$/u', trim($apparatus));
-    }
 }

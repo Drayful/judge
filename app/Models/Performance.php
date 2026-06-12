@@ -165,9 +165,7 @@ class Performance extends Model
 
     public function isBodyOnlyApparatus(): bool
     {
-        $this->loadMissing('category');
-
-        return PerformanceApparatus::isBodyOnly($this->apparatus, $this->category?->name);
+        return PerformanceApparatus::isBodyOnly($this->apparatus);
     }
 
     /**

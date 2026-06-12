@@ -278,7 +278,6 @@ class StartProtocolImportService
             $base = $this->resolveApparatusLabelForImport(
                 $item['vid_raw'],
                 (int) $item['column_offset'],
-                $item['group_line'] ?? $groupLine,
                 (bool) ($item['bp_icon'] ?? false),
             );
 
@@ -404,7 +403,6 @@ class StartProtocolImportService
     private function resolveApparatusLabelForImport(
         ?string $vidRaw,
         int $columnOffset,
-        ?string $groupLine = null,
         bool $cellHasBpIcon = false,
     ): string {
         $t = trim((string) $vidRaw);
@@ -412,7 +410,7 @@ class StartProtocolImportService
             return PerformanceApparatus::normalize($t) ?? $t;
         }
 
-        if ($cellHasBpIcon || PerformanceApparatus::isBodyOnlyStream($groupLine)) {
+        if ($cellHasBpIcon) {
             return PerformanceApparatus::BODY_ONLY_LABEL;
         }
 
