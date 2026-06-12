@@ -542,7 +542,13 @@ class ScoringSystemTest extends TestCase
         $this->assertTrue(PerformanceApparatus::isBodyOnly('б.п.'));
         $this->assertTrue(PerformanceApparatus::isBodyOnly('free'));
         $this->assertSame('БП', PerformanceApparatus::normalize('б/п'));
+        $this->assertSame('БП', PerformanceApparatus::normalize('B'));
+        $this->assertSame('БП', PerformanceApparatus::normalize('Б'));
+        $this->assertTrue(PerformanceApparatus::isBodyOnlyCellMarker('B'));
         $this->assertFalse(PerformanceApparatus::isBodyOnly('Мяч'));
+        $this->assertTrue(PerformanceApparatus::isExplicitApparatusLabel('Мяч'));
+        $this->assertFalse(PerformanceApparatus::isExplicitApparatusLabel('B'));
+        $this->assertFalse(PerformanceApparatus::isExplicitApparatusLabel('Вид 1'));
     }
 
     public function test_mixed_stream_bp_and_apparatus_per_performance(): void

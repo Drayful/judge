@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Support\ExcelBpIconDetector;
 use App\Support\PerformanceApparatus;
 use App\Models\Athlete;
 use App\Models\Category;
@@ -19,14 +18,10 @@ use Throwable;
 
 class StartProtocolImportService
 {
-    /** Первая колонка зоны видов / «рисунков» (H, далее I, J, …). */
-    private const VID_FIRST_COLUMN = 'H';
-
     /**
      * Очередь строк текущего потока (до смены «Поток»/«Группа»/конца листа).
-     * Число кругов по потоку: max(1, «N» из строки «Группа: … N вида», max непустых ячеек H+ по строкам, ширина колонок).
-     * У каждой участницы столько выступлений, сколько кругов; текст вида — из ячейки столбца k или «Вид k+1».
-     * Порядок: сначала все по колонке H, затем по I… (по стартовому внутри колонки).
+     * Число кругов и снаряды — только из названия группы («N вида», «Б.П.», «Б.П.; 2 вида»).
+     * Порядок в очереди: сначала все по 1-му кругу, затем по 2-му… (по стартовому внутри круга).
      *
      * @var list<array{start:int,full_name:string,year:?int,club:string,vid_slots:list<array{offset:int,raw:string}>,group_line:?string}>
      */
@@ -39,11 +34,9 @@ class StartProtocolImportService
      */
     private array $importBaseOccurrence = [];
 
-    private ?ExcelBpIconDetector $bpIconDetector = null;
-
     /**
      * Импортирует стартовый протокол Excel: блоки «Группа: …», «Поток N …», строки участниц.
-     * От H вправо непустые ячейки задают подписи видов; число кругов — по потоку (см. выше). Стартовый № в B или C.
+     * Снаряды и число кругов — только из строки «Группа: …». Стартовый № в A, B или C.
      *
      * @return array{categories_created:int, categories_reused:int, athletes_created:int, performances_created:int, rows_skipped:int}
      */
@@ -60,8 +53,6 @@ class StartProtocolImportService
         }
 
         $sheet = $spreadsheet->getActiveSheet();
-        $this->bpIconDetector = new ExcelBpIconDetector;
-        $this->bpIconDetector->indexSheet($sheet, self::VID_FIRST_COLUMN);
         $highestRow = (int) $sheet->getHighestRow();
 
         $currentGroup = null;
@@ -79,14 +70,14 @@ class StartProtocolImportService
 
         DB::transaction(function () use ($sheet, $highestRow, $tournament, &$currentGroup, &$groupApparatus, &$groupBirthYear, &$currentCategory, &$stats) {
             for ($row = 1; $row <= $highestRow; $row++) {
-                $b = $this->cellStr($sheet, $row, 'B');
+                $line = $this->findGroupOrStreamLine($sheet, $row);
 
-                if ($b !== '' && str_contains($b, 'Группа:')) {
+                if ($line !== '' && str_contains($line, 'Группа:')) {
                     $this->flushStreamBuffer($currentCategory, $currentGroup, $stats);
-                    if (preg_match('/Группа:\s*(.+)/u', $b, $m)) {
+                    if (preg_match('/Группа:\s*(.+)/u', $line, $m)) {
                         $currentGroup = trim($m[1]);
                     } else {
-                        $currentGroup = trim($b);
+                        $currentGroup = trim($line);
                     }
                     $groupApparatus = $this->extractApparatusLabel($currentGroup);
                     $groupBirthYear = $this->extractBirthYear($currentGroup);
@@ -95,13 +86,13 @@ class StartProtocolImportService
                     continue;
                 }
 
-                if ($b !== '' && preg_match('/Поток\s+(\d+)/u', $b, $m)) {
+                if ($line !== '' && preg_match('/Поток\s+(\d+)/u', $line, $m)) {
                     $this->flushStreamBuffer($currentCategory, $currentGroup, $stats);
 
                     $streamNo = (int) $m[1];
 
                     $streamTime = null;
-                    if (preg_match('/(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})/u', $b, $tm)) {
+                    if (preg_match('/(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})/u', $line, $tm)) {
                         $streamTime = $tm[1];
                     }
 
@@ -154,7 +145,6 @@ class StartProtocolImportService
                     'full_name' => $parsed['full_name'],
                     'year' => $parsed['year'],
                     'club' => $parsed['club'],
-                    'vid_slots' => $parsed['vid_slots'],
                     'group_line' => $currentGroup,
                 ];
             }
@@ -166,31 +156,22 @@ class StartProtocolImportService
     }
 
     /**
-     * @return array{start:int,full_name:string,year:?int,club:string,vid_slots:list<array{offset:int,raw:string}>}|null
+     * @return array{start:int,full_name:string,year:?int,club:string}|null
      */
     private function parseAthleteRow(Worksheet $sheet, int $row): ?array
     {
-        $b = $this->cellStr($sheet, $row, 'B');
-        $c = $this->cellStr($sheet, $row, 'C');
-
-        $startColIdx = null;
-        if ($this->parseInt($b) !== null) {
-            $startColIdx = Coordinate::columnIndexFromString('B');
-        } elseif ($this->parseInt($c) !== null) {
-            $startColIdx = Coordinate::columnIndexFromString('C');
-        } else {
+        $startColIdx = $this->detectStartColumnIndex($sheet, $row);
+        if ($startColIdx === null) {
             return null;
         }
 
         $startNum = $this->parseInt($this->cellStr($sheet, $row, Coordinate::stringFromColumnIndex($startColIdx)));
-        if ($startNum === null) {
+        if ($startNum === null || $startNum < 1 || $startNum > 999) {
             return null;
         }
 
         $nameColIdx = $startColIdx + 1;
-        $yearColIdx = $startColIdx + 2;
-        $clubColIdx = $startColIdx + 3;
-        $vidStartIdx = Coordinate::columnIndexFromString(self::VID_FIRST_COLUMN);
+        [$yearColIdx, $clubColIdx] = $this->resolveYearClubColumnIndices($sheet, $row, $nameColIdx);
 
         $name = $this->cellStr($sheet, $row, Coordinate::stringFromColumnIndex($nameColIdx));
         $yearRaw = $sheet->getCell(Coordinate::stringFromColumnIndex($yearColIdx).$row)->getValue();
@@ -200,30 +181,11 @@ class StartProtocolImportService
             return null;
         }
 
-        $year = $this->parseYear($yearRaw);
-
-        $sheetHigh = Coordinate::columnIndexFromString($sheet->getHighestColumn());
-        $lastIdx = max($vidStartIdx, $sheetHigh);
-        $vidSlots = [];
-        for ($ci = $vidStartIdx; $ci <= $lastIdx; $ci++) {
-            $offset = $ci - $vidStartIdx;
-            $cell = $this->cellStr($sheet, $row, Coordinate::stringFromColumnIndex($ci));
-            $bpIcon = $this->bpIconDetector?->cellHasBpIcon($row, $offset) ?? false;
-            if ($cell !== '' || $bpIcon) {
-                $vidSlots[] = [
-                    'offset' => $offset,
-                    'raw' => $cell,
-                    'bp_icon' => $bpIcon,
-                ];
-            }
-        }
-
         return [
             'start' => $startNum,
             'full_name' => $name,
-            'year' => $year,
+            'year' => $this->parseYear($yearRaw),
             'club' => $club,
-            'vid_slots' => $vidSlots,
         ];
     }
 
@@ -241,21 +203,23 @@ class StartProtocolImportService
         $groupLine = $currentGroup ?? '';
         $this->importBaseOccurrence = [];
 
-        $roundCount = $this->resolveStreamRoundCount($this->streamRowBuffer, $groupLine);
+        Performance::query()
+            ->where('category_id', $currentCategory->id)
+            ->where('status', 'scheduled')
+            ->delete();
+
+        $apparatusLabels = PerformanceApparatus::apparatusLabelsFromGroupName($groupLine);
 
         $expanded = [];
         foreach ($this->streamRowBuffer as $r) {
-            $line = $r['group_line'] ?? $groupLine;
-            for ($k = 0; $k < $roundCount; $k++) {
+            foreach ($apparatusLabels as $roundIndex => $apparatusBase) {
                 $expanded[] = [
                     'start' => $r['start'],
                     'full_name' => $r['full_name'],
                     'year' => $r['year'],
                     'club' => $r['club'],
-                    'vid_raw' => $this->slotRawAtOffset($r['vid_slots'], $k),
-                    'bp_icon' => $this->slotBpIconAtOffset($r['vid_slots'], $k),
-                    'column_offset' => $k,
-                    'group_line' => $line,
+                    'round_index' => $roundIndex,
+                    'apparatus_base' => $apparatusBase,
                 ];
             }
         }
@@ -275,11 +239,7 @@ class StartProtocolImportService
 
             $athlete = $this->resolveAthlete($lastName, $firstName, $birthdate, $item['club'], $stats);
 
-            $base = $this->resolveApparatusLabelForImport(
-                $item['vid_raw'],
-                (int) $item['column_offset'],
-                (bool) ($item['bp_icon'] ?? false),
-            );
+            $base = (string) $item['apparatus_base'];
 
             if (!isset($this->importBaseOccurrence[$athlete->id])) {
                 $this->importBaseOccurrence[$athlete->id] = [];
@@ -328,7 +288,7 @@ class StartProtocolImportService
     private function orderRowsByColumnOffsetThenStart(array $rows): array
     {
         usort($rows, function ($a, $b) {
-            $c = $a['column_offset'] <=> $b['column_offset'];
+            $c = $a['round_index'] <=> $b['round_index'];
             if ($c !== 0) {
                 return $c;
             }
@@ -340,81 +300,54 @@ class StartProtocolImportService
     }
 
     /**
-     * Сколько кругов в этом потоке: не меньше объявленного в «Группа: … N вида», не меньше фактических колонок H+.
-     *
-     * @param  list<array{vid_slots:list<array{offset:int,raw:string}>}>  $buffer
+     * Строка «Группа» / «Поток» может быть в A, B или C (объединённые ячейки).
      */
-    private function resolveStreamRoundCount(array $buffer, string $groupLine): int
+    private function findGroupOrStreamLine(Worksheet $sheet, int $row): string
     {
-        $nFromGroup = $this->extractVidCountFromGroup($groupLine) ?? 0;
-        $maxSlotsPerRow = 0;
-        $maxOffset = -1;
-        foreach ($buffer as $r) {
-            $slots = $r['vid_slots'] ?? [];
-            $maxSlotsPerRow = max($maxSlotsPerRow, count($slots));
-            foreach ($slots as $slot) {
-                $maxOffset = max($maxOffset, (int) $slot['offset']);
+        foreach (['A', 'B', 'C', 'D'] as $col) {
+            $v = $this->cellStr($sheet, $row, $col);
+            if ($v === '') {
+                continue;
+            }
+            if (str_contains($v, 'Группа:') || preg_match('/Поток\s+\d+/u', $v)) {
+                return $v;
             }
         }
-        $nFromSpan = $maxOffset >= 0 ? $maxOffset + 1 : 0;
 
-        return max(1, $nFromGroup, $maxSlotsPerRow, $nFromSpan);
+        return '';
     }
 
     /**
-     * Число видов из строки группы («2 вида», «… 3 вида …»).
+     * Стартовый №: колонка A, B или C (в протоколах чаще A или B).
      */
-    private function extractVidCountFromGroup(string $groupLine): ?int
+    private function detectStartColumnIndex(Worksheet $sheet, int $row): ?int
     {
-        if (preg_match('/(\d+)\s*вид/u', $groupLine, $m)) {
-            $n = (int) $m[1];
-            if ($n >= 1 && $n <= 50) {
-                return $n;
+        foreach (['A', 'B', 'C'] as $col) {
+            $val = $this->cellStr($sheet, $row, $col);
+            $n = $this->parseInt($val);
+            if ($n !== null && $n >= 1 && $n <= 999) {
+                return Coordinate::columnIndexFromString($col);
             }
         }
 
         return null;
     }
 
-    private function slotRawAtOffset(array $vidSlots, int $offset): ?string
+    /**
+     * Год рождения и клуб: ищем 4-значный год в 1–4 колонках после ФИО (пропуск пустой C).
+     *
+     * @return array{0:int,1:int}
+     */
+    private function resolveYearClubColumnIndices(Worksheet $sheet, int $row, int $nameColIdx): array
     {
-        foreach ($vidSlots as $slot) {
-            if ((int) $slot['offset'] === $offset) {
-                $t = trim((string) ($slot['raw'] ?? ''));
-
-                return $t !== '' ? $t : null;
+        for ($ci = $nameColIdx + 1; $ci <= $nameColIdx + 4; $ci++) {
+            $val = $sheet->getCell(Coordinate::stringFromColumnIndex($ci).$row)->getValue();
+            if ($this->parseYear($val) !== null) {
+                return [$ci, $ci + 1];
             }
         }
 
-        return null;
-    }
-
-    private function slotBpIconAtOffset(array $vidSlots, int $offset): bool
-    {
-        foreach ($vidSlots as $slot) {
-            if ((int) $slot['offset'] === $offset) {
-                return (bool) ($slot['bp_icon'] ?? false);
-            }
-        }
-
-        return false;
-    }
-
-    private function resolveApparatusLabelForImport(
-        ?string $vidRaw,
-        int $columnOffset,
-        bool $cellHasBpIcon = false,
-    ): string {
-        $t = trim((string) $vidRaw);
-        if ($t !== '') {
-            return PerformanceApparatus::normalize($t) ?? $t;
-        }
-
-        if ($cellHasBpIcon) {
-            return PerformanceApparatus::BODY_ONLY_LABEL;
-        }
-
-        return 'Вид '.($columnOffset + 1);
+        return [$nameColIdx + 2, $nameColIdx + 3];
     }
 
     private function resolveAthlete(string $lastName, string $firstName, ?Carbon $birthdate, string $clubFromRow, array &$stats): Athlete
