@@ -9,6 +9,7 @@ use App\Models\Performance;
 use App\Models\Tournament;
 use App\Models\User;
 use App\Services\FinalProtocolService;
+use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -49,7 +50,7 @@ class ScoringSystemTest extends TestCase
         ], $overrides));
     }
 
-    private function makePerformance(Category $category, ?Athlete $athlete = null, int $order = 0): Performance
+    private function makePerformance(Category $category, ?Athlete $athlete = null, int $order = 0, ?string $apparatus = null): Performance
     {
         $athlete ??= Athlete::forceCreate([
             'first_name' => 'Имя',
@@ -64,6 +65,7 @@ class ScoringSystemTest extends TestCase
             'order_index' => $order,
             'status' => 'performing',
             'is_counted' => true,
+            'apparatus' => $apparatus,
         ]);
     }
 
@@ -459,6 +461,103 @@ class ScoringSystemTest extends TestCase
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertFalse($report['has_violation'], 'пока не все A-судьи выставили — не блокируем');
+    }
+
+    public function test_body_only_d_uses_trimmed_mean_of_four_judges(): void
+    {
+        $category = $this->makeCategory();
+        $perf = $this->makePerformance($category, apparatus: 'БП');
+
+        // 4.0, 5.0, 6.0, 7.0 -> drop 4.0 и 7.0 -> avg(5.0, 6.0) = 5.5
+        $this->addScore($perf, 'd', 7.0, 'db', null, 'DB2');
+        $this->addScore($perf, 'd', 4.0, 'db', null, 'DB1');
+        $this->addScore($perf, 'd', 6.0, 'db', null, 'DA2');
+        $this->addScore($perf, 'd', 5.0, 'db', null, 'DA1');
+
+        $this->addScore($perf, 'a', 8.0, null, null, 'A1');
+        $this->addScore($perf, 'a', 8.0, null, null, 'A2');
+        $this->addScore($perf, 'a', 8.0, null, null, 'A3');
+        $this->addScore($perf, 'a', 8.0, null, null, 'A4');
+        $this->addScore($perf, 'e', 7.0, null, null, 'E1');
+        $this->addScore($perf, 'e', 7.0, null, null, 'E2');
+        $this->addScore($perf, 'e', 7.0, null, null, 'E3');
+        $this->addScore($perf, 'e', 7.0, null, null, 'E4');
+
+        $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
+
+        $this->assertEqualsWithDelta(5.5, $perf->d_score, 0.0005, 'БП: trimmed mean по 4 судьям D');
+        $this->assertEqualsWithDelta(20.5, $perf->total, 0.0005, 'total = D + A + E');
+    }
+
+    public function test_body_only_spread_violation_across_four_d_judges(): void
+    {
+        $category = $this->makeCategory();
+        $perf = $this->makePerformance($category, apparatus: 'б.п.');
+        $this->fillBodyOnlyDScores($perf, [3.0, 4.0, 4.5, 5.5]);
+        $this->fillAeScores($perf);
+
+        $perf->load('judgeScores', 'category');
+        $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
+
+        $this->assertTrue($report['has_violation'], '3.0 vs 5.5 -> spread > 1.0 в объединённой D-панели БП');
+        $this->assertFalse(SecretaryLiveUi::readyToFinalize($perf, $category));
+        $this->assertContains('DB1', $report['violating_slots']);
+    }
+
+    public function test_body_only_spread_ok_within_one(): void
+    {
+        $category = $this->makeCategory();
+        $perf = $this->makePerformance($category, apparatus: 'БП');
+        $this->fillBodyOnlyDScores($perf, [5.0, 5.2, 5.4, 5.6]);
+        $this->fillAeScores($perf);
+
+        $perf->load('judgeScores', 'category');
+        $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
+
+        $this->assertFalse($report['has_violation']);
+        $this->assertTrue(SecretaryLiveUi::readyToFinalize($perf, $category));
+    }
+
+    private function fillBodyOnlyDScores(Performance $perf, array $scores): void
+    {
+        foreach (['DB1', 'DB2', 'DA1', 'DA2'] as $i => $slot) {
+            $this->addScore($perf, 'd', $scores[$i], 'db', null, $slot);
+        }
+    }
+
+    private function fillAeScores(Performance $perf): void
+    {
+        foreach (['A1', 'A2', 'A3', 'A4'] as $slot) {
+            $this->addScore($perf, 'a', 8.0, null, null, $slot);
+        }
+        foreach (['E1', 'E2', 'E3', 'E4'] as $slot) {
+            $this->addScore($perf, 'e', 7.0, null, null, $slot);
+        }
+    }
+
+    public function test_apparatus_normalize_bp_labels(): void
+    {
+        $this->assertTrue(PerformanceApparatus::isBodyOnly('БП'));
+        $this->assertTrue(PerformanceApparatus::isBodyOnly('б.п.'));
+        $this->assertTrue(PerformanceApparatus::isBodyOnly('free'));
+        $this->assertSame('БП', PerformanceApparatus::normalize('б/п'));
+        $this->assertFalse(PerformanceApparatus::isBodyOnly('Мяч'));
+    }
+
+    public function test_body_only_from_stream_name_when_vid_empty(): void
+    {
+        $category = $this->makeCategory(['name' => '2018 г.р., Б.П. — Поток 1']);
+        $perf = $this->makePerformance($category, apparatus: 'Вид 1');
+
+        $this->assertTrue($perf->isBodyOnlyApparatus());
+    }
+
+    public function test_body_only_stream_name_detection(): void
+    {
+        $this->assertTrue(PerformanceApparatus::isBodyOnlyStream('2018 г.р., C, Б.П.'));
+        $this->assertTrue(PerformanceApparatus::isBodyOnlyStream('2020 г.р., Б. П. — Поток 5'));
+        $this->assertFalse(PerformanceApparatus::isBodyOnlyStream('2018 г.р., C, 1 вид'));
     }
 
     public function test_groups_lists_year_division_with_athlete_count(): void

@@ -13,6 +13,7 @@ use App\Services\FinalProtocolService;
 use App\Services\MusicTrackUploadService;
 use App\Services\StartProtocolImportService;
 use App\Services\StreamAdvanceService;
+use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -635,7 +636,7 @@ class SecretaryController extends Controller
         Performance::query()->create([
             'category_id' => $category->id,
             'athlete_id' => (int) $data['athlete_id'],
-            'apparatus' => $data['apparatus'] ?? null,
+            'apparatus' => PerformanceApparatus::normalize($data['apparatus'] ?? null),
             'start_number' => $data['start_number'] ?? null,
             'order_index' => $orderIndex,
             'status' => 'scheduled',

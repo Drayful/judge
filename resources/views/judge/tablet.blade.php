@@ -25,6 +25,10 @@
     $isHeadJudge = $authUser && in_array($authUser->role, ['head_judge', 'superior_jury', 'admin', 'super_admin'], true);
     $ageMin = $category->age_min;
     $ageMax = $category->age_max;
+    $isBpBodyTablet = $current
+        && $current->isBodyOnlyApparatus()
+        && in_array($slot, ['DA1', 'DA2'], true)
+        && ($panel['subpanel'] ?? null) === 'db';
 @endphp
 
 @section('content')
@@ -89,6 +93,11 @@
                     </div>
                 </div>
             @else
+                @if($isBpBodyTablet)
+                    <div class="shrink-0 rounded-lg border border-cyan-700/60 bg-cyan-950/40 px-3 py-1.5 text-xs text-cyan-100">
+                        БП (без предмета): планшет трудности тела — оценка войдёт в общий расчёт D вместе с DB1 и DB2.
+                    </div>
+                @endif
                 @if($myScore && $myScore->submitted_at === null && is_array($myScore->entries) && count($myScore->entries) > 0)
                     <div class="shrink-0 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-100">
                         Оценка возвращена на доработку — исправьте при необходимости и отправьте снова.

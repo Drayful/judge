@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\ExcelBpIconDetector;
+use App\Support\PerformanceApparatus;
 use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\Performance;
@@ -37,6 +39,8 @@ class StartProtocolImportService
      */
     private array $importBaseOccurrence = [];
 
+    private ?ExcelBpIconDetector $bpIconDetector = null;
+
     /**
      * Импортирует стартовый протокол Excel: блоки «Группа: …», «Поток N …», строки участниц.
      * От H вправо непустые ячейки задают подписи видов; число кругов — по потоку (см. выше). Стартовый № в B или C.
@@ -56,6 +60,8 @@ class StartProtocolImportService
         }
 
         $sheet = $spreadsheet->getActiveSheet();
+        $this->bpIconDetector = new ExcelBpIconDetector;
+        $this->bpIconDetector->indexSheet($sheet, self::VID_FIRST_COLUMN);
         $highestRow = (int) $sheet->getHighestRow();
 
         $currentGroup = null;
@@ -200,11 +206,14 @@ class StartProtocolImportService
         $lastIdx = max($vidStartIdx, $sheetHigh);
         $vidSlots = [];
         for ($ci = $vidStartIdx; $ci <= $lastIdx; $ci++) {
+            $offset = $ci - $vidStartIdx;
             $cell = $this->cellStr($sheet, $row, Coordinate::stringFromColumnIndex($ci));
-            if ($cell !== '') {
+            $bpIcon = $this->bpIconDetector?->cellHasBpIcon($row, $offset) ?? false;
+            if ($cell !== '' || $bpIcon) {
                 $vidSlots[] = [
-                    'offset' => $ci - $vidStartIdx,
+                    'offset' => $offset,
                     'raw' => $cell,
+                    'bp_icon' => $bpIcon,
                 ];
             }
         }
@@ -244,6 +253,7 @@ class StartProtocolImportService
                     'year' => $r['year'],
                     'club' => $r['club'],
                     'vid_raw' => $this->slotRawAtOffset($r['vid_slots'], $k),
+                    'bp_icon' => $this->slotBpIconAtOffset($r['vid_slots'], $k),
                     'column_offset' => $k,
                     'group_line' => $line,
                 ];
@@ -265,7 +275,12 @@ class StartProtocolImportService
 
             $athlete = $this->resolveAthlete($lastName, $firstName, $birthdate, $item['club'], $stats);
 
-            $base = $this->resolveApparatusLabelForImport($item['vid_raw'], (int) $item['column_offset']);
+            $base = $this->resolveApparatusLabelForImport(
+                $item['vid_raw'],
+                (int) $item['column_offset'],
+                $item['group_line'] ?? $groupLine,
+                (bool) ($item['bp_icon'] ?? false),
+            );
 
             if (!isset($this->importBaseOccurrence[$athlete->id])) {
                 $this->importBaseOccurrence[$athlete->id] = [];
@@ -375,11 +390,30 @@ class StartProtocolImportService
         return null;
     }
 
-    private function resolveApparatusLabelForImport(?string $vidRaw, int $columnOffset): string
+    private function slotBpIconAtOffset(array $vidSlots, int $offset): bool
     {
+        foreach ($vidSlots as $slot) {
+            if ((int) $slot['offset'] === $offset) {
+                return (bool) ($slot['bp_icon'] ?? false);
+            }
+        }
+
+        return false;
+    }
+
+    private function resolveApparatusLabelForImport(
+        ?string $vidRaw,
+        int $columnOffset,
+        ?string $groupLine = null,
+        bool $cellHasBpIcon = false,
+    ): string {
         $t = trim((string) $vidRaw);
         if ($t !== '') {
-            return $t;
+            return PerformanceApparatus::normalize($t) ?? $t;
+        }
+
+        if ($cellHasBpIcon || PerformanceApparatus::isBodyOnlyStream($groupLine)) {
+            return PerformanceApparatus::BODY_ONLY_LABEL;
         }
 
         return 'Вид '.($columnOffset + 1);

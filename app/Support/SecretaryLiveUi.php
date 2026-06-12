@@ -26,6 +26,32 @@ class SecretaryLiveUi
         ['key' => 'e', 'label' => 'E (исполнение)', 'slots' => ['E1', 'E2', 'E3', 'E4']],
     ];
 
+    /** Слоты D-бригады для расчёта итога. */
+    public const D_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2'];
+
+    /**
+     * Панели для проверки разброса: при БП DB+DA объединяются в одну четвёрку.
+     *
+     * @return array<int, array{key: string, label: string, slots: array<int, string>}>
+     */
+    public static function spreadPanelsFor(?Performance $perf, ?Category $category = null): array
+    {
+        if ($perf && $perf->isBodyOnlyApparatus()) {
+            $panels = [
+                ['key' => 'd_bp', 'label' => 'D (БП, трудность тела)', 'slots' => self::D_JUDGE_SLOTS],
+            ];
+            foreach (self::SPREAD_PANELS as $panel) {
+                if (! in_array($panel['key'], ['db', 'da'], true)) {
+                    $panels[] = $panel;
+                }
+            }
+
+            return $panels;
+        }
+
+        return self::SPREAD_PANELS;
+    }
+
     /**
      * Список неактивных слотов для категории (или пустой массив).
      *
@@ -245,7 +271,7 @@ class SecretaryLiveUi
         $violatingSlots = [];
         $panels = [];
 
-        foreach (self::SPREAD_PANELS as $panel) {
+        foreach (self::spreadPanelsFor($perf, $category) as $panel) {
             $activeSlots = array_values(array_filter(
                 $panel['slots'],
                 fn (string $slot) => ! in_array($slot, $inactive, true),

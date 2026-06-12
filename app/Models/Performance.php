@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\PerformanceApparatus;
+use App\Support\SecretaryLiveUi;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -112,12 +114,16 @@ class Performance extends Model
         // в т.ч. валидные 0.0. Используем явное «не null».
         $notNull = static fn ($v) => $v !== null;
 
-        $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter($notNull)->values();
-        $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter($notNull)->values();
+        if ($this->isBodyOnlyApparatus()) {
+            $d = $this->calculateBodyOnlyDScore();
+        } else {
+            $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter($notNull)->values();
+            $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter($notNull)->values();
 
-        $db = $dDb->count() ? (float) $dDb->avg() : null;
-        $da = $dDa->count() ? (float) $dDa->avg() : null;
-        $d = ($db !== null && $da !== null) ? ($db + $da) : null;
+            $db = $dDb->count() ? (float) $dDb->avg() : null;
+            $da = $dDa->count() ? (float) $dDa->avg() : null;
+            $d = ($db !== null && $da !== null) ? ($db + $da) : null;
+        }
 
         $aVals = $scores->where('panel', 'a')->pluck('score')->filter($notNull)->sort()->values();
         $eVals = $scores->where('panel', 'e')->pluck('score')->filter($notNull)->sort()->values();
@@ -155,5 +161,66 @@ class Performance extends Model
         } else {
             $this->total = null;
         }
+    }
+
+    public function isBodyOnlyApparatus(): bool
+    {
+        $this->loadMissing('category');
+
+        return PerformanceApparatus::isBodyOnly($this->apparatus, $this->category?->name);
+    }
+
+    /**
+     * БП: 4 оценки DB1/DB2/DA1/DA2 → сортировка, отбрасываем min/max, среднее двух центральных.
+     */
+    private function calculateBodyOnlyDScore(): ?float
+    {
+        $this->loadMissing('category');
+        $inactive = SecretaryLiveUi::inactiveSlots($this->category);
+        $rows = SecretaryLiveUi::scoreRowsBySlot($this, $this->category);
+
+        $activeSlots = array_values(array_filter(
+            SecretaryLiveUi::D_JUDGE_SLOTS,
+            fn (string $slot) => ! in_array($slot, $inactive, true),
+        ));
+
+        if ($activeSlots === []) {
+            return null;
+        }
+
+        $vals = collect($activeSlots)
+            ->map(function (string $slot) use ($rows) {
+                $row = $rows[$slot] ?? null;
+                if ($row === null || $row->submitted_at === null || $row->score === null) {
+                    return null;
+                }
+
+                return (float) $row->score;
+            });
+
+        if ($vals->contains(null)) {
+            return null;
+        }
+
+        $sorted = $vals->sort()->values();
+        $count = $sorted->count();
+
+        if ($count >= 4) {
+            $mid = $sorted->slice(1, $count - 2);
+
+            return (float) $mid->avg();
+        }
+
+        if ($count >= 3) {
+            $mid = $sorted->slice(1, $count - 2);
+
+            return (float) $mid->avg();
+        }
+
+        if ($count >= 2) {
+            return (float) $sorted->avg();
+        }
+
+        return (float) $sorted->first();
     }
 }

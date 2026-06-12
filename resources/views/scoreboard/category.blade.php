@@ -8,6 +8,7 @@
             'ribbon' => 'Лента',
             'rope'   => 'Скакалка',
             'free'   => 'Б/П',
+            'бп'     => 'Б/П',
         ];
         $categoryApparatus = $category->apparatus
             ? ($apparatusLabels[strtolower($category->apparatus)] ?? $category->apparatus)

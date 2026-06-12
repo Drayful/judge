@@ -140,7 +140,7 @@ class JudgeController extends Controller
         $user = request()->user();
         $panel = $user?->judgePanel();
         $myScore = ($current && $panel)
-            ? $this->findMyScore($current, $user, $panel)
+            ? $this->findMyScore($current, $user, $this->effectiveJudgePanel($current, $panel))
             : null;
 
         return response()->json([
@@ -239,6 +239,7 @@ class JudgeController extends Controller
             $request->validate([
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
             ]);
+            $panel = $this->effectiveJudgePanel($performance, $panel);
             $panelKey = $panel['panel'];
             $subpanel = $panel['subpanel'] ?? null;
             $penaltyType = $panel['penalty_type'] ?? null;
@@ -414,6 +415,10 @@ class JudgeController extends Controller
         $current = SecretaryLiveUi::currentPerformance($ordered);
         $streamStatus = SecretaryLiveUi::streamStatus($current);
 
+        if ($current) {
+            $panel = $this->effectiveJudgePanel($current, $panel);
+        }
+
         $myScore = $current ? $this->findMyScore($current, $user, $panel) : null;
 
         $rules = $category->scoring_rules ?? [];
@@ -431,6 +436,20 @@ class JudgeController extends Controller
             'aBase' => $aBase,
             'eBase' => $eBase,
         ]);
+    }
+
+    /**
+     * БП (без предмета): DA-судьи выставляют оценку на планшете DB (subpanel=db).
+     */
+    private function effectiveJudgePanel(Performance $performance, array $panel): array
+    {
+        if (($panel['panel'] ?? null) === 'd'
+            && ($panel['subpanel'] ?? null) === 'da'
+            && $performance->isBodyOnlyApparatus()) {
+            return array_merge($panel, ['subpanel' => 'db']);
+        }
+
+        return $panel;
     }
 
     /**
