@@ -104,6 +104,11 @@ class User extends Authenticatable
 
     public function isAnyJudge(): bool
     {
-        return $this->judgePanel() !== null || in_array($this->role, ['head_judge', 'superior_jury', 'chief_judge'], true) || $this->isAdmin();
+        // Главный судья не судит с планшета — только проверяет оценки в Live.
+        if ($this->isChiefJudge()) {
+            return false;
+        }
+
+        return $this->judgePanel() !== null || in_array($this->role, ['head_judge', 'superior_jury'], true) || $this->isAdmin();
     }
 }
