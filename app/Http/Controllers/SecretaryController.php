@@ -163,18 +163,22 @@ class SecretaryController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'program' => ['required', 'string', 'in:individual,group'],
             'apparatus' => ['nullable', 'string', 'max:64'],
-            'age_min' => ['nullable', 'integer', 'min:0', 'max:150'],
-            'age_max' => ['nullable', 'integer', 'min:0', 'max:150'],
+            'birth_year' => ['required', 'integer', 'min:1990', 'max:2035'],
+            'division' => ['nullable', 'string', 'max:16'],
             'is_published' => ['nullable', 'boolean'],
         ]);
+
+        $division = isset($data['division']) && trim($data['division']) !== ''
+            ? strtoupper(trim($data['division']))
+            : null;
 
         $category = Category::query()->create([
             'tournament_id' => $tournament->id,
             'name' => $data['name'],
             'program' => $data['program'],
             'apparatus' => $data['apparatus'] ?? null,
-            'age_min' => $data['age_min'] ?? null,
-            'age_max' => $data['age_max'] ?? null,
+            'birth_year' => (int) $data['birth_year'],
+            'division' => $division,
             'is_published' => (bool) ($data['is_published'] ?? false),
         ]);
 

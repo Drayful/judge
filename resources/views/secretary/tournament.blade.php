@@ -89,8 +89,8 @@
                 <form method="POST" action="{{ route('secretary.tournament.categories.store', $tr) }}" class="grid grid-cols-1 md:grid-cols-6 gap-3 mb-6">
                     @csrf
                     <div class="md:col-span-2">
-                        <x-input-label value="Название категории" />
-                        <x-text-input name="name" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 placeholder:text-slate-500" required placeholder="Напр. Juniors – Hoop" />
+                        <x-input-label value="Название потока" />
+                        <x-text-input name="name" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 placeholder:text-slate-500" required placeholder="2015 г.р., B · Мяч — Поток 1" />
                     </div>
                     <div>
                         <x-input-label value="Программа" />
@@ -104,12 +104,18 @@
                         <x-text-input name="apparatus" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" placeholder="hoop/ball/..." />
                     </div>
                     <div>
-                        <x-input-label value="Возраст от" />
-                        <x-text-input name="age_min" type="number" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        <x-input-label value="Год рождения" />
+                        <x-text-input name="birth_year" type="number" min="1990" max="2035" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" required placeholder="2015" />
+                        <p class="mt-1 text-xs text-slate-500">Группа для итога и табло</p>
                     </div>
                     <div>
-                        <x-input-label value="Возраст до" />
-                        <x-text-input name="age_max" type="number" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        <x-input-label value="Категория" />
+                        <select name="division" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
+                            <option value="">— без буквы —</option>
+                            @foreach(['A', 'B', 'C', 'D'] as $div)
+                                <option value="{{ $div }}">{{ $div }}</option>
+                            @endforeach
+                        </select>
                         <label class="mt-2 flex items-center gap-2 text-sm text-slate-300">
                             <input type="checkbox" name="is_published" value="1" class="rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500">
                             Опубликована
@@ -134,7 +140,7 @@
                                             <x-badge tone="gray">—</x-badge>
                                         @endif
                                         <span class="text-slate-400">
-                                            {{ $c->age_min ?? '—' }}–{{ $c->age_max ?? '—' }}
+                                            {{ $c->birth_year ?? $c->resolvedBirthYear() ?? '—' }} г.р.@if($c->division ?? $c->resolvedDivision()), кат. {{ $c->division ?? $c->resolvedDivision() }}@endif
                                         </span>
                                     </div>
                                 </div>
