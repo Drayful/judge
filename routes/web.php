@@ -167,5 +167,14 @@ Route::get('/scoreboard', [ScoreboardController::class, 'index'])
 Route::get('/scoreboard/categories/{category}', [ScoreboardController::class, 'category'])
     ->name('scoreboard.category');
 
+Route::get('/scoreboard/categories/{category}/table', [ScoreboardController::class, 'table'])
+    ->name('scoreboard.table');
+
 Route::get('/scoreboard/categories/{category}/live', [ScoreboardController::class, 'categoryLive'])
     ->name('scoreboard.category.live');
+
+Route::get('/scoreboard/categories/{category}/now', [ScoreboardController::class, 'performance'])
+    ->name('scoreboard.performance');
+
+Route::get('/scoreboard/categories/{category}/now/live', [ScoreboardController::class, 'performanceLive'])
+    ->name('scoreboard.performance.live');

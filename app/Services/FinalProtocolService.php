@@ -65,9 +65,52 @@ class FinalProtocolService
     /**
      * Строки итогового протокола одной группы.
      *
-     * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
+     * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
      */
-    public function build(Tournament $tournament, ?int $birthYear, ?string $division): array
+    public function build(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly = false): array
+    {
+        return $this->buildGroup($tournament, $birthYear, $division, $publishedOnly);
+    }
+
+    /**
+     * Итоговый протокол только по опубликованным результатам (публичное табло).
+     *
+     * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
+     */
+    public function buildPublished(Tournament $tournament, ?int $birthYear, ?string $division): array
+    {
+        return $this->buildGroup($tournament, $birthYear, $division, true);
+    }
+
+    /**
+     * @return array<int, array{athlete_id:int, place:int, name:string, club:string, total:float, vidi:list<float>}>
+     */
+    public function publishedAthletesById(Category $category): array
+    {
+        $category->loadMissing('tournament');
+        $tournament = $category->tournament;
+        if ($tournament === null) {
+            return [];
+        }
+
+        $data = $this->buildPublished(
+            $tournament,
+            $category->resolvedBirthYear(),
+            $category->resolvedDivision()
+        );
+
+        $map = [];
+        foreach ($data['rows'] as $row) {
+            $map[$row['athlete_id']] = $row;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
+     */
+    private function buildGroup(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly): array
     {
         $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
 
@@ -81,6 +124,7 @@ class FinalProtocolService
             ->whereIn('category_id', $categories->pluck('id'))
             ->whereNotNull('total')
             ->where('is_counted', true)
+            ->when($publishedOnly, fn ($q) => $q->whereNotNull('published_at'))
             ->orderBy('athlete_id')
             ->orderBy('order_index')
             ->orderBy('id')
@@ -104,6 +148,7 @@ class FinalProtocolService
             $total = round(array_sum($vidi), 3);
 
             $rows[] = [
+                'athlete_id' => $athlete->id,
                 'name' => trim(($athlete->last_name ?? '').' '.($athlete->first_name ?? '')),
                 'year' => $athlete->birthdate?->year ?? $birthYear,
                 'club' => trim((string) ($athlete->club ?? '')),

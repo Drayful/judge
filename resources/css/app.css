@@ -6,6 +6,142 @@
     .live-panel {
         @apply rounded-2xl border border-slate-700/90 bg-slate-900/75 shadow-xl shadow-black/35 backdrop-blur-sm;
     }
+
+    /* ——— Публичное табло ——— */
+    .sb-bg {
+        background:
+            radial-gradient(ellipse 80% 50% at 50% -10%, rgba(16, 185, 129, 0.12), transparent 55%),
+            radial-gradient(ellipse 60% 40% at 100% 100%, rgba(6, 182, 212, 0.08), transparent 50%),
+            linear-gradient(180deg, #020617 0%, #0f172a 45%, #020617 100%);
+    }
+
+    .sb-screen {
+        @apply relative flex flex-col h-dvh max-h-dvh overflow-hidden text-slate-100;
+    }
+
+    .sb-header {
+        @apply shrink-0 border-b border-white/5 bg-slate-950/80 backdrop-blur-md px-4 sm:px-8 py-4 sm:py-5;
+    }
+
+    .sb-main {
+        @apply relative flex-1 min-h-0 flex flex-col px-4 sm:px-8 py-3 sm:py-5 gap-4;
+    }
+
+    .sb-podium {
+        @apply shrink-0 grid grid-cols-3 gap-3 sm:gap-5 items-end;
+    }
+
+    .sb-podium-card {
+        @apply rounded-2xl border backdrop-blur-sm p-3 sm:p-5 text-center min-w-0 transition-shadow;
+    }
+
+    .sb-podium-card--gold {
+        @apply border-amber-500/40 bg-gradient-to-b from-amber-500/15 to-slate-900/80 shadow-lg shadow-amber-900/20 sm:pb-6 sm:-mt-2;
+    }
+
+    .sb-podium-card--silver {
+        @apply border-slate-400/30 bg-gradient-to-b from-slate-400/10 to-slate-900/70;
+    }
+
+    .sb-podium-card--bronze {
+        @apply border-orange-500/35 bg-gradient-to-b from-orange-500/10 to-slate-900/70;
+    }
+
+    .sb-medal {
+        @apply inline-flex items-center justify-center rounded-full font-bold tabular-nums;
+    }
+
+    .sb-medal--gold {
+        @apply bg-amber-400 text-amber-950 w-9 h-9 sm:w-11 sm:h-11 text-sm sm:text-base;
+    }
+
+    .sb-medal--silver {
+        @apply bg-slate-300 text-slate-900 w-8 h-8 sm:w-10 sm:h-10 text-sm;
+    }
+
+    .sb-medal--bronze {
+        @apply bg-orange-500 text-orange-950 w-8 h-8 sm:w-10 sm:h-10 text-sm;
+    }
+
+    .sb-rows {
+        @apply flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-1.5 sm:gap-2 pr-0.5;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+    }
+
+    .sb-row {
+        @apply grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_3rem_1fr_auto_auto] items-center gap-3 sm:gap-4
+            rounded-xl border border-slate-700/50 bg-slate-900/50 hover:bg-slate-800/40 px-3 sm:px-4 py-2.5 sm:py-3 transition-colors;
+    }
+
+    .sb-place {
+        @apply inline-flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full text-xs sm:text-sm font-bold tabular-nums;
+    }
+
+    .sb-total {
+        @apply text-lg sm:text-2xl font-bold tabular-nums text-teal-300;
+    }
+
+    .sb-footer {
+        @apply shrink-0 border-t border-white/5 bg-slate-950/80 px-4 sm:px-8 py-2 text-xs text-slate-500 flex justify-between;
+    }
+
+    /* Индивидуальное табло */
+    .sb-live-stage {
+        @apply flex-1 min-h-0 flex flex-col items-center justify-center px-4 sm:px-8 py-4;
+    }
+
+    .sb-place-hero {
+        @apply text-7xl sm:text-8xl lg:text-9xl font-black tabular-nums text-amber-300 leading-none tracking-tight;
+    }
+
+    .sb-athlete-name {
+        @apply text-3xl sm:text-5xl lg:text-6xl font-bold text-white tracking-tight leading-tight;
+    }
+
+    .sb-scores {
+        @apply grid grid-cols-5 gap-2 sm:gap-4 w-full max-w-4xl;
+    }
+
+    .sb-score-card {
+        @apply rounded-2xl border border-slate-600/40 bg-slate-900/60 backdrop-blur-sm px-2 py-3 sm:px-4 sm:py-5 text-center;
+    }
+
+    .sb-score-card--total {
+        @apply border-teal-500/40 bg-teal-950/30 ring-1 ring-teal-500/20;
+    }
+
+    .sb-score-label {
+        @apply text-[10px] sm:text-xs uppercase tracking-[0.15em] text-slate-500 font-medium;
+    }
+
+    .sb-score-value {
+        @apply mt-1 text-xl sm:text-3xl lg:text-4xl font-bold tabular-nums text-white leading-none;
+    }
+
+    .sb-score-value--total {
+        @apply text-teal-200;
+    }
+
+    .sb-score-value--penalty {
+        @apply text-rose-300;
+    }
+
+    .sb-btn {
+        @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium transition;
+    }
+
+    .sb-btn-primary {
+        @apply bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/30;
+    }
+
+    .sb-btn-ghost {
+        @apply border border-slate-600 bg-slate-900/50 text-slate-300 hover:text-white hover:border-slate-500;
+    }
+
+    .sb-btn-cyan {
+        @apply bg-cyan-600 hover:bg-cyan-500 text-white;
+    }
 }
 
 @layer utilities {
@@ -22,6 +158,55 @@
     }
     .live-pulse {
         animation: live-pulse 1.8s ease-in-out infinite;
+    }
+
+    /* Табло: без прокрутки, всё в экран */
+    .scoreboard-fit {
+        height: 100dvh;
+        max-height: 100dvh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    .scoreboard-fit-main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    .scoreboard-fit-rows {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-evenly;
+    }
+    .scoreboard-tv-hide {
+        display: none !important;
+    }
+    body.scoreboard-tv-mode {
+        overflow: hidden;
+    }
+    body.scoreboard-tv-mode .scoreboard-chrome {
+        display: none !important;
+    }
+    body.scoreboard-tv-mode .scoreboard-tv-stage {
+        height: 100dvh;
+        flex: 1 1 auto;
+        padding: clamp(0.75rem, 3vh, 2.5rem);
+    }
+    body.scoreboard-tv-mode #liveContent {
+        gap: clamp(1rem, 4vh, 3rem);
+    }
+
+    .sb-rows::-webkit-scrollbar {
+        width: 4px;
+    }
+    .sb-rows::-webkit-scrollbar-thumb {
+        background: rgba(100, 116, 139, 0.35);
+        border-radius: 4px;
     }
 }
 
