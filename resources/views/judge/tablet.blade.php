@@ -386,6 +386,29 @@
                 },
 
                 /**
+                 * DB: минимум по одному элементу без риска (прыжок, равновесие, поворот).
+                 * −0.3 за каждый отсутствующий тип; «Х» (notDone) всё равно снимает сбавку за отсутствие.
+                 */
+                dbMinElementsStatus() {
+                    const required = [
+                        { k: '^', label: 'Прыжок' },
+                        { k: 'T', label: 'Равновесие' },
+                        { k: '⚲', label: 'Поворот' },
+                    ];
+                    const presentKeys = new Set();
+                    for (const a of this.actions) {
+                        if (a.symbol && a.symbol !== 'R') {
+                            presentKeys.add(a.symbol);
+                        }
+                    }
+                    const items = required.map(s => ({ ...s, ok: presentKeys.has(s.k) }));
+                    const missing = items.filter(s => ! s.ok);
+                    const penalty = this.round3(missing.length * 0.3);
+
+                    return { items, missing, penalty };
+                },
+
+                /**
                  * DA: засчитываются максимум 12 (юниоры) / 15 (сеньоры) элементов
                  * в порядке ввода; акробатик среди них не больше 3.
                  * Несделанная акробатика («Х») занимает слот акробатики с 0 баллов.
@@ -481,7 +504,13 @@
                 finalScore() {
                     if (this.mode === 'add') {
                         if (this.panel === 'd') {
-                            return this.symbolFlow ? this.dbComputed().total : this.daComputed().total;
+                            if (this.symbolFlow) {
+                                const base = this.dbComputed().total;
+                                const penalty = this.dbMinElementsStatus().penalty;
+                                const r = this.round3(base - penalty);
+                                return r < 0 ? 0 : r;
+                            }
+                            return this.daComputed().total;
                         }
                         return this.totalDeduction();
                     }

@@ -73,6 +73,21 @@
         <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая оценка</div>
         <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="finalScore().toFixed(2)"></div>
 
+        {{-- Минимум по одному элементу без риска: −0.3 за отсутствующий тип --}}
+        <div class="mt-1 w-full">
+            <div class="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Мин. по 1 элементу</div>
+            <div class="flex flex-wrap justify-center gap-1 text-[10px]">
+                <template x-for="s in dbMinElementsStatus().items" :key="s.k">
+                    <span class="rounded px-1.5 py-0.5 border font-medium"
+                          :class="s.ok ? 'border-emerald-700/40 text-emerald-300/90 bg-emerald-950/25' : 'border-rose-700/40 text-rose-300 bg-rose-950/30'"
+                          x-text="s.label + (s.ok ? '' : ' −0.3')"></span>
+                </template>
+            </div>
+            <div x-show="dbMinElementsStatus().penalty > 0"
+                 class="mt-0.5 text-[10px] text-rose-300/90 font-mono tabular-nums"
+                 x-text="'Сбавка за отсутствие: −' + dbMinElementsStatus().penalty.toFixed(1)"></div>
+        </div>
+
         {{-- Зачёт: элементы с наивысшей стоимостью + лимит рисков --}}
         <div class="flex items-center gap-2 text-[10px] font-mono tabular-nums">
             <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
