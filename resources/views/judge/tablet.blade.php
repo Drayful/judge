@@ -29,6 +29,7 @@
         && $current->isBodyOnlyApparatus()
         && in_array($slot, ['DA1', 'DA2'], true)
         && ($panel['subpanel'] ?? null) === 'db';
+    $isGroupProgram = $category->program === 'group';
 @endphp
 
 @section('content')
@@ -112,6 +113,7 @@
                     :saved="$saved"
                     :entries="$myScore?->entries ?? []"
                     :age-group="$myScore?->age_group ?? 'junior'"
+                    :group-program="$isGroupProgram"
                     :tournament="$tournament"
                 />
             @endif
@@ -146,7 +148,10 @@
                 pendingSymbol: null,         // { symbol, label }
                 _hintT: null,
                 symbolFlow: opts.panel === 'd' && opts.subpanel === 'db', // DB: символ → значение
-                acroPending: false,          // DA: следующий балл — акробатика
+                groupDaFlow: !! opts.groupProgram && opts.subpanel === 'da', // DA группа: DC → значение
+                groupProgram: !! opts.groupProgram,
+                acroPending: false,          // DA индивид.: следующий балл — акробатика
+                pendingDc: null,             // DA группа: { symbol, label }
 
                 // Возрастная группа: лимиты зачёта элементов для бригад DB/DA
                 ageGroup: 'junior',          // 'junior' | 'senior'
@@ -155,9 +160,17 @@
                         junior: { elements: 6, risks: 3 },
                         senior: { elements: 8, risks: 4 },
                     },
+                    groupDb: {
+                        junior: { elements: 6, dbMax: 3, deMax: 3, dbMin: 0, deMin: 0, risks: 1 },
+                        senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4, risks: 1 },
+                    },
                     da: {
                         junior: { elements: 12, acro: 3 },
                         senior: { elements: 15, acro: 3 },
+                    },
+                    groupDa: {
+                        junior: { elementsMin: 6, elementsMax: 10, ccMin: 2, crMin: 2, multiMin: 2, acro: 3 },
+                        senior: { elementsMin: 9, elementsMax: 14, ccMin: 3, crMin: 3, multiMin: 3, acro: 3 },
                     },
                 },
 
@@ -218,6 +231,7 @@
                             cat: cat,
                             label: e.label || '',
                             symbol: e.symbol || null,
+                            exchange: e.exchange || null,
                             acro: !! e.acro,
                             combo: !! e.combo,
                             notDone: !! e.notDone,
@@ -284,8 +298,39 @@
                 // ====== DB-бригада: символ → значение / «не выполнен» ======
                 /** Выбрать символ элемента (прыжок, равновесие, поворот, риск). Значения пока нет. */
                 selectSymbol(symbol, label) {
-                    this.pendingSymbol = { symbol: symbol, label: label };
+                    let exchange = null;
+                    if (this.groupProgram && this.symbolFlow) {
+                        if (symbol === 'R') {
+                            exchange = null;
+                        } else if (symbol === 'DE') {
+                            exchange = 'de';
+                        } else {
+                            exchange = 'db';
+                        }
+                    }
+                    this.pendingSymbol = { symbol: symbol, label: label, exchange: exchange };
                     this.error = null;
+                },
+                historyLabel(a) {
+                    if (a.notDone) {
+                        if (a.symbol === 'DE' || a.exchange === 'de') {
+                            return 'DE Х·0';
+                        }
+                        if (a.exchange === 'db') {
+                            return (a.label || a.symbol) + ' (DB) Х·0';
+                        }
+                        return (a.label || a.symbol) + ' Х·0';
+                    }
+                    if (a.symbol === 'R') {
+                        return 'Риск ' + Number(a.v).toFixed(1);
+                    }
+                    if (a.symbol === 'DE' || a.exchange === 'de') {
+                        return 'DE ' + Number(a.v).toFixed(1);
+                    }
+                    if (a.exchange === 'db') {
+                        return (a.label || a.symbol) + ' (DB) ' + Number(a.v).toFixed(1);
+                    }
+                    return (a.symbol || '') + ' ' + Number(a.v).toFixed(1);
                 },
                 /** «Х» (DB) — элемент не выполнен: в историю символ с 0 баллов, на итог не влияет. */
                 markNotDone() {
@@ -297,6 +342,7 @@
                         v: 0,
                         symbol: this.pendingSymbol.symbol,
                         label: this.pendingSymbol.label,
+                        exchange: this.pendingSymbol.symbol === 'R' ? null : (this.pendingSymbol.exchange || 'db'),
                         notDone: true,
                         inTotal: false,
                     });
@@ -308,9 +354,30 @@
                 /** Включить/выключить режим «следующий балл — акробатика». */
                 toggleAcro() {
                     this.acroPending = ! this.acroPending;
+                    if (this.acroPending) {
+                        this.pendingDc = null;
+                    }
                     this.error = null;
                 },
-                /** «Х» (DA) — несделанная акробатика: занимает слот акробатики, даёт 0 баллов. */
+                /** Выбрать тип сотрудничества (CC, CR, C↗↗, C↓↓) для группового DA. */
+                selectDcType(symbol, label) {
+                    this.pendingDc = { symbol: symbol, label: label };
+                    this.acroPending = false;
+                    this.error = null;
+                },
+                dcDisplay(sym) {
+                    if (sym === 'C_UP') return 'C↗↗';
+                    if (sym === 'C_DOWN') return 'C↓↓';
+                    return sym || '';
+                },
+                daHistoryLabel(a) {
+                    const tag = this.dcDisplay(a.symbol) || (a.acro ? 'A' : '');
+                    if (a.notDone) {
+                        return tag + ' Х·0';
+                    }
+                    return tag + ' ' + Number(a.v).toFixed(1);
+                },
+                /** «Х» (DA индивид.) — несделанная акробатика. */
                 markAcroNotDone() {
                     this.acroPending = false;
                     this.actions.unshift({
@@ -320,6 +387,21 @@
                         label: 'Акробатика',
                     });
                     if (this.actions.length > 40) this.actions.pop();
+                },
+                /** «Х» (DA группа) — сотрудничество не выполнено: занимает слот DC, 0 баллов. */
+                markDcNotDone() {
+                    if (! this.pendingDc) {
+                        this.flashHint('Сначала выберите тип сотрудничества');
+                        return;
+                    }
+                    this.actions.unshift({
+                        v: 0,
+                        symbol: this.pendingDc.symbol,
+                        label: this.pendingDc.label,
+                        notDone: true,
+                    });
+                    if (this.actions.length > 40) this.actions.pop();
+                    this.pendingDc = null;
                 },
 
                 /** Присвоить значение: DB — выбранному символу; DA — акробатике или простому элементу. */
@@ -336,6 +418,7 @@
                             v: v,
                             symbol: this.pendingSymbol.symbol,
                             label: this.pendingSymbol.label,
+                            exchange: this.pendingSymbol.symbol === 'R' ? null : (this.pendingSymbol.exchange || 'db'),
                             notDone: false,
                         });
                         if (this.actions.length > 40) this.actions.pop();
@@ -343,7 +426,31 @@
                         return;
                     }
 
-                    // DA: акробатика или простое значение — зачёт решает daComputed()
+                    // DA группа: сотрудничество, акробатика или простой элемент
+                    if (this.groupDaFlow) {
+                        if (this.pendingDc) {
+                            this.actions.unshift({
+                                v: v,
+                                symbol: this.pendingDc.symbol,
+                                label: this.pendingDc.label,
+                                notDone: false,
+                            });
+                            if (this.actions.length > 40) this.actions.pop();
+                            this.pendingDc = null;
+                            return;
+                        }
+                        this.actions.unshift({
+                            v: v,
+                            acro: this.acroPending,
+                            notDone: false,
+                            label: this.acroPending ? 'Акробатика' : '',
+                        });
+                        this.acroPending = false;
+                        if (this.actions.length > 40) this.actions.pop();
+                        return;
+                    }
+
+                    // DA индивид.: акробатика или простое значение — зачёт решает daComputed()
                     this.actions.unshift({
                         v: v,
                         acro: this.acroPending,
@@ -357,13 +464,61 @@
                 // ====== Возрастная группа и зачёт элементов (DB/DA) ======
                 setAgeGroup(g) { this.ageGroup = g; },
                 dbLim() { return this.limits.db[this.ageGroup]; },
-                daLim() { return this.limits.da[this.ageGroup]; },
+                groupDbLim() { return this.limits.groupDb[this.ageGroup]; },
 
                 /**
-                 * DB: засчитываются только N элементов с наивысшей стоимостью
-                 * (юниоры 6 / сеньоры 8), рисков среди них не больше 3 / 4.
+                 * Групповые упражнения DB: зачёт по порядку ввода, лимиты DB/DE.
                  */
+                groupDbComputed() {
+                    const lim = this.groupDbLim();
+                    const counted = new Set();
+                    let used = 0, dbUsed = 0, deUsed = 0, risks = 0, total = 0;
+
+                    for (let i = this.actions.length - 1; i >= 0; i--) {
+                        const a = this.actions[i];
+                        if (a.notDone) continue;
+                        if (used >= lim.elements) continue;
+
+                        if (a.symbol === 'R') {
+                            if (risks >= lim.risks) continue;
+                            risks += 1;
+                            used += 1;
+                            counted.add(i);
+                            total += a.v;
+                            continue;
+                        }
+
+                        const ex = a.symbol === 'DE' ? 'de' : (a.exchange || (a.symbol && a.symbol !== 'R' ? 'db' : null));
+                        if (ex !== 'db' && ex !== 'de') continue;
+                        if (ex === 'db' && dbUsed >= lim.dbMax) continue;
+                        if (ex === 'de' && deUsed >= lim.deMax) continue;
+
+                        if (ex === 'db') dbUsed += 1;
+                        if (ex === 'de') deUsed += 1;
+                        used += 1;
+                        counted.add(i);
+                        total += a.v;
+                    }
+
+                    return {
+                        counted,
+                        total: this.round3(total),
+                        used,
+                        dbUsed,
+                        deUsed,
+                        risks,
+                        totalOver: used > lim.elements,
+                        dbOver: dbUsed > lim.dbMax,
+                        deOver: deUsed > lim.deMax,
+                        risksOver: risks > lim.risks,
+                    };
+                },
+
                 dbComputed() {
+                    if (this.groupProgram && this.symbolFlow) {
+                        return this.groupDbComputed();
+                    }
+
                     const lim = this.dbLim();
                     const items = this.actions
                         .map((a, i) => ({ a, i }))
@@ -385,6 +540,78 @@
                     return { counted, total: this.round3(total), used, risks };
                 },
 
+                daLim() { return this.limits.da[this.ageGroup]; },
+                groupDaLim() { return this.limits.groupDa[this.ageGroup]; },
+
+                isDcMulti(sym) {
+                    return sym === 'C_UP' || sym === 'C_DOWN';
+                },
+
+                /**
+                 * Групповые упражнения DA (DC): зачёт по порядку ввода, лимиты по типам.
+                 */
+                groupDaComputed() {
+                    const lim = this.groupDaLim();
+                    const counted = new Set();
+                    const dcSyms = ['CC', 'CR', 'C_UP', 'C_DOWN'];
+                    let used = 0, cc = 0, cr = 0, multi = 0, acro = 0, total = 0;
+
+                    for (let i = this.actions.length - 1; i >= 0; i--) {
+                        const a = this.actions[i];
+                        const sym = a.symbol;
+                        const isAcro = !! a.acro;
+                        const isDc = sym && dcSyms.includes(sym);
+
+                        if (a.notDone) {
+                            if (used >= lim.elementsMax) {
+                                continue;
+                            }
+                            if (isAcro && acro < lim.acro) {
+                                acro += 1;
+                                used += 1;
+                            } else if (isDc) {
+                                used += 1;
+                            }
+                            continue;
+                        }
+
+                        if (used >= lim.elementsMax) {
+                            continue;
+                        }
+
+                        if (isAcro) {
+                            if (acro >= lim.acro) {
+                                continue;
+                            }
+                            acro += 1;
+                            used += 1;
+                            counted.add(i);
+                            total += a.v;
+                        } else if (isDc) {
+                            used += 1;
+                            counted.add(i);
+                            total += a.v;
+                            if (sym === 'CC') cc += 1;
+                            else if (sym === 'CR') cr += 1;
+                            else if (this.isDcMulti(sym)) multi += 1;
+                        } else {
+                            used += 1;
+                            counted.add(i);
+                            total += a.v;
+                        }
+                    }
+
+                    return {
+                        counted,
+                        total: this.round3(total),
+                        used,
+                        cc,
+                        cr,
+                        multi,
+                        acro,
+                    };
+                },
+
                 /**
                  * DB: минимум по одному элементу без риска (прыжок, равновесие, поворот).
                  * −0.3 за каждый отсутствующий тип; «Х» (notDone) всё равно снимает сбавку за отсутствие.
@@ -397,7 +624,7 @@
                     ];
                     const presentKeys = new Set();
                     for (const a of this.actions) {
-                        if (a.symbol && a.symbol !== 'R') {
+                        if (a.symbol && a.symbol !== 'R' && a.symbol !== 'DE') {
                             presentKeys.add(a.symbol);
                         }
                     }
@@ -414,6 +641,10 @@
                  * Несделанная акробатика («Х») занимает слот акробатики с 0 баллов.
                  */
                 daComputed() {
+                    if (this.groupDaFlow) {
+                        return this.groupDaComputed();
+                    }
+
                     const lim = this.daLim();
                     const counted = new Set();
                     let acro = 0, used = 0, total = 0;
@@ -456,7 +687,11 @@
                         this.pendingSymbol = null;
                         return;
                     }
-                    // DA: режим акробатики включён, но значение не выбрано — выключаем.
+                    if (this.groupDaFlow && this.pendingDc) {
+                        this.pendingDc = null;
+                        return;
+                    }
+                    // DA индивид.: режим акробатики включён, но значение не выбрано — выключаем.
                     if (this.acroPending) {
                         this.acroPending = false;
                         return;
@@ -479,6 +714,7 @@
                     this.actions = [];
                     this.resetCats();
                     this.acroPending = false;
+                    this.pendingDc = null;
                     this.pendingSymbol = null;
                     this.error = null;
                 },
@@ -534,6 +770,7 @@
                             v: a.v,
                             label: a.label || null,
                             symbol: a.symbol || null,
+                            exchange: a.exchange || null,
                             acro: !! a.acro,
                             combo: !! a.combo,
                             notDone: !! a.notDone,

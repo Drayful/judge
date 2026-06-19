@@ -7,6 +7,7 @@
     'saved' => null,
     'entries' => [],
     'ageGroup' => 'junior',
+    'groupProgram' => false,
     'tournament',
 ])
 
@@ -32,11 +33,16 @@
         panel: @js($type),
         subpanel: @js($subpanel),
         penaltyType: @js($penaltyType),
+        groupProgram: @js((bool) $groupProgram),
     })"
     class="flex-1 min-h-0 grid grid-cols-12 gap-2 relative"
 >
-    @if ($type === 'd' && $subpanel === 'da')
+    @if ($type === 'd' && $subpanel === 'da' && $groupProgram)
+        @include('judge.partials._tablet_da_group', ['slot' => $slot, 'subpanel' => $subpanel])
+    @elseif ($type === 'd' && $subpanel === 'da')
         @include('judge.partials._tablet_da', ['slot' => $slot, 'subpanel' => $subpanel])
+    @elseif ($type === 'd' && $groupProgram)
+        @include('judge.partials._tablet_d_group', ['slot' => $slot])
     @elseif ($type === 'd')
         @include('judge.partials._tablet_d', ['slot' => $slot, 'subpanel' => $subpanel])
     @elseif ($type === 'e')

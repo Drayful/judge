@@ -721,9 +721,20 @@
             </div>`;
     };
 
+    const dcDisplay = (sym) => {
+        if (sym === 'C_UP') return 'C↗↗';
+        if (sym === 'C_DOWN') return 'C↓↓';
+        return sym || '';
+    };
+
     const entryLine = (e) => {
-        const sym = e.symbol ? `<span class="font-black">${esc(e.symbol)}</span> ` : (e.acro ? '<span class="font-black text-indigo-300">A</span> ' : '');
-        const label = e.label ? `<span class="text-slate-400">${esc(e.label)}</span> ` : '';
+        const showEx = e.exchange && e.symbol !== 'DE';
+        const exTag = showEx ? ` <span class="text-indigo-300/90">(${esc(String(e.exchange).toUpperCase())})</span>` : '';
+        const dcSym = e.symbol && ['CC', 'CR', 'C_UP', 'C_DOWN'].includes(e.symbol)
+            ? `<span class="font-black text-indigo-300">${esc(dcDisplay(e.symbol))}</span> `
+            : '';
+        const sym = dcSym || (e.symbol ? `<span class="font-black">${esc(e.symbol)}</span> ` : (e.acro ? '<span class="font-black text-indigo-300">A</span> ' : ''));
+        const label = e.label ? `<span class="text-slate-400">${esc(e.label)}</span>${exTag} ` : '';
         const val = e.notDone ? '<span class="text-rose-300">Х · 0 (не выполнен)</span>' : `<span class="font-mono tabular-nums">${Number(e.v).toFixed(1)}</span>`;
         const counted = e.notDone ? '' : (e.counted === false ? ' <span class="text-[10px] text-rose-300">не в зачёте</span>' : '');
         return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
