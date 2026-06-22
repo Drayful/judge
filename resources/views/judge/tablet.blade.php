@@ -169,8 +169,8 @@
                         senior: { elements: 15, acro: 3 },
                     },
                     groupDa: {
-                        junior: { elementsMin: 6, elementsMax: 10, ccMin: 2, crMin: 2, multiMin: 2, acro: 3 },
-                        senior: { elementsMin: 9, elementsMax: 14, ccMin: 3, crMin: 3, multiMin: 3, acro: 3 },
+                        junior: { elementsMin: 6, elementsMax: 10, ccMin: 2, crMin: 2, multiMin: 2 },
+                        senior: { elementsMin: 9, elementsMax: 14, ccMin: 3, crMin: 3, multiMin: 3 },
                     },
                 },
 
@@ -354,15 +354,11 @@
                 /** Включить/выключить режим «следующий балл — акробатика». */
                 toggleAcro() {
                     this.acroPending = ! this.acroPending;
-                    if (this.acroPending) {
-                        this.pendingDc = null;
-                    }
                     this.error = null;
                 },
                 /** Выбрать тип сотрудничества (CC, CR, C↗↗, C↓↓) для группового DA. */
                 selectDcType(symbol, label) {
                     this.pendingDc = { symbol: symbol, label: label };
-                    this.acroPending = false;
                     this.error = null;
                 },
                 dcDisplay(sym) {
@@ -426,27 +422,20 @@
                         return;
                     }
 
-                    // DA группа: сотрудничество, акробатика или простой элемент
+                    // DA группа: только сотрудничество (тип выбран заранее)
                     if (this.groupDaFlow) {
-                        if (this.pendingDc) {
-                            this.actions.unshift({
-                                v: v,
-                                symbol: this.pendingDc.symbol,
-                                label: this.pendingDc.label,
-                                notDone: false,
-                            });
-                            if (this.actions.length > 40) this.actions.pop();
-                            this.pendingDc = null;
+                        if (! this.pendingDc) {
+                            this.flashHint('Сначала выберите тип сотрудничества');
                             return;
                         }
                         this.actions.unshift({
                             v: v,
-                            acro: this.acroPending,
+                            symbol: this.pendingDc.symbol,
+                            label: this.pendingDc.label,
                             notDone: false,
-                            label: this.acroPending ? 'Акробатика' : '',
                         });
-                        this.acroPending = false;
                         if (this.actions.length > 40) this.actions.pop();
+                        this.pendingDc = null;
                         return;
                     }
 
@@ -554,22 +543,17 @@
                     const lim = this.groupDaLim();
                     const counted = new Set();
                     const dcSyms = ['CC', 'CR', 'C_UP', 'C_DOWN'];
-                    let used = 0, cc = 0, cr = 0, multi = 0, acro = 0, total = 0;
+                    let used = 0, cc = 0, cr = 0, multi = 0, total = 0;
 
                     for (let i = this.actions.length - 1; i >= 0; i--) {
                         const a = this.actions[i];
                         const sym = a.symbol;
-                        const isAcro = !! a.acro;
-                        const isDc = sym && dcSyms.includes(sym);
+                        if (! sym || ! dcSyms.includes(sym)) {
+                            continue;
+                        }
 
                         if (a.notDone) {
-                            if (used >= lim.elementsMax) {
-                                continue;
-                            }
-                            if (isAcro && acro < lim.acro) {
-                                acro += 1;
-                                used += 1;
-                            } else if (isDc) {
+                            if (used < lim.elementsMax) {
                                 used += 1;
                             }
                             continue;
@@ -579,26 +563,12 @@
                             continue;
                         }
 
-                        if (isAcro) {
-                            if (acro >= lim.acro) {
-                                continue;
-                            }
-                            acro += 1;
-                            used += 1;
-                            counted.add(i);
-                            total += a.v;
-                        } else if (isDc) {
-                            used += 1;
-                            counted.add(i);
-                            total += a.v;
-                            if (sym === 'CC') cc += 1;
-                            else if (sym === 'CR') cr += 1;
-                            else if (this.isDcMulti(sym)) multi += 1;
-                        } else {
-                            used += 1;
-                            counted.add(i);
-                            total += a.v;
-                        }
+                        used += 1;
+                        counted.add(i);
+                        total += a.v;
+                        if (sym === 'CC') cc += 1;
+                        else if (sym === 'CR') cr += 1;
+                        else if (this.isDcMulti(sym)) multi += 1;
                     }
 
                     return {
@@ -608,8 +578,22 @@
                         cc,
                         cr,
                         multi,
-                        acro,
                     };
+                },
+
+                /**
+                 * Групповой DA: −0.3 за каждую группу (CC, CR, броски/ловли), не выполнившую минимум.
+                 */
+                groupDaMinStatus() {
+                    const lim = this.groupDaLim();
+                    const c = this.groupDaComputed();
+                    let missingGroups = 0;
+                    if (c.cc < lim.ccMin) missingGroups += 1;
+                    if (c.cr < lim.crMin) missingGroups += 1;
+                    if (c.multi < lim.multiMin) missingGroups += 1;
+                    const penalty = this.round3(missingGroups * 0.3);
+
+                    return { missingGroups, penalty };
                 },
 
                 /**
@@ -743,6 +727,12 @@
                             if (this.symbolFlow) {
                                 const base = this.dbComputed().total;
                                 const penalty = this.dbMinElementsStatus().penalty;
+                                const r = this.round3(base - penalty);
+                                return r < 0 ? 0 : r;
+                            }
+                            if (this.groupDaFlow) {
+                                const base = this.groupDaComputed().total;
+                                const penalty = this.groupDaMinStatus().penalty;
                                 const r = this.round3(base - penalty);
                                 return r < 0 ? 0 : r;
                             }

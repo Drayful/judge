@@ -1,4 +1,4 @@
-{{-- DA-бригада · групповые упражнения: DC + акробатика, баллы 0.2–1.0 --}}
+{{-- DA-бригада · групповые упражнения: DC, баллы 0.2–1.0 --}}
 
 @php
     $dcTypes = [
@@ -32,16 +32,6 @@
             <div class="mt-1 text-[10px] uppercase tracking-wider text-indigo-100/70">{{ $p['sub'] }}</div>
         </button>
     @endforeach
-
-    <button type="button" @click="toggleAcro()"
-        :class="acroPending ? 'ring-2 ring-amber-400 brightness-125 bg-[#6b4cc0]' : 'bg-[#5547a5] hover:bg-[#6657c2]'"
-        class="flex-1 min-h-0 rounded-2xl border border-indigo-700/60 text-white shadow-md active:scale-[0.98] flex flex-col items-center justify-center transition">
-        <div class="text-3xl xl:text-4xl font-black leading-none">A</div>
-        <div class="mt-1 text-[10px] uppercase tracking-wider text-indigo-100/80">Акробатика</div>
-        <div class="mt-0.5 text-xs font-mono tabular-nums"
-             :class="groupDaComputed().acro >= groupDaLim().acro ? 'text-rose-300' : 'text-amber-200'"
-             x-text="groupDaComputed().acro + '/' + groupDaLim().acro"></div>
-    </button>
 </div>
 
 <div class="col-span-5 flex flex-col gap-2 h-full min-h-0">
@@ -77,10 +67,11 @@
             <span class="rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDaComputed().multi < groupDaLim().multiMin ? 'border-amber-600/60 text-amber-200' : 'border-slate-700 text-slate-300'"
                   x-text="'Бр/Лв: ' + groupDaComputed().multi + '/' + groupDaLim().multiMin"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
-                  :class="groupDaComputed().acro >= groupDaLim().acro ? 'text-amber-300 border-amber-600/40' : 'border-slate-700 text-slate-300'"
-                  x-text="'Акр: ' + groupDaComputed().acro + '/' + groupDaLim().acro"></span>
         </div>
+
+        <div x-show="groupDaMinStatus().penalty > 0"
+             class="mt-0.5 text-[10px] text-rose-300/90 font-mono tabular-nums"
+             x-text="'Сбавка за минимум: −' + groupDaMinStatus().penalty.toFixed(1)"></div>
 
         <div class="min-h-[20px] mt-1">
             <template x-if="pendingDc">
@@ -88,14 +79,11 @@
                     <span x-text="pendingDc.label"></span> — нажмите балл или «Х»
                 </div>
             </template>
-            <template x-if="!pendingDc && acroPending">
-                <div class="text-[11px] text-amber-200">Акробатика — нажмите балл или «Х»</div>
-            </template>
-            <template x-if="!pendingDc && !acroPending && groupDaComputed().used >= groupDaLim().elementsMax">
+            <template x-if="!pendingDc && groupDaComputed().used >= groupDaLim().elementsMax">
                 <div class="text-[11px] text-rose-300">Лимит DC достигнут — новые баллы не зачтутся</div>
             </template>
-            <template x-if="!pendingDc && !acroPending && groupDaComputed().used < groupDaLim().elementsMax">
-                <div class="text-[11px] text-slate-500">Сотрудничество / акробатика + балл, либо просто балл</div>
+            <template x-if="!pendingDc && groupDaComputed().used < groupDaLim().elementsMax">
+                <div class="text-[11px] text-slate-500">Сначала тип сотрудничества, затем балл</div>
             </template>
         </div>
 
@@ -133,18 +121,18 @@
             class="rounded-2xl bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 py-3 text-base font-bold text-white shadow-md active:scale-[0.98]">
             ОТМЕНА
         </button>
-        <button type="button" @click="pendingDc ? markDcNotDone() : markAcroNotDone()"
-            :class="(pendingDc || acroPending) ? 'border-rose-600 ring-1 ring-rose-500/50' : 'opacity-60 border-slate-700'"
+        <button type="button" @click="markDcNotDone()"
+            :class="pendingDc ? 'border-rose-600 ring-1 ring-rose-500/50' : 'opacity-60 border-slate-700'"
             class="rounded-2xl bg-[#5a1d28] hover:bg-[#74232f] border text-white font-semibold active:scale-[0.98] flex flex-col items-center justify-center py-2 shadow-md transition">
             <div class="text-2xl leading-none font-black">Х</div>
-            <div class="text-[9px] text-rose-200/80" x-text="pendingDc ? 'не выполнен' : 'акроб. 0'"></div>
+            <div class="text-[9px] text-rose-200/80">не выполнен · 0</div>
         </button>
     </div>
 
-    <div class="flex-1 min-h-0 grid grid-cols-3 grid-rows-3 gap-2">
+    <div class="flex-1 min-h-0 grid grid-cols-3 grid-rows-3 gap-2" :class="pendingDc ? '' : 'opacity-90'">
         @foreach ($allScores as $v)
             <button type="button" @click="assignValue({{ $v }})"
-                :class="(pendingDc || acroPending) ? 'ring-2 ring-amber-400/80 brightness-110' : ''"
+                :class="pendingDc ? 'ring-2 ring-amber-400/80 brightness-110' : ''"
                 class="min-h-0 rounded-xl bg-[#13294b] hover:bg-[#1a3865] border border-slate-700 text-white text-xl xl:text-2xl font-bold shadow-md tabular-nums active:scale-[0.98] flex items-center justify-center transition">
                 {{ number_format($v, 1) }}
             </button>
