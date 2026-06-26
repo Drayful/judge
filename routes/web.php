@@ -138,7 +138,7 @@ Route::middleware('auth')->group(function () {
         ->middleware('role:judge,admin')
         ->name('judge.submit-score');
     Route::post('/judge/performances/{performance}/finalize', [JudgeController::class, 'finalize'])
-        ->middleware('role:judge,admin')
+        ->middleware('role:secretary,chief_judge,admin')
         ->name('judge.finalize');
 
     Route::post('/supervisor/performances/{performance}/approve', [SupervisorController::class, 'approve'])

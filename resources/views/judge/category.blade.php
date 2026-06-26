@@ -26,6 +26,7 @@
             @php
                 $allowedPanels = $panel ? [$panel['panel']] : ['d','a','e','penalty'];
                 $isSupervisor = in_array(auth()->user()->role, ['superior_jury','head_judge','admin','super_admin'], true);
+                $canFinalize = auth()->user()->isSecretary() || auth()->user()->isChiefJudge() || auth()->user()->isAdmin();
             @endphp
 
             <x-card>
@@ -104,10 +105,12 @@
                                     </td>
                                     <td class="py-3 text-right whitespace-nowrap">
                                         <div class="inline-flex items-center gap-2">
-                                            <form method="POST" action="{{ route('judge.finalize', $p) }}">
-                                                @csrf
-                                                <x-secondary-button>Итог</x-secondary-button>
-                                            </form>
+                                            @if($canFinalize)
+                                                <form method="POST" action="{{ route('judge.finalize', $p) }}">
+                                                    @csrf
+                                                    <x-secondary-button>Итог</x-secondary-button>
+                                                </form>
+                                            @endif
 
                                             @if($isSupervisor)
                                                 @if($inq && $inq->status !== 'decided')
@@ -201,10 +204,12 @@
                             </div>
 
                             <div class="mt-4 flex flex-wrap gap-2 justify-end">
-                                <form method="POST" action="{{ route('judge.finalize', $p) }}">
-                                    @csrf
-                                    <x-secondary-button>Итог</x-secondary-button>
-                                </form>
+                                @if($canFinalize)
+                                    <form method="POST" action="{{ route('judge.finalize', $p) }}">
+                                        @csrf
+                                        <x-secondary-button>Итог</x-secondary-button>
+                                    </form>
+                                @endif
 
                                 @if($isSupervisor)
                                     @if($inq && $inq->status !== 'decided')
