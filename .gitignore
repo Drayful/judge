@@ -36,3 +36,6 @@ env.txt
 
 # local clone of empty remote (created by assistant)
 github-judge/
+
+# local AI agent guidance notes (personal, not tracked)
+CLAUDE.md
