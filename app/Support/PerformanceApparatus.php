@@ -10,6 +10,14 @@ class PerformanceApparatus
     public const BODY_ONLY_LABEL = 'БП';
 
     /**
+     * Именованный список предметов РГ для формирования групп.
+     * Порядок = типичный порядок кругов; «Б.П.» — упражнение без предмета.
+     *
+     * @var list<string>
+     */
+    public const RG_APPARATUS = ['Б.П.', 'Скакалка', 'Обруч', 'Мяч', 'Булавы', 'Лента'];
+
+    /**
      * Базовая метка без суффикса повтора («Мяч · 2» → «Мяч»).
      */
     public static function baseLabel(?string $raw): string
@@ -175,5 +183,4 @@ class PerformanceApparatus
 
         return in_array($compact, ['бп', 'free', 'безпредмета', 'body', 'bp'], true);
     }
-
 }

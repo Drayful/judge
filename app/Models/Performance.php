@@ -33,6 +33,9 @@ class Performance extends Model
         'e_score',
         'penalty',
         'total',
+        'scores_overridden',
+        'scores_overridden_by',
+        'scores_overridden_at',
         'finalized_at',
         'approved_at',
         'published_at',
@@ -46,7 +49,9 @@ class Performance extends Model
         'decided_at' => 'datetime',
         'approved_at' => 'datetime',
         'published_at' => 'datetime',
+        'scores_overridden_at' => 'datetime',
         'is_counted' => 'bool',
+        'scores_overridden' => 'bool',
     ];
 
     public function originalPerformance(): BelongsTo
@@ -96,6 +101,24 @@ class Performance extends Model
     public function recalculateTotals(): void
     {
         $rules = $this->category?->scoring_rules ?? null;
+        $round = (int) ($rules['round_decimals'] ?? 3);
+
+        // Ручное выставление итога секретарём / главным судьёй: D/A/E/штраф заданы
+        // напрямую, оценки судей игнорируем — считаем только итоговую сумму.
+        if ($this->scores_overridden) {
+            $d = $this->d_score;
+            $a = $this->a_score;
+            $e = $this->e_score;
+            $pen = $this->penalty;
+
+            if ($d !== null && $a !== null && $e !== null) {
+                $this->total = round((float) $d + (float) $a + (float) $e - (float) ($pen ?? 0.0), $round);
+            } else {
+                $this->total = null;
+            }
+
+            return;
+        }
 
         // ТЗ / FIG-подобно:
         // - D = сумма компонент: среднее по судьям DB + среднее по DA (при одном судье на слот — как DB1+DA1)
@@ -104,7 +127,6 @@ class Performance extends Model
         // - Storage precision 0.001; display/rounding can be configured later.
         $aBase = (float) ($rules['a_base'] ?? 10.0);
         $eBase = (float) ($rules['e_base'] ?? 10.0);
-        $round = (int) ($rules['round_decimals'] ?? 3);
 
         $scores = $this->judgeScores()
             ->whereNotNull('submitted_at')

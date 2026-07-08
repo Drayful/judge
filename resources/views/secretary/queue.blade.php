@@ -422,6 +422,68 @@
                             </form>
                         @endif
                     </div>
+
+                    {{-- Ручное выставление финальной оценки (секретарь / главный судья) --}}
+                    <div class="mt-4 rounded-xl border {{ $currentPerformance->scores_overridden ? 'border-amber-600/60 bg-amber-950/20' : 'border-slate-700 bg-slate-950/40' }} p-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-sm font-semibold text-white">Финальная оценка вручную</h4>
+                            @if($currentPerformance->scores_overridden)
+                                <span class="rounded-md border border-amber-600/60 bg-amber-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-100">Ручной режим</span>
+                            @endif
+                        </div>
+                        <p class="mt-1 text-xs text-slate-500">
+                            Проставьте итоговые D / A / E и штраф напрямую — без ожидания судей. Пока включён ручной режим,
+                            оценки судей не пересчитывают итог. Итог фиксируется сразу.
+                        </p>
+
+                        <form method="POST" action="{{ route('secretary.performance.setFinalScore', $currentPerformance) }}"
+                              class="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-end"
+                              onsubmit="return confirm('Выставить финальную оценку вручную и зафиксировать итог?');">
+                            @csrf
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-slate-500">D</label>
+                                <input type="number" name="d_score" step="0.001" min="0" max="99.999" required
+                                       value="{{ old('d_score', $d !== null ? number_format((float) $d, 3, '.', '') : '') }}"
+                                       class="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-sm py-1.5 px-2 font-mono tabular-nums">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-slate-500">A</label>
+                                <input type="number" name="a_score" step="0.001" min="0" max="99.999" required
+                                       value="{{ old('a_score', $a !== null ? number_format((float) $a, 3, '.', '') : '') }}"
+                                       class="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-sm py-1.5 px-2 font-mono tabular-nums">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-slate-500">E</label>
+                                <input type="number" name="e_score" step="0.001" min="0" max="99.999" required
+                                       value="{{ old('e_score', $e !== null ? number_format((float) $e, 3, '.', '') : '') }}"
+                                       class="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-sm py-1.5 px-2 font-mono tabular-nums">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-rose-300/80">Штраф</label>
+                                <input type="number" name="penalty" step="0.001" min="0" max="99.999"
+                                       value="{{ old('penalty', $pen !== null ? number_format((float) $pen, 3, '.', '') : '') }}"
+                                       class="mt-1 w-full rounded-md border border-rose-900/50 bg-slate-950 text-rose-100 text-sm py-1.5 px-2 font-mono tabular-nums">
+                            </div>
+                            <button type="submit" class="rounded-md border border-amber-600/70 bg-amber-800/40 px-3 py-2 text-xs font-semibold text-amber-50 hover:bg-amber-700/50">
+                                Выставить итог
+                            </button>
+                        </form>
+
+                        @error('d_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        @error('a_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        @error('e_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        @error('penalty') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+
+                        @if($currentPerformance->scores_overridden)
+                            <form method="POST" action="{{ route('secretary.performance.clearFinalOverride', $currentPerformance) }}" class="mt-3"
+                                  onsubmit="return confirm('Снять ручной режим? Итог снова будет считаться по оценкам судей.');">
+                                @csrf
+                                <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline">
+                                    ↩ Снять ручной режим (считать по судьям)
+                                </button>
+                            </form>
+                        @endif
+                    </div>
                 </div>
             @endif
         </div>

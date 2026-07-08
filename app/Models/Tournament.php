@@ -28,6 +28,16 @@ class Tournament extends Model
         return $this->hasMany(Category::class);
     }
 
+    public function groups(): HasMany
+    {
+        return $this->hasMany(Group::class);
+    }
+
+    public function entries(): HasMany
+    {
+        return $this->hasMany(Entry::class);
+    }
+
     /**
      * Поток (категория), который сейчас ведёт секретарь в Live — для планшета судей без выбора потока.
      */

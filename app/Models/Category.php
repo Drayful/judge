@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\CategoryMeta;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,11 +11,15 @@ class Category extends Model
 {
     protected $fillable = [
         'tournament_id',
+        'group_id',
         'name',
         'program',
         'apparatus',
         'birth_year',
         'division',
+        'stream_no',
+        'starts_at_label',
+        'ends_at_label',
         'age_min',
         'age_max',
         'is_published',
@@ -42,7 +47,7 @@ class Category extends Model
             return (int) $this->birth_year;
         }
 
-        return \App\Support\CategoryMeta::extractBirthYear($this->name);
+        return CategoryMeta::extractBirthYear($this->name);
     }
 
     /**
@@ -54,7 +59,7 @@ class Category extends Model
             return strtoupper(trim($this->division));
         }
 
-        return \App\Support\CategoryMeta::extractDivision($this->name);
+        return CategoryMeta::extractDivision($this->name);
     }
 
     /**
@@ -94,6 +99,11 @@ class Category extends Model
     public function tournament(): BelongsTo
     {
         return $this->belongsTo(Tournament::class);
+    }
+
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(Group::class);
     }
 
     public function performances(): HasMany

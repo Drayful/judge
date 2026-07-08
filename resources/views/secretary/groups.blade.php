@@ -1,0 +1,187 @@
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h2 class="font-semibold text-xl text-slate-100 leading-tight">
+                    Группы и потоки: {{ $tournament->name }}
+                </h2>
+                <div class="text-sm text-slate-400">
+                    Пул участниц → группы (предметы) → потоки (время, стартовые номера, очередь).
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium"
+                   href="{{ route('secretary.tournament', $tournament) }}">← Турнир</a>
+                @if($tournament->categories->isNotEmpty())
+                    <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                       href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $tournament->categories->sortBy('id')->first()->id }}">
+                        Live — Секретарь
+                    </a>
+                @endif
+            </div>
+        </div>
+    </x-slot>
+
+    <div class="py-10">
+        <div class="w-full px-0 space-y-4">
+            <x-flash />
+
+            {{-- ПУЛ: непривязанные участницы по (программа/год/категория) --}}
+            <x-card>
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <div class="font-semibold text-slate-100">Пул участниц (не привязаны к группе)</div>
+                    <x-badge tone="violet">{{ $pool->sum('count') }} в пуле</x-badge>
+                </div>
+
+                @if($pool->isEmpty())
+                    <div class="text-sm text-slate-400">
+                        Пул пуст. Импортируйте список участвующих на странице турнира.
+                    </div>
+                @else
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        @foreach($pool as $p)
+                            <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40">
+                                <div class="flex items-center justify-between gap-3 mb-3">
+                                    <div class="font-medium text-slate-100">
+                                        {{ $p['label'] ?? (($p['birth_year'] ? $p['birth_year'].' г.р.' : 'Без года')) }}
+                                        @if($p['division']), кат. {{ $p['division'] }}@endif
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <x-badge tone="gray">{{ $p['program'] === 'group' ? 'групповые' : 'индивид.' }}</x-badge>
+                                        <x-badge tone="violet">{{ $p['count'] }} уч.</x-badge>
+                                    </div>
+                                </div>
+
+                                <form method="POST" action="{{ route('secretary.tournament.groups.store', $tournament) }}" class="space-y-3">
+                                    @csrf
+                                    <input type="hidden" name="program" value="{{ $p['program'] }}">
+                                    <input type="hidden" name="birth_year" value="{{ $p['birth_year'] }}">
+                                    <input type="hidden" name="division" value="{{ $p['division'] }}">
+
+                                    <div>
+                                        <x-input-label value="Предметы (круги, по порядку)" />
+                                        <div class="mt-1 flex flex-wrap gap-2">
+                                            @foreach($apparatusOptions as $ap)
+                                                <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-emerald-600">
+                                                    <input type="checkbox" name="apparatus[]" value="{{ $ap }}"
+                                                           class="rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500">
+                                                    {{ $ap }}
+                                                </label>
+                                            @endforeach
+                                        </div>
+                                    </div>
+
+                                    <div class="flex items-end justify-between gap-3">
+                                        <div>
+                                            <x-input-label value="Нумерация" />
+                                            <select name="number_mode" class="mt-1 rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                                <option value="continuous">сквозная по группе</option>
+                                                <option value="per_stream">с начала в каждом потоке</option>
+                                            </select>
+                                        </div>
+                                        <x-primary-button>Создать группу</x-primary-button>
+                                    </div>
+                                </form>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </x-card>
+
+            {{-- ГРУППЫ и их ПОТОКИ --}}
+            <x-card>
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <div class="font-semibold text-slate-100">Группы</div>
+                    <x-badge tone="gray">{{ $tournament->groups->count() }} групп</x-badge>
+                </div>
+
+                @forelse($tournament->groups as $group)
+                    <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40 mb-3">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="font-medium text-slate-100">{{ $group->name }}</div>
+                                <div class="text-sm text-slate-400 mt-1 flex flex-wrap items-center gap-2">
+                                    <x-badge tone="gray">{{ $group->program === 'group' ? 'групповые' : 'индивид.' }}</x-badge>
+                                    @foreach($group->apparatusLabels() as $ap)
+                                        <x-badge tone="violet">{{ $ap }}</x-badge>
+                                    @endforeach
+                                    <span class="text-slate-400">· {{ $groupEntryCounts[$group->id] ?? 0 }} уч.</span>
+                                    <span class="text-slate-500">· нумерация: {{ $group->number_mode === 'per_stream' ? 'с начала в потоке' : 'сквозная' }}</span>
+                                </div>
+                            </div>
+
+                            <form method="POST" action="{{ route('secretary.tournament.groups.destroy', [$tournament, $group]) }}"
+                                  onsubmit="return confirm('Удалить группу «{{ $group->name }}»? Её потоки, выступления и оценки будут удалены; участницы вернутся в пул.');">
+                                @csrf @method('DELETE')
+                                <button type="submit" class="rounded-md border border-rose-800/60 bg-rose-950/40 px-2.5 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-900/60 hover:border-rose-600 transition">
+                                    Удалить группу
+                                </button>
+                            </form>
+                        </div>
+
+                        {{-- Форма формирования потоков --}}
+                        <form method="POST" action="{{ route('secretary.tournament.groups.streams', [$tournament, $group]) }}"
+                              class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 items-end border-t border-slate-800 pt-4">
+                            @csrf
+                            <div>
+                                <x-input-label value="Размер потока" />
+                                <x-text-input name="stream_size" type="number" min="1" max="200" value="12"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Начало (ЧЧ:ММ)" />
+                                <x-text-input name="start_time" type="time" value="08:00"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Блок, мин" />
+                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Нумерация" />
+                                <select name="number_mode" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                    <option value="continuous" @selected($group->number_mode !== 'per_stream')>сквозная</option>
+                                    <option value="per_stream" @selected($group->number_mode === 'per_stream')>с начала в потоке</option>
+                                </select>
+                            </div>
+                            <x-primary-button class="justify-center">Сформировать потоки</x-primary-button>
+                        </form>
+
+                        {{-- Список потоков группы --}}
+                        @if($group->categories->isNotEmpty())
+                            <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                @foreach($group->categories->sortBy('stream_no') as $cat)
+                                    <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+                                        <div class="text-sm text-slate-200">
+                                            Поток {{ $cat->stream_no }}
+                                            @if($cat->starts_at_label)
+                                                <span class="text-slate-400">· {{ $cat->starts_at_label }}@if($cat->ends_at_label)–{{ $cat->ends_at_label }}@endif</span>
+                                            @endif
+                                        </div>
+                                        <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium"
+                                           href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $cat->id }}">
+                                            Очередь →
+                                        </a>
+                                    </div>
+                                @endforeach
+                            </div>
+                            <div class="mt-3">
+                                <form method="POST" action="{{ route('secretary.tournament.groups.renumber', [$tournament, $group]) }}" class="inline-block">
+                                    @csrf
+                                    <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline">
+                                        Пересчитать номера и очереди
+                                    </button>
+                                </form>
+                            </div>
+                        @else
+                            <div class="mt-3 text-sm text-slate-500">Потоки ещё не сформированы.</div>
+                        @endif
+                    </div>
+                @empty
+                    <div class="text-sm text-slate-400">Групп пока нет. Создайте группу из пула выше.</div>
+                @endforelse
+            </x-card>
+        </div>
+    </div>
+</x-app-layout>

@@ -70,6 +70,24 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/import-start-protocol', [SecretaryController::class, 'importStartProtocol'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.importStartProtocol');
+    Route::get('/secretary/tournaments/{tournament}/groups', [SecretaryController::class, 'groups'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups');
+    Route::post('/secretary/tournaments/{tournament}/groups', [SecretaryController::class, 'storeGroup'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.store');
+    Route::post('/secretary/tournaments/{tournament}/groups/{group}/streams', [SecretaryController::class, 'generateStreams'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.streams');
+    Route::post('/secretary/tournaments/{tournament}/groups/{group}/renumber', [SecretaryController::class, 'renumberGroup'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.renumber');
+    Route::delete('/secretary/tournaments/{tournament}/groups/{group}', [SecretaryController::class, 'destroyGroup'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.destroy');
+    Route::post('/secretary/entries/{entry}/move', [SecretaryController::class, 'moveEntry'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.entries.move');
     Route::post('/secretary/tournaments/{tournament}/categories', [SecretaryController::class, 'storeCategory'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.categories.store');
@@ -112,6 +130,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/performances/{performance}/update-judge-score', [SecretaryController::class, 'updateJudgeScore'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.performance.updateJudgeScore');
+    Route::post('/secretary/performances/{performance}/set-final-score', [SecretaryController::class, 'setFinalScore'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.performance.setFinalScore');
+    Route::post('/secretary/performances/{performance}/clear-final-override', [SecretaryController::class, 'clearFinalOverride'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.performance.clearFinalOverride');
 
     Route::get('/judge', [JudgeController::class, 'tournaments'])
         ->middleware('role:judge,admin')

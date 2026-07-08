@@ -16,6 +16,10 @@
                    href="#protocols">
                     Итоговые протоколы
                 </a>
+                <a class="rounded-lg border border-sky-700/60 bg-sky-950/40 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-900/60 transition"
+                   href="{{ route('secretary.tournament.groups', $tr) }}">
+                    Группы и потоки
+                </a>
                 @if($tr->categories->isNotEmpty())
                     <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500"
                         href="{{ route('secretary.tournament.live', $tr) }}?category={{ $tr->categories->sortBy('id')->first()->id }}">
@@ -51,16 +55,16 @@
 
             <x-card>
                 <div class="mb-4">
-                    <div class="font-semibold text-slate-100">Импорт стартового протокола (Excel)</div>
+                    <div class="font-semibold text-slate-100">Импорт списка участвующих (Excel)</div>
                     <div class="mt-2 rounded-lg border border-emerald-800/50 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100/95">
-                        Все группы и потоки из файла создаются <strong>в этом турнире</strong>:
+                        Участницы загружаются в <strong>пул этого турнира</strong>:
                         «{{ $tr->name }}» <span class="font-mono text-emerald-300/90">#{{ $tr->id }}</span>.
-                        Название чемпионата в шапке Excel не задаёт привязку — важно только то, что вы на странице этого турнира.
+                        Группы (набор предметов) и потоки (время, стартовые номера) формируются потом на странице
+                        <a class="underline hover:text-white" href="{{ route('secretary.tournament.groups', $tr) }}">«Группы и потоки»</a>.
                     </div>
                     <p class="text-sm text-slate-400 mt-3">
-                        Структура файла: блоки «Группа: …», строки «Поток N», список участниц (стартовый №, ФИО, год рождения, клуб).
-                        Число кругов и снаряды — только из строки «Группа: …»: «1 вид», «2 вида», «Б.П.», «Б.П.; 2 вида» и т.п. Порядок в очереди: сначала все по 1-му кругу, затем по 2-му.
-                        Каждый поток в файле становится отдельной категорией с очередью.
+                        Структура файла: по одному листу на (год + категория) — «2019 А», «2018С», «2020 и мл»;
+                        колонки ФИО, год рождения, клуб. Листы «груп…» — групповые команды, «Лист судей» пропускается.
                     </p>
                 </div>
 
@@ -71,7 +75,7 @@
                         <input id="protocol" name="protocol" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                             class="mt-1 block w-full text-sm text-slate-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-800 file:text-emerald-300 hover:file:bg-slate-700 border border-slate-700 rounded-lg bg-slate-950/50" />
                     </div>
-                    <x-primary-button class="shrink-0 justify-center">Импортировать потоки</x-primary-button>
+                    <x-primary-button class="shrink-0 justify-center">Импортировать в пул</x-primary-button>
                 </form>
             </x-card>
 

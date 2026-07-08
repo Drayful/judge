@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Athlete;
 use App\Models\Category;
+use App\Models\Entry;
+use App\Models\Group;
 use App\Models\JudgeScore;
 use App\Models\MusicTrack;
 use App\Models\Performance;
@@ -13,8 +15,10 @@ use App\Services\FinalProtocolService;
 use App\Services\MusicTrackUploadService;
 use App\Services\StartProtocolImportService;
 use App\Services\StreamAdvanceService;
+use App\Services\StreamBuilderService;
 use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
+use Carbon\Carbon;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -130,7 +134,7 @@ class SecretaryController extends Controller
         $request->validate([
             'protocol' => ['required', Rule::file()->max(15360)->extensions(['xls', 'xlsx'])],
         ], [
-            'protocol.required' => 'Выберите файл стартового протокола.',
+            'protocol.required' => 'Выберите файл списка участвующих.',
             'protocol.extensions' => 'Допустимые расширения: .xls, .xlsx.',
         ]);
 
@@ -146,15 +150,16 @@ class SecretaryController extends Controller
         }
 
         $message = sprintf(
-            'Импорт завершён: категорий создано %d, переиспользовано %d; участниц добавлено в базу %d; выходов в очередях %d; строк пропущено %d.',
-            $stats['categories_created'],
-            $stats['categories_reused'],
+            'Импорт завершён: листов обработано %d, пропущено %d; участниц в пул добавлено %d (новых в базе %d), команд %d; пропущено дублей %d. Дальше — «Группы и потоки».',
+            $stats['sheets_processed'],
+            $stats['sheets_skipped'],
+            $stats['entries_created'],
             $stats['athletes_created'],
-            $stats['performances_created'],
-            $stats['rows_skipped'],
+            $stats['group_teams_created'],
+            $stats['entries_skipped'],
         );
 
-        return back()->with('status', $message);
+        return redirect()->route('secretary.tournament.groups', $tournament)->with('status', $message);
     }
 
     public function storeCategory(Request $request, Tournament $tournament): RedirectResponse
@@ -183,7 +188,7 @@ class SecretaryController extends Controller
         ]);
 
         return redirect()
-            ->to(route('secretary.tournament.live', $tournament) . '?category=' . $category->id)
+            ->to(route('secretary.tournament.live', $tournament).'?category='.$category->id)
             ->with('status', 'Категория создана. Можно добавлять атлетов в очередь.');
     }
 
@@ -240,6 +245,254 @@ class SecretaryController extends Controller
             : 'В турнире не было потоков для удаления.';
 
         return redirect()->route('secretary.tournament', $tournament)->with('status', $msg);
+    }
+
+    /**
+     * Страница «Группы и потоки»: пул участниц (entries) по (программа/год/категория),
+     * уже созданные группы и их потоки.
+     */
+    public function groups(Tournament $tournament): View
+    {
+        $tournament->load([
+            'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
+            'groups.categories' => fn ($q) => $q->orderBy('stream_no'),
+        ]);
+
+        // Пул: entries, ещё не привязанные к группе, сгруппированные по (программа, год, категория).
+        $pool = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNull('group_id')
+            ->orderBy('program')
+            ->orderByDesc('birth_year')
+            ->orderBy('division')
+            ->get()
+            ->groupBy(fn (Entry $e) => $e->program.'|'.($e->birth_year ?? '0').'|'.($e->division ?? ''))
+            ->map(function ($rows) {
+                /** @var Entry $first */
+                $first = $rows->first();
+
+                return [
+                    'program' => $first->program,
+                    'birth_year' => $first->birth_year,
+                    'division' => $first->division,
+                    'label' => $first->meta['label'] ?? null,
+                    'count' => $rows->count(),
+                ];
+            })
+            ->values();
+
+        // Счётчики привязанного пула на группу.
+        $groupEntryCounts = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNotNull('group_id')
+            ->selectRaw('group_id, count(*) as c')
+            ->groupBy('group_id')
+            ->pluck('c', 'group_id');
+
+        return view('secretary.groups', [
+            'tournament' => $tournament,
+            'pool' => $pool,
+            'groupEntryCounts' => $groupEntryCounts,
+            'apparatusOptions' => PerformanceApparatus::RG_APPARATUS,
+        ]);
+    }
+
+    /**
+     * Создать группу из пула: (год + категория + набор предметов). Привязывает
+     * подходящие непривязанные entries.
+     */
+    public function storeGroup(Request $request, Tournament $tournament): RedirectResponse
+    {
+        $data = $request->validate([
+            'program' => ['required', 'string', 'in:individual,group'],
+            'birth_year' => ['nullable', 'integer', 'min:1990', 'max:2035'],
+            'division' => ['nullable', 'string', 'max:16'],
+            'apparatus' => ['required', 'array', 'min:1'],
+            'apparatus.*' => ['string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+            'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
+        ], [
+            'apparatus.required' => 'Выберите хотя бы один предмет.',
+        ]);
+
+        $division = isset($data['division']) && trim($data['division']) !== ''
+            ? strtoupper(trim($data['division']))
+            : null;
+        $birthYear = isset($data['birth_year']) ? (int) $data['birth_year'] : null;
+
+        $group = DB::transaction(function () use ($tournament, $data, $division, $birthYear) {
+            // метка пула («2020 и мл» и т.п.), если есть у entries.
+            $label = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->whereNull('group_id')
+                ->where('program', $data['program'])
+                ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear))
+                ->when($division !== null, fn ($q) => $q->where('division', $division))
+                ->value('meta->label');
+
+            $name = $this->groupName($birthYear, $division, $label);
+
+            $group = Group::query()->create([
+                'tournament_id' => $tournament->id,
+                'program' => $data['program'],
+                'birth_year' => $birthYear,
+                'birth_year_label' => is_string($label) ? $label : null,
+                'division' => $division,
+                'name' => $name,
+                'apparatus' => array_values($data['apparatus']),
+                'number_mode' => $data['number_mode'] ?? 'continuous',
+                'order_index' => (int) (Group::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
+            ]);
+
+            Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->whereNull('group_id')
+                ->where('program', $data['program'])
+                ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
+                ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
+                ->update(['group_id' => $group->id]);
+
+            return $group;
+        });
+
+        $attached = Entry::query()->where('group_id', $group->id)->count();
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Группа «{$group->name}» создана, участниц привязано: {$attached}. Теперь сформируйте потоки.");
+    }
+
+    /**
+     * Сформировать потоки группы (авто-разбивка по размеру + очереди).
+     */
+    public function generateStreams(Request $request, Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse
+    {
+        if ((int) $group->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        $data = $request->validate([
+            'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
+            'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
+            'start_time' => ['nullable', 'date_format:H:i'],
+            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+        ]);
+
+        $times = $this->buildStreamTimes(
+            $group,
+            (int) $data['stream_size'],
+            $data['start_time'] ?? null,
+            isset($data['block_minutes']) ? (int) $data['block_minutes'] : null,
+        );
+
+        $builder->generateStreams(
+            $group,
+            (int) $data['stream_size'],
+            $times,
+            $data['number_mode'] ?? $group->number_mode ?? 'continuous',
+        );
+
+        $streams = $group->categories()->count();
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Потоки сформированы: {$streams}. Стартовые номера и очереди готовы.");
+    }
+
+    /**
+     * Метки времени по потокам из «время начала + длина блока».
+     *
+     * @return list<array{start:?string,end:?string}>
+     */
+    private function buildStreamTimes(Group $group, int $streamSize, ?string $startTime, ?int $blockMinutes): array
+    {
+        if ($startTime === null || $blockMinutes === null || $streamSize < 1) {
+            return [];
+        }
+
+        $count = (int) ceil(max(0, $group->entries()->count()) / $streamSize);
+        if ($count < 1) {
+            return [];
+        }
+
+        $cursor = Carbon::createFromFormat('H:i', $startTime)->startOfMinute();
+        $times = [];
+        for ($i = 0; $i < $count; $i++) {
+            $start = $cursor->format('H:i');
+            $cursor = $cursor->copy()->addMinutes($blockMinutes);
+            $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
+        }
+
+        return $times;
+    }
+
+    /**
+     * Удалить группу: отвязать пул и снести её потоки (с выступлениями/музыкой).
+     */
+    public function destroyGroup(Tournament $tournament, Group $group): RedirectResponse
+    {
+        if ((int) $group->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        $name = $group->name;
+
+        DB::transaction(function () use ($tournament, $group) {
+            foreach ($group->categories as $cat) {
+                $this->purgeCategoryMusic($cat);
+                if ((int) ($tournament->active_category_id ?? 0) === (int) $cat->id) {
+                    $tournament->update(['active_category_id' => null]);
+                }
+                $cat->delete();
+            }
+
+            // entries возвращаются в пул (group_id → null через nullOnDelete).
+            $group->delete();
+        });
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Группа «{$name}» удалена, участницы возвращены в пул.");
+    }
+
+    /**
+     * Ручная правка: перенести участницу в другой поток группы и пересобрать номера/очереди.
+     */
+    public function moveEntry(Request $request, Entry $entry, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'stream_no' => ['required', 'integer', 'min:1', 'max:200'],
+        ]);
+
+        $tournament = $entry->tournament;
+        if ($entry->group_id === null || $tournament === null) {
+            return back()->withErrors(['entry' => 'Участница ещё не привязана к группе с потоками.']);
+        }
+
+        $builder->moveEntryToStream($entry, (int) $data['stream_no']);
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', 'Участница перенесена, номера пересчитаны.');
+    }
+
+    /**
+     * Ручная правка: пересчитать стартовые номера и очереди по текущему распределению.
+     */
+    public function renumberGroup(Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse
+    {
+        if ((int) $group->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        $builder->renumber($group);
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', 'Номера и очереди пересчитаны.');
+    }
+
+    private function groupName(?int $birthYear, ?string $division, ?string $label): string
+    {
+        $yearPart = is_string($label) && trim($label) !== ''
+            ? trim($label)
+            : ($birthYear ? $birthYear.' г.р.' : 'Без года');
+
+        return $division ? $yearPart.', '.$division : $yearPart;
     }
 
     /**
@@ -614,6 +867,65 @@ class SecretaryController extends Controller
         return back()->with('status', 'Оценка '.$data['slot'].' исправлена на '.number_format((float) $data['score'], 3, '.', '').'.');
     }
 
+    /**
+     * Выставить финальную оценку вручную (секретарь / главный судья): D/A/E/штраф
+     * задаются напрямую, оценки судей больше не пересчитывают итог, пока действует
+     * ручной режим. Итог фиксируется сразу.
+     */
+    public function setFinalScore(Performance $performance, Request $request): RedirectResponse
+    {
+        $data = $request->validate([
+            'd_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'a_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'e_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'penalty' => ['nullable', 'numeric', 'min:0', 'max:99.999'],
+        ], [], [
+            'd_score' => 'оценка D',
+            'a_score' => 'оценка A',
+            'e_score' => 'оценка E',
+            'penalty' => 'штраф',
+        ]);
+
+        $penalty = isset($data['penalty']) && $data['penalty'] !== null && $data['penalty'] !== ''
+            ? round((float) $data['penalty'], 3)
+            : null;
+
+        DB::transaction(function () use ($performance, $request, $data, $penalty) {
+            $performance->d_score = round((float) $data['d_score'], 3);
+            $performance->a_score = round((float) $data['a_score'], 3);
+            $performance->e_score = round((float) $data['e_score'], 3);
+            $performance->penalty = $penalty;
+            $performance->scores_overridden = true;
+            $performance->scores_overridden_by = $request->user()?->id;
+            $performance->scores_overridden_at = now();
+            $performance->load('category');
+            $performance->recalculateTotals();
+            $performance->finalized_at = now();
+            $performance->save();
+        });
+
+        return back()->with('status', 'Финальная оценка выставлена вручную и зафиксирована: итог '
+            .SecretaryLiveUi::formatScore($performance->total !== null ? (float) $performance->total : null).'.');
+    }
+
+    /**
+     * Снять ручной режим: вернуться к расчёту итога по оценкам судей.
+     */
+    public function clearFinalOverride(Performance $performance): RedirectResponse
+    {
+        DB::transaction(function () use ($performance) {
+            $performance->scores_overridden = false;
+            $performance->scores_overridden_by = null;
+            $performance->scores_overridden_at = null;
+            $performance->finalized_at = null;
+            $performance->load(['judgeScores', 'category']);
+            $performance->recalculateTotals();
+            $performance->save();
+        });
+
+        return back()->with('status', 'Ручной режим снят — итог снова считается по оценкам судей.');
+    }
+
     public function addToQueue(Request $request, Category $category): RedirectResponse
     {
         $data = $request->validate([
@@ -767,7 +1079,7 @@ class SecretaryController extends Controller
     public function toggleJudgeSlot(Request $request, Category $category)
     {
         $data = $request->validate([
-            'slot' => ['required', 'string', Rule::in(\App\Support\SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
             'active' => ['required', 'in:0,1'],
         ]);
 
