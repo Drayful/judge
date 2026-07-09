@@ -132,4 +132,42 @@ class GroupStreamBuilderTest extends TestCase
         $category = Category::where('group_id', $group->id)->where('stream_no', $newbie->stream_no)->firstOrFail();
         $this->assertSame(13, Performance::where('category_id', $category->id)->count());
     }
+
+    public function test_assemble_tournament_one_click(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        // Два пула: 2018/A (5) и 2017/B (3).
+        $this->seedPool($tournament, 5, 2018, 'A');
+        $this->seedPool($tournament, 3, 2017, 'B');
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.assemble', $tournament), [
+                'apparatus' => ['Б.П.'],
+                'stream_size' => 4,
+                'start_time' => '08:00',
+                'block_minutes' => 25,
+                'number_mode' => 'continuous',
+            ])->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        // Две группы, весь пул привязан.
+        $this->assertSame(2, $tournament->groups()->count());
+        $this->assertSame(0, Entry::where('tournament_id', $tournament->id)->whereNull('group_id')->count());
+
+        // 2018/A: 5 уч. / размер 4 → 2 потока; 2017/B: 3 уч. → 1 поток. Итого 3 потока.
+        $this->assertSame(3, Category::whereIn('group_id', $tournament->groups()->pluck('id'))->count());
+
+        // Каскад времени: первый поток дня — 08:00; следующая группа стартует после
+        // двух блоков первой (08:00→08:25→08:50).
+        $groupA = $tournament->groups()->where('birth_year', 2018)->firstOrFail();
+        $groupB = $tournament->groups()->where('birth_year', 2017)->firstOrFail();
+        $this->assertSame('08:00', Category::where('group_id', $groupA->id)->where('stream_no', 1)->value('starts_at_label'));
+        $this->assertSame('08:50', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
+
+        // Повторный запуск — новых пулов нет, ошибка (ничего не дублируется).
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.assemble', $tournament), [
+                'apparatus' => ['Б.П.'], 'stream_size' => 4,
+            ])->assertSessionHasErrors('assemble');
+        $this->assertSame(2, $tournament->groups()->count());
+    }
 }

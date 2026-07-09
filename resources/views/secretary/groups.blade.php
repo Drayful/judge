@@ -26,6 +26,73 @@
         <div class="w-full px-0 space-y-4">
             <x-flash />
 
+            {{-- СБОРКА ТУРНИРА В ОДИН КЛИК --}}
+            @if($pool->isNotEmpty())
+                <x-card>
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="font-semibold text-emerald-200">⚡ Собрать турнир из файла в один клик</div>
+                            <p class="mt-1 text-xs text-slate-400 max-w-3xl">
+                                По каждому пулу ({{ $pool->count() }} шт.) создаётся группа с выбранными предметами и сразу
+                                нарезаются потоки. Время идёт каскадом: следующая группа стартует после предыдущей.
+                                Предметы и время по любой группе можно поправить ниже.
+                            </p>
+                        </div>
+                    </div>
+
+                    <form method="POST" action="{{ route('secretary.tournament.assemble', $tournament) }}"
+                          class="mt-4 space-y-3"
+                          onsubmit="return confirm('Создать группы по всем {{ $pool->count() }} пулам и нарезать потоки?');">
+                        @csrf
+                        <div>
+                            <x-input-label value="Предметы по умолчанию (для всех групп)" />
+                            <div class="mt-1 flex flex-wrap gap-2">
+                                @foreach($apparatusOptions as $ap)
+                                    <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-emerald-600">
+                                        <input type="checkbox" name="apparatus[]" value="{{ $ap }}" @checked($ap === 'Б.П.')
+                                               class="rounded border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500">
+                                        {{ $ap }}
+                                    </label>
+                                @endforeach
+                            </div>
+                            @error('apparatus') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
+                            @error('assemble') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                            <div>
+                                <x-input-label value="Размер потока" />
+                                <x-text-input name="stream_size" type="number" min="1" max="200" value="12"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Начало дня (ЧЧ:ММ)" />
+                                <x-text-input name="start_time" type="time" value="08:00"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Блок, мин" />
+                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Нумерация" />
+                                <select name="number_mode" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                    <option value="continuous">сквозная</option>
+                                    <option value="per_stream">с начала в потоке</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500">
+                                ⚡ Собрать турнир
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-500">
+                            Предметы применяются ко всем группам одинаково — для групп с другим набором поправьте предметы и пересоберите потоки ниже.
+                        </p>
+                    </form>
+                </x-card>
+            @endif
+
             {{-- ПУЛ: непривязанные участницы по (программа/год/категория) --}}
             <x-card>
                 <div class="flex items-center justify-between gap-3 mb-4">

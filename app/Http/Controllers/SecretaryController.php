@@ -319,45 +319,138 @@ class SecretaryController extends Controller
             : null;
         $birthYear = isset($data['birth_year']) ? (int) $data['birth_year'] : null;
 
-        $group = DB::transaction(function () use ($tournament, $data, $division, $birthYear) {
-            // метка пула («2020 и мл» и т.п.), если есть у entries.
-            $label = Entry::query()
-                ->where('tournament_id', $tournament->id)
-                ->whereNull('group_id')
-                ->where('program', $data['program'])
-                ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear))
-                ->when($division !== null, fn ($q) => $q->where('division', $division))
-                ->value('meta->label');
-
-            $name = $this->groupName($birthYear, $division, $label);
-
-            $group = Group::query()->create([
-                'tournament_id' => $tournament->id,
-                'program' => $data['program'],
-                'birth_year' => $birthYear,
-                'birth_year_label' => is_string($label) ? $label : null,
-                'division' => $division,
-                'name' => $name,
-                'apparatus' => array_values($data['apparatus']),
-                'number_mode' => $data['number_mode'] ?? 'continuous',
-                'order_index' => (int) (Group::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
-            ]);
-
-            Entry::query()
-                ->where('tournament_id', $tournament->id)
-                ->whereNull('group_id')
-                ->where('program', $data['program'])
-                ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
-                ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
-                ->update(['group_id' => $group->id]);
-
-            return $group;
-        });
+        $group = DB::transaction(fn () => $this->createGroupFromPool(
+            $tournament,
+            $data['program'],
+            $birthYear,
+            $division,
+            array_values($data['apparatus']),
+            $data['number_mode'] ?? 'continuous',
+        ));
 
         $attached = Entry::query()->where('group_id', $group->id)->count();
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', "Группа «{$group->name}» создана, участниц привязано: {$attached}. Теперь сформируйте потоки.");
+    }
+
+    /**
+     * Собрать турнир из файла в один клик: по каждому пулу (программа/год/категория)
+     * создаётся группа с общим набором предметов и сразу нарезаются потоки с
+     * каскадным расписанием (следующая группа стартует после предыдущей).
+     * Повторный запуск обрабатывает только новые (непривязанные) пулы.
+     */
+    public function assembleTournament(Request $request, Tournament $tournament, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'apparatus' => ['required', 'array', 'min:1'],
+            'apparatus.*' => ['string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+            'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
+            'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
+            'start_time' => ['nullable', 'date_format:H:i'],
+            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+        ], [
+            'apparatus.required' => 'Выберите хотя бы один предмет по умолчанию.',
+        ]);
+
+        $apparatus = array_values($data['apparatus']);
+        $streamSize = (int) $data['stream_size'];
+        $numberMode = $data['number_mode'] ?? 'continuous';
+        $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
+
+        // Пулы: непривязанные entries по (программа, год, категория) в порядке дня —
+        // индивидуальные раньше групповых, младшие (больший год) раньше.
+        $pools = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNull('group_id')
+            ->selectRaw('program, birth_year, division')
+            ->groupBy('program', 'birth_year', 'division')
+            ->orderByRaw("case when program = 'individual' then 0 else 1 end")
+            ->orderByDesc('birth_year')
+            ->orderBy('division')
+            ->get();
+
+        if ($pools->isEmpty()) {
+            return back()->withErrors(['assemble' => 'В пуле нет непривязанных участниц — импортируйте список или все пулы уже разобраны по группам.']);
+        }
+
+        $groupsCreated = 0;
+        $streamsCreated = 0;
+
+        DB::transaction(function () use ($pools, $tournament, $builder, $apparatus, $streamSize, $numberMode, $blockMinutes, $data, &$groupsCreated, &$streamsCreated) {
+            // Общий «курсор» времени на весь день (каскадное расписание).
+            $cursor = ($data['start_time'] ?? null) !== null && $blockMinutes !== null
+                ? Carbon::createFromFormat('H:i', $data['start_time'])->startOfMinute()
+                : null;
+
+            foreach ($pools as $pool) {
+                $birthYear = $pool->birth_year !== null ? (int) $pool->birth_year : null;
+                $division = $pool->division !== null && trim((string) $pool->division) !== ''
+                    ? strtoupper(trim((string) $pool->division))
+                    : null;
+
+                $group = $this->createGroupFromPool($tournament, $pool->program, $birthYear, $division, $apparatus, $numberMode);
+                $groupsCreated++;
+
+                $count = Entry::query()->where('group_id', $group->id)->count();
+                $streamCount = (int) ceil($count / $streamSize);
+
+                // Каскад времени: этой группе — блоки от курсора, затем сдвигаем курсор.
+                $times = [];
+                if ($cursor !== null) {
+                    for ($i = 0; $i < $streamCount; $i++) {
+                        $start = $cursor->format('H:i');
+                        $cursor = $cursor->copy()->addMinutes($blockMinutes);
+                        $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
+                    }
+                }
+
+                $builder->generateStreams($group, $streamSize, $times, $numberMode);
+                $streamsCreated += $streamCount;
+            }
+        });
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Турнир собран: групп создано {$groupsCreated}, потоков {$streamsCreated}. Предметы/время можно поправить по каждой группе.");
+    }
+
+    /**
+     * Создать группу из непривязанного пула и привязать подходящие entries.
+     *
+     * @param  list<string>  $apparatus
+     */
+    private function createGroupFromPool(Tournament $tournament, string $program, ?int $birthYear, ?string $division, array $apparatus, string $numberMode): Group
+    {
+        // метка пула («2020 и мл» и т.п.), если есть у entries.
+        $label = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNull('group_id')
+            ->where('program', $program)
+            ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
+            ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
+            ->value('meta->label');
+
+        $group = Group::query()->create([
+            'tournament_id' => $tournament->id,
+            'program' => $program,
+            'birth_year' => $birthYear,
+            'birth_year_label' => is_string($label) ? $label : null,
+            'division' => $division,
+            'name' => $this->groupName($birthYear, $division, is_string($label) ? $label : null),
+            'apparatus' => $apparatus,
+            'number_mode' => $numberMode,
+            'order_index' => (int) (Group::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
+        ]);
+
+        Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNull('group_id')
+            ->where('program', $program)
+            ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
+            ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
+            ->update(['group_id' => $group->id]);
+
+        return $group;
     }
 
     /**
