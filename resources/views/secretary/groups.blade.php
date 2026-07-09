@@ -33,6 +33,49 @@
                     <x-badge tone="violet">{{ $pool->sum('count') }} в пуле</x-badge>
                 </div>
 
+                {{-- Ручная вставка в пул (если импорт кого-то не добавил) --}}
+                <details class="mb-4 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <summary class="cursor-pointer text-sm font-medium text-emerald-300 hover:text-emerald-200">
+                        ＋ Добавить участницу вручную
+                    </summary>
+                    <form method="POST" action="{{ route('secretary.tournament.entries.store', $tournament) }}"
+                          class="mt-3 grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
+                        @csrf
+                        <div class="sm:col-span-2">
+                            <x-input-label value="ФИО / название команды" />
+                            <x-text-input name="full_name" required placeholder="Иванова Мария"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                        <div>
+                            <x-input-label value="Программа" />
+                            <select name="program" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                <option value="individual">индивид.</option>
+                                <option value="group">групповые</option>
+                            </select>
+                        </div>
+                        <div>
+                            <x-input-label value="Год" />
+                            <x-text-input name="birth_year" type="number" min="1990" max="2035" placeholder="2018"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                        <div>
+                            <x-input-label value="Категория" />
+                            <select name="division" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                <option value="">—</option>
+                                @foreach(['A', 'B', 'C', 'D'] as $div)
+                                    <option value="{{ $div }}">{{ $div }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <x-primary-button class="justify-center">В пул</x-primary-button>
+                        <div class="sm:col-span-6">
+                            <x-text-input name="club" placeholder="Клуб (необязательно)"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                    </form>
+                    @error('full_name') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                </details>
+
                 @if($pool->isEmpty())
                     <div class="text-sm text-slate-400">
                         Пул пуст. Импортируйте список участвующих на странице турнира.
@@ -177,6 +220,35 @@
                         @else
                             <div class="mt-3 text-sm text-slate-500">Потоки ещё не сформированы.</div>
                         @endif
+
+                        {{-- Быстрое добавление участницы в эту группу --}}
+                        <details class="mt-3 rounded-lg border border-slate-800 bg-slate-900/30 p-3">
+                            <summary class="cursor-pointer text-xs font-medium text-emerald-300 hover:text-emerald-200">
+                                ＋ Добавить участницу в группу
+                            </summary>
+                            <form method="POST" action="{{ route('secretary.tournament.entries.store', $tournament) }}"
+                                  class="mt-2 flex flex-wrap items-end gap-2">
+                                @csrf
+                                <input type="hidden" name="group_id" value="{{ $group->id }}">
+                                <input type="hidden" name="program" value="{{ $group->program }}">
+                                <div class="flex-1 min-w-[180px]">
+                                    <label class="block text-[10px] uppercase tracking-wider text-slate-500">ФИО / команда</label>
+                                    <x-text-input name="full_name" required placeholder="Иванова Мария"
+                                                  class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 text-sm" />
+                                </div>
+                                <div class="min-w-[160px]">
+                                    <label class="block text-[10px] uppercase tracking-wider text-slate-500">Клуб</label>
+                                    <x-text-input name="club" placeholder="Клуб (необязательно)"
+                                                  class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 text-sm" />
+                                </div>
+                                <button type="submit" class="rounded-md border border-emerald-700/70 bg-emerald-900/40 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-800/50">
+                                    Добавить
+                                </button>
+                            </form>
+                            <p class="mt-2 text-[11px] text-slate-500">
+                                Год и категория берутся из группы. Если потоки уже сформированы — попадёт в последний поток с пересчётом номеров (при необходимости перенесите).
+                            </p>
+                        </details>
                     </div>
                 @empty
                     <div class="text-sm text-slate-400">Групп пока нет. Создайте группу из пула выше.</div>

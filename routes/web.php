@@ -76,6 +76,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/groups', [SecretaryController::class, 'storeGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.store');
+    Route::post('/secretary/tournaments/{tournament}/entries', [SecretaryController::class, 'storeEntry'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.entries.store');
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/streams', [SecretaryController::class, 'generateStreams'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.streams');

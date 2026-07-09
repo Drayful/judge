@@ -361,6 +361,113 @@ class SecretaryController extends Controller
     }
 
     /**
+     * Ручная вставка участницы/команды, если импорт кого-то не добавил.
+     * Без group_id — в пул; с group_id — сразу в группу (и, если потоки уже
+     * сформированы, добавляется в последний поток с пересчётом номеров).
+     */
+    public function storeEntry(Request $request, Tournament $tournament, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'full_name' => ['required', 'string', 'max:255'],
+            'program' => ['required', 'string', 'in:individual,group'],
+            'birth_year' => ['nullable', 'integer', 'min:1990', 'max:2035'],
+            'division' => ['nullable', 'string', 'max:16'],
+            'club' => ['nullable', 'string', 'max:255'],
+            'group_id' => ['nullable', 'integer'],
+        ]);
+
+        $group = null;
+        if (! empty($data['group_id'])) {
+            $group = Group::query()
+                ->where('tournament_id', $tournament->id)
+                ->find($data['group_id']);
+            if ($group === null) {
+                abort(404);
+            }
+        }
+
+        // Программа/год/категория: у группы берём из неё, иначе из формы.
+        $program = $group?->program ?? $data['program'];
+        $birthYear = $group?->birth_year ?? (isset($data['birth_year']) ? (int) $data['birth_year'] : null);
+        $division = $group !== null
+            ? $group->division
+            : (isset($data['division']) && trim($data['division']) !== '' ? strtoupper(trim($data['division'])) : null);
+        $club = isset($data['club']) && trim($data['club']) !== '' ? trim($data['club']) : null;
+
+        $fullName = trim((string) preg_replace('/\s+/u', ' ', $data['full_name']));
+        if ($program === 'group') {
+            // Команда: имя целиком в фамилию.
+            $lastName = $fullName;
+            $firstName = '—';
+        } else {
+            $parts = preg_split('/\s+/u', $fullName, 2);
+            $lastName = $parts[0] ?? $fullName;
+            $firstName = ($parts[1] ?? '') !== '' ? $parts[1] : '—';
+        }
+
+        $birthdate = $birthYear !== null ? Carbon::createFromDate($birthYear, 1, 1)->startOfDay() : null;
+
+        DB::transaction(function () use ($tournament, $group, $program, $birthYear, $division, $club, $lastName, $firstName, $birthdate, $builder) {
+            $athlete = $this->resolveOrCreateAthlete($lastName, $firstName, $birthdate, $club);
+
+            $entry = Entry::query()->create([
+                'tournament_id' => $tournament->id,
+                'athlete_id' => $athlete->id,
+                'group_id' => $group?->id,
+                'program' => $program,
+                'birth_year' => $birthYear,
+                'division' => $division,
+                'club' => $club,
+                'order_index' => (int) (Entry::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
+                'meta' => ['manual' => true],
+            ]);
+
+            // Если у группы уже есть потоки — добавляем в последний и пересчитываем.
+            if ($group !== null) {
+                $maxStream = (int) (Category::query()->where('group_id', $group->id)->max('stream_no') ?? 0);
+                if ($maxStream > 0) {
+                    $entry->stream_no = $maxStream;
+                    $entry->save();
+                    $builder->renumber($group);
+                }
+            }
+        });
+
+        $where = $group !== null ? "группу «{$group->name}»" : 'пул';
+        $msg = "Участница добавлена в {$where}.";
+        if ($group !== null && Category::query()->where('group_id', $group->id)->exists()) {
+            $msg .= ' Добавлена в последний поток, номера пересчитаны.';
+        }
+
+        return redirect()->route('secretary.tournament.groups', $tournament)->with('status', $msg);
+    }
+
+    private function resolveOrCreateAthlete(string $lastName, string $firstName, ?Carbon $birthdate, ?string $club): Athlete
+    {
+        $q = Athlete::query()
+            ->whereRaw('LOWER(last_name) = ?', [mb_strtolower($lastName)])
+            ->whereRaw('LOWER(first_name) = ?', [mb_strtolower($firstName)]);
+
+        $q = $birthdate !== null ? $q->whereDate('birthdate', $birthdate) : $q->whereNull('birthdate');
+
+        $found = $q->first();
+        if ($found !== null) {
+            if ($club !== null && ($found->club === null || $found->club === '')) {
+                $found->update(['club' => $club]);
+            }
+
+            return $found;
+        }
+
+        return Athlete::query()->create([
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'birthdate' => $birthdate,
+            'club' => $club,
+        ]);
+    }
+
+    /**
      * Сформировать потоки группы (авто-разбивка по размеру + очереди).
      */
     public function generateStreams(Request $request, Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse

@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Athlete;
 use App\Models\Category;
+use App\Models\JudgeScore;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -13,7 +15,7 @@ class ScoreboardTest extends TestCase
 {
     use RefreshDatabase;
 
-  public function test_index_shows_tournament_picker(): void
+    public function test_index_shows_tournament_picker(): void
     {
         $tournament = Tournament::create([
             'name' => 'Public Cup',
@@ -130,90 +132,90 @@ class ScoreboardTest extends TestCase
             'status' => 'performing',
             'is_counted' => true,
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'DB1'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'DB1'])->id,
             'panel' => 'd',
             'subpanel' => 'db',
             'score' => 7.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'DB2'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'DB2'])->id,
             'panel' => 'd',
             'subpanel' => 'db',
             'score' => 7.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'DA1'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'DA1'])->id,
             'panel' => 'd',
             'subpanel' => 'da',
             'score' => 4.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'DA2'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'DA2'])->id,
             'panel' => 'd',
             'subpanel' => 'da',
             'score' => 4.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'A1'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'A1'])->id,
             'panel' => 'a',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'A2'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'A2'])->id,
             'panel' => 'a',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'A3'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'A3'])->id,
             'panel' => 'a',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'A4'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'A4'])->id,
             'panel' => 'a',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'E1'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'E1'])->id,
             'panel' => 'e',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'E2'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'E2'])->id,
             'panel' => 'e',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'E3'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'E3'])->id,
             'panel' => 'e',
             'score' => 8.5,
             'submitted_at' => now(),
         ]);
-        \App\Models\JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $live->id,
-            'judge_id' => \App\Models\User::factory()->create(['slot' => 'E4'])->id,
+            'judge_id' => User::factory()->create(['slot' => 'E4'])->id,
             'panel' => 'e',
             'score' => 8.5,
             'submitted_at' => now(),

@@ -171,6 +171,12 @@ class StartProtocolImportService
         }
 
         foreach ($teams as $team) {
+            // Заголовок без участниц — почти всегда ложное срабатывание (клубная
+            // подпись и т.п.). Команду без состава не заводим.
+            if ($team['members'] === []) {
+                continue;
+            }
+
             $teamName = $team['name'] !== '' ? $team['name'] : ($label !== '' ? $label : $title);
             $birthdate = $team['year'] !== null ? Carbon::createFromDate($team['year'], 1, 1)->startOfDay() : null;
 
@@ -247,20 +253,33 @@ class StartProtocolImportService
     }
 
     /**
-     * Строка-заголовок команды: кавычки, «Федерация», «Team», клубный токен.
+     * Строка-заголовок команды. Два признака:
+     *  1) начинается с года/диапазона лет + название: «2014-2015 "Nova"»,
+     *     «2015 Eveline», «2014-2015 IMPULSE» (название может быть без кавычек);
+     *  2) содержит клуб/федерацию/кавычки: «"MGS" г. Алматы», «Федерация г. Алматы».
+     * Строки-участницы этим не считаются: у них год (если есть) стоит В КОНЦЕ
+     * («Фех София 2014»), а не в начале.
      */
     private function isTeamHeader(string $a): bool
     {
+        if (preg_match('/^\s*\d{4}(\s*[-–—]\s*\d{4})?\s+\S/u', $a)) {
+            return true;
+        }
+
         return (bool) preg_match('/[«»“”"]|федерац|\bteam\b|ШХГ|СХГ|СДЮ|г\.\s*алмат|MGS/iu', $a);
     }
 
     private function teamName(string $header): string
     {
+        // Название в кавычках — берём его.
         if (preg_match('/[«“"]([^»”"]+)[»”"]/u', $header, $m)) {
             return trim($m[1]);
         }
 
-        return trim($header);
+        // Иначе отрезаем ведущий год/диапазон лет: «2014-2015 IMPULSE» → «IMPULSE».
+        $stripped = trim((string) preg_replace('/^\s*\d{4}(\s*[-–—]\s*\d{4})?\s+/u', '', $header));
+
+        return $stripped !== '' ? $stripped : trim($header);
     }
 
     private function firstYearIn(string $s): ?int

@@ -12,6 +12,7 @@ use App\Services\FinalProtocolService;
 use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class ScoringSystemTest extends TestCase
@@ -242,7 +243,7 @@ class ScoringSystemTest extends TestCase
         $p4 = $this->makePerformance($category, $a4, 6);
         $p4->update(['total' => 99.000, 'is_counted' => false]);
 
-        $service = new FinalProtocolService();
+        $service = new FinalProtocolService;
         $data = $service->build($category->tournament, 2015, 'A');
 
         $rows = $data['rows'];
@@ -300,7 +301,7 @@ class ScoringSystemTest extends TestCase
         $tmp = tempnam(sys_get_temp_dir(), 'proto').'.xlsx';
         file_put_contents($tmp, $bytes);
 
-        $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+        $reader = IOFactory::createReader('Xlsx');
         $spreadsheet = $reader->load($tmp);
         $sheet = $spreadsheet->getActiveSheet();
 
@@ -347,7 +348,7 @@ class ScoringSystemTest extends TestCase
         $perf->load('judgeScores', 'category');
 
         // Автопереход считает выступление готовым (DA пропущены как неактивные)...
-        $ready = \App\Support\SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
+        $ready = SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
         $this->assertTrue($ready, 'автопереход считает готовым: DA выключены');
 
         // ...но итог НЕ считается, т.к. D требует и DB, и DA.
@@ -379,7 +380,7 @@ class ScoringSystemTest extends TestCase
 
         $perf->load('judgeScores', 'category');
 
-        $ready = \App\Support\SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
+        $ready = SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
         $this->assertTrue($ready, 'автопереход готов с неполными, но активными бригадами');
 
         $perf->recalculateTotals();
@@ -595,7 +596,7 @@ class ScoringSystemTest extends TestCase
         $p1 = $this->makePerformance($category, $a1, 1);
         $p1->update(['total' => 20.0]);
 
-        $service = new FinalProtocolService();
+        $service = new FinalProtocolService;
         $groups = $service->groups($category->tournament);
 
         $this->assertCount(1, $groups);

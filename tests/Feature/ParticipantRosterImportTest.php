@@ -35,13 +35,22 @@ class ParticipantRosterImportTest extends TestCase
             ['Козлова Дина', 2019, 'Клуб В'],
         ], null, 'A1');
 
-        // Групповой лист: заголовок-клуб + участницы.
+        // Групповой лист: три стиля заголовков (кавычки, год+кавычки, год+без кавычек).
         $s3 = $ss->createSheet();
-        $s3->setTitle('груп 2016');
+        $s3->setTitle('груп-ые 2014-2015');
         $s3->fromArray([
-            ['"MGS" г. Алматы', null],
-            ['Аягоз Сафия', 2016],
-            ['Дана Аружан', 2016],
+            ['2014-2015 "Nova"'],
+            ['Фех София 2014'],
+            ['Дастанкызы Сабина 2014'],
+            [''],
+            ['2015 "Eveline"'],
+            ['Донаева Гулмира 2015'],
+            ['Новрузова Нурай 2015'],
+            [''],
+            ['2014-2015 IMPULSE'],   // без кавычек — тоже заголовок
+            ['Айткулова Линна'],      // без года у участниц
+            ['Нурлан Айсана'],
+            ['Марат Айша'],
         ], null, 'A1');
 
         // Судейский лист — должен пропускаться.
@@ -77,10 +86,27 @@ class ParticipantRosterImportTest extends TestCase
         // Латинская «А» с пробелом.
         $this->assertSame(1, Entry::where('birth_year', 2019)->where('division', 'A')->count());
 
-        // Групповая команда: одна entry program=group с составом в meta.
-        $this->assertSame(1, $stats['group_teams_created']);
-        $team = Entry::where('program', 'group')->firstOrFail();
-        $this->assertNotEmpty($team->meta['members'] ?? []);
-        $this->assertCount(2, $team->meta['members']);
+        // Три команды: Nova, Eveline и IMPULSE (последний — заголовок без кавычек).
+        $this->assertSame(3, $stats['group_teams_created']);
+
+        $names = Entry::where('program', 'group')
+            ->with('athlete')
+            ->get()
+            ->map(fn (Entry $e) => $e->athlete->last_name)
+            ->all();
+        $this->assertContains('Nova', $names);
+        $this->assertContains('Eveline', $names);
+        $this->assertContains('IMPULSE', $names);
+
+        // Участницы IMPULSE (без года) не приклеились к Eveline.
+        $impulse = Entry::where('program', 'group')
+            ->whereHas('athlete', fn ($q) => $q->where('last_name', 'IMPULSE'))
+            ->firstOrFail();
+        $this->assertCount(3, $impulse->meta['members']);
+
+        $eveline = Entry::where('program', 'group')
+            ->whereHas('athlete', fn ($q) => $q->where('last_name', 'Eveline'))
+            ->firstOrFail();
+        $this->assertCount(2, $eveline->meta['members']);
     }
 }

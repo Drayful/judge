@@ -95,4 +95,41 @@ class GroupStreamBuilderTest extends TestCase
         $this->assertSame('БП', $firstPerf->apparatus);
         $this->assertSame(1, (int) $firstPerf->start_number);
     }
+
+    public function test_manual_entry_added_to_group_with_streams(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 12);
+        $secretary = $this->secretary();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.store', $tournament), [
+            'program' => 'individual', 'birth_year' => 2018, 'division' => 'C',
+            'apparatus' => ['Б.П.'], 'number_mode' => 'continuous',
+        ]);
+        $group = $tournament->groups()->firstOrFail();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.streams', [$tournament, $group]), [
+            'stream_size' => 12, 'start_time' => '08:00', 'block_minutes' => 25,
+        ]);
+
+        // Ручная вставка забытой участницы в группу.
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.entries.store', $tournament), [
+                'full_name' => 'Забытая Участница',
+                'program' => 'individual',
+                'group_id' => $group->id,
+                'club' => 'Клуб X',
+            ])->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        // Стало 13 в группе, номер 13 у новенькой, попала в поток и в очередь.
+        $this->assertSame(13, Entry::where('group_id', $group->id)->count());
+        $newbie = Entry::where('group_id', $group->id)
+            ->whereHas('athlete', fn ($q) => $q->where('last_name', 'Забытая'))
+            ->firstOrFail();
+        $this->assertSame(13, (int) $newbie->start_number);
+        $this->assertNotNull($newbie->stream_no);
+
+        $category = Category::where('group_id', $group->id)->where('stream_no', $newbie->stream_no)->firstOrFail();
+        $this->assertSame(13, Performance::where('category_id', $category->id)->count());
+    }
 }
