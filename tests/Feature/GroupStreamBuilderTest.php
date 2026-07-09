@@ -89,6 +89,8 @@ class GroupStreamBuilderTest extends TestCase
         $first = $categories->firstWhere('stream_no', 1);
         $this->assertSame('08:00', $first->starts_at_label);
         $this->assertSame('08:25', $first->ends_at_label);
+        // Время попадает в название потока.
+        $this->assertStringContainsString('Поток 1 (08:00–08:25)', $first->name);
 
         // Круг-за-кругом: первое выступление 1-го потока — БП стартового №1.
         $firstPerf = Performance::where('category_id', $first->id)->orderBy('order_index')->first();
@@ -133,6 +135,39 @@ class GroupStreamBuilderTest extends TestCase
         $this->assertSame(13, Performance::where('category_id', $category->id)->count());
     }
 
+    public function test_mass_generate_streams_for_all_groups(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 5, 2018, 'A');
+        $this->seedPool($tournament, 3, 2017, 'B');
+        $secretary = $this->secretary();
+
+        // Две группы без потоков.
+        foreach ([[2018, 'A'], [2017, 'B']] as [$year, $div]) {
+            $this->actingAs($secretary)->post(route('secretary.tournament.groups.store', $tournament), [
+                'program' => 'individual', 'birth_year' => $year, 'division' => $div,
+                'apparatus' => ['Б.П.'], 'number_mode' => 'continuous',
+            ]);
+        }
+        $this->assertSame(0, Category::whereIn('group_id', $tournament->groups()->pluck('id'))->count());
+
+        // Массово нарезать потоки во всех группах.
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.streams.all', $tournament), [
+                'stream_size' => 4, 'start_time' => '09:00', 'block_minutes' => 30,
+            ])->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        // 2018/A: 5/4 → 2 потока; 2017/B: 3 → 1 поток.
+        $groupA = $tournament->groups()->where('birth_year', 2018)->firstOrFail();
+        $groupB = $tournament->groups()->where('birth_year', 2017)->firstOrFail();
+        $this->assertSame(2, Category::where('group_id', $groupA->id)->count());
+        $this->assertSame(1, Category::where('group_id', $groupB->id)->count());
+
+        // Каскад: A стартует 09:00, B — после двух блоков A (09:00→09:30→10:00).
+        $this->assertSame('09:00', Category::where('group_id', $groupA->id)->where('stream_no', 1)->value('starts_at_label'));
+        $this->assertSame('10:00', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
+    }
+
     public function test_assemble_tournament_one_click(): void
     {
         $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
@@ -169,5 +204,38 @@ class GroupStreamBuilderTest extends TestCase
                 'apparatus' => ['Б.П.'], 'stream_size' => 4,
             ])->assertSessionHasErrors('assemble');
         $this->assertSame(2, $tournament->groups()->count());
+    }
+
+    public function test_assemble_uses_separate_apparatus_for_group_program(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        // Индивидуальный пул и групповой (команды).
+        $this->seedPool($tournament, 3, 2018, 'A');
+        $team = Athlete::create(['first_name' => '—', 'last_name' => 'Nova']);
+        Entry::create([
+            'tournament_id' => $tournament->id, 'athlete_id' => $team->id,
+            'program' => 'group', 'birth_year' => 2016, 'division' => null,
+        ]);
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.assemble', $tournament), [
+                'apparatus' => ['Б.П.'],           // индивидуальные
+                'group_apparatus' => ['Обруч', 'Мяч'], // групповые — свои
+                'stream_size' => 12,
+                'start_time' => '08:00', 'block_minutes' => 25,
+            ])->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        $indiv = $tournament->groups()->where('program', 'individual')->firstOrFail();
+        $grp = $tournament->groups()->where('program', 'group')->firstOrFail();
+
+        $this->assertSame(['Б.П.'], $indiv->apparatusLabels());
+        $this->assertSame(['Обруч', 'Мяч'], $grp->apparatusLabels());
+
+        // Групповые — секцией после индивидуальных (каскад времени): индивид с 08:00,
+        // групповые позже.
+        $indivStart = Category::where('group_id', $indiv->id)->where('stream_no', 1)->value('starts_at_label');
+        $grpStart = Category::where('group_id', $grp->id)->where('stream_no', 1)->value('starts_at_label');
+        $this->assertSame('08:00', $indivStart);
+        $this->assertTrue($grpStart > $indivStart, "групповые ({$grpStart}) должны идти после индивидуальных ({$indivStart})");
     }
 }

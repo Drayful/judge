@@ -94,11 +94,15 @@ class StartProtocolImportService
                 continue;
             }
 
-            $rowYear = $this->parseYear($sheet->getCell('B'.$row)->getValue()) ?? $sheetYear;
+            // Год из ячейки — это реальная дата рождения гимнастки (для протокола).
+            // Категория же определяется ЛИСТОМ (год листа + буква), поэтому entry.birth_year
+            // берём из листа: так «2020 и младше» и т.п. не разъезжаются по годам.
+            $rowYear = $this->parseYear($sheet->getCell('B'.$row)->getValue());
             $club = $this->cellStr($sheet, $row, 'C');
 
             [$lastName, $firstName] = $this->splitName($name);
-            $birthdate = $rowYear !== null ? Carbon::createFromDate($rowYear, 1, 1)->startOfDay() : null;
+            $realYear = $rowYear ?? $sheetYear;
+            $birthdate = $realYear !== null ? Carbon::createFromDate($realYear, 1, 1)->startOfDay() : null;
 
             $athlete = $this->resolveAthlete($lastName, $firstName, $birthdate, $club, $stats);
 
@@ -112,11 +116,11 @@ class StartProtocolImportService
                 'tournament_id' => $tournament->id,
                 'athlete_id' => $athlete->id,
                 'program' => 'individual',
-                'birth_year' => $rowYear ?? $sheetYear,
+                'birth_year' => $sheetYear,
                 'division' => $division,
                 'club' => $club !== '' ? $club : null,
                 'order_index' => ++$order,
-                'meta' => ['sheet' => $title, 'label' => $label],
+                'meta' => ['sheet' => $title, 'label' => $label, 'real_year' => $rowYear],
             ]);
 
             $stats['entries_created']++;
@@ -192,13 +196,16 @@ class StartProtocolImportService
                 'tournament_id' => $tournament->id,
                 'athlete_id' => $athlete->id,
                 'program' => 'group',
-                'birth_year' => $team['year'] ?? $sheetYear,
+                // Категория = лист (год листа), а не год конкретной команды — иначе
+                // «2014-2015», «КМС» и т.п. разъезжаются по годам.
+                'birth_year' => $sheetYear,
                 'division' => null,
                 'club' => $team['club'] !== '' ? $team['club'] : null,
                 'meta' => [
                     'sheet' => $title,
                     'label' => $label,
                     'members' => $team['members'],
+                    'real_year' => $team['year'],
                 ],
             ]);
 

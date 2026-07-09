@@ -127,18 +127,25 @@ class StreamBuilderService
 
         $isNew = ! $category->exists;
 
-        $category->name = $group->name.' — Поток '.$streamNo;
+        // Время: из переданных меток, иначе сохраняем текущее (renumber не сбрасывает).
+        $start = ($times['start'] ?? null) !== null ? $times['start'] : $category->starts_at_label;
+        $end = ($times['end'] ?? null) !== null ? $times['end'] : $category->ends_at_label;
+
+        $category->starts_at_label = $start;
+        $category->ends_at_label = $end;
+
+        $timeSuffix = '';
+        if ($start !== null && $start !== '') {
+            $timeSuffix = $end !== null && $end !== ''
+                ? ' ('.$start.'–'.$end.')'
+                : ' ('.$start.')';
+        }
+
+        $category->name = $group->name.' — Поток '.$streamNo.$timeSuffix;
         $category->program = $group->program;
         $category->birth_year = $group->birth_year;
         $category->division = $group->division;
         $category->apparatus = $this->apparatusSummary($group);
-
-        if (($times['start'] ?? null) !== null) {
-            $category->starts_at_label = $times['start'];
-        }
-        if (($times['end'] ?? null) !== null) {
-            $category->ends_at_label = $times['end'];
-        }
 
         if ($isNew) {
             $category->is_published = false;

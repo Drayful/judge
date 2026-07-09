@@ -23,6 +23,7 @@ use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -102,23 +103,34 @@ class SecretaryController extends Controller
         $data = $request->validate([
             'birth_year' => ['nullable', 'integer'],
             'division' => ['nullable', 'string', 'max:16'],
+            'mode' => ['nullable', 'string', 'in:all_around,by_apparatus'],
         ]);
 
         $birthYear = isset($data['birth_year']) ? (int) $data['birth_year'] : null;
         $division = $data['division'] ?? null;
+        $mode = $data['mode'] ?? 'all_around';
 
-        $built = $protocols->build($tournament, $birthYear, $division);
-
-        if ($built['rows'] === []) {
-            abort(404, 'Нет завершённых результатов для этой категории.');
+        if ($mode === 'by_apparatus') {
+            $built = $protocols->buildByApparatus($tournament, $birthYear, $division);
+            $hasRows = collect($built['apparatus'])->contains(fn ($a) => $a['rows'] !== []);
+            if (! $hasRows) {
+                abort(404, 'Нет завершённых результатов по видам для этой категории.');
+            }
+            $spreadsheet = $exporter->buildByApparatus($tournament, $built);
+            $suffix = '_vidy';
+        } else {
+            $built = $protocols->build($tournament, $birthYear, $division);
+            if ($built['rows'] === []) {
+                abort(404, 'Нет завершённых результатов для этой категории.');
+            }
+            $spreadsheet = $exporter->build($tournament, $built);
+            $suffix = '';
         }
-
-        $spreadsheet = $exporter->build($tournament, $built);
 
         $fileName = 'protocol_'.$tournament->id.'_'
             .($birthYear ?? 'na').'_'
             .($division !== null && $division !== '' ? strtoupper($division) : 'na')
-            .'.xlsx';
+            .$suffix.'.xlsx';
 
         return response()->streamDownload(function () use ($spreadsheet) {
             $writer = new XlsxWriter($spreadsheet);
@@ -220,13 +232,30 @@ class SecretaryController extends Controller
     }
 
     /**
-     * Очистить турнир от всех потоков (категорий) разом.
+     * Полная очистка турнира: потоки (категории) с выступлениями/оценками/музыкой,
+     * группы, пул участниц (entries) и привязанные к турниру атлеты.
+     * Атлеты удаляются только если не задействованы в других турнирах.
      */
     public function clearTournamentCategories(Tournament $tournament): RedirectResponse
     {
-        $deleted = 0;
+        $stats = ['categories' => 0, 'groups' => 0, 'entries' => 0, 'athletes' => 0];
 
-        DB::transaction(function () use ($tournament, &$deleted) {
+        DB::transaction(function () use ($tournament, &$stats) {
+            // Атлеты, связанные с турниром (через пул и через выступления) — фиксируем
+            // ДО удаления, потом проверим, не заняты ли они в других турнирах.
+            $athleteIds = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->pluck('athlete_id')
+                ->merge(
+                    Performance::query()
+                        ->join('categories', 'categories.id', '=', 'performances.category_id')
+                        ->where('categories.tournament_id', $tournament->id)
+                        ->pluck('performances.athlete_id')
+                )
+                ->filter()
+                ->unique()
+                ->values();
+
             $categories = Category::query()
                 ->where('tournament_id', $tournament->id)
                 ->get();
@@ -234,15 +263,29 @@ class SecretaryController extends Controller
             foreach ($categories as $cat) {
                 $this->purgeCategoryMusic($cat);
                 $cat->delete();
-                $deleted++;
+                $stats['categories']++;
             }
 
+            $stats['groups'] = Group::query()->where('tournament_id', $tournament->id)->delete();
+            $stats['entries'] = Entry::query()->where('tournament_id', $tournament->id)->delete();
+
             $tournament->update(['active_category_id' => null]);
+
+            // Удаляем атлетов, которые после очистки больше нигде не используются.
+            foreach ($athleteIds as $athleteId) {
+                $usedElsewhere = Entry::query()->where('athlete_id', $athleteId)->exists()
+                    || Performance::query()->where('athlete_id', $athleteId)->exists();
+
+                if (! $usedElsewhere) {
+                    Athlete::query()->whereKey($athleteId)->delete();
+                    $stats['athletes']++;
+                }
+            }
         });
 
-        $msg = $deleted > 0
-            ? "Турнир очищен: удалено потоков — {$deleted}."
-            : 'В турнире не было потоков для удаления.';
+        $msg = ($stats['categories'] + $stats['groups'] + $stats['entries'] + $stats['athletes']) > 0
+            ? "Турнир очищен: потоков — {$stats['categories']}, групп — {$stats['groups']}, участниц в пуле — {$stats['entries']}, атлетов удалено — {$stats['athletes']}."
+            : 'В турнире нечего было очищать.';
 
         return redirect()->route('secretary.tournament', $tournament)->with('status', $msg);
     }
@@ -345,21 +388,25 @@ class SecretaryController extends Controller
         $data = $request->validate([
             'apparatus' => ['required', 'array', 'min:1'],
             'apparatus.*' => ['string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+            'group_apparatus' => ['nullable', 'array'],
+            'group_apparatus.*' => ['string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
             'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
         ], [
-            'apparatus.required' => 'Выберите хотя бы один предмет по умолчанию.',
+            'apparatus.required' => 'Выберите хотя бы один предмет для индивидуальных.',
         ]);
 
-        $apparatus = array_values($data['apparatus']);
+        $indivApparatus = array_values($data['apparatus']);
+        // Групповым — свои предметы; если не указаны, берём индивидуальные.
+        $groupApparatus = ! empty($data['group_apparatus']) ? array_values($data['group_apparatus']) : $indivApparatus;
         $streamSize = (int) $data['stream_size'];
         $numberMode = $data['number_mode'] ?? 'continuous';
         $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
 
         // Пулы: непривязанные entries по (программа, год, категория) в порядке дня —
-        // индивидуальные раньше групповых, младшие (больший год) раньше.
+        // индивидуальные раньше групповых (групповые отдельной секцией), младшие раньше.
         $pools = Entry::query()
             ->where('tournament_id', $tournament->id)
             ->whereNull('group_id')
@@ -377,41 +424,102 @@ class SecretaryController extends Controller
         $groupsCreated = 0;
         $streamsCreated = 0;
 
-        DB::transaction(function () use ($pools, $tournament, $builder, $apparatus, $streamSize, $numberMode, $blockMinutes, $data, &$groupsCreated, &$streamsCreated) {
-            // Общий «курсор» времени на весь день (каскадное расписание).
-            $cursor = ($data['start_time'] ?? null) !== null && $blockMinutes !== null
-                ? Carbon::createFromFormat('H:i', $data['start_time'])->startOfMinute()
-                : null;
-
+        DB::transaction(function () use ($pools, $tournament, $builder, $indivApparatus, $groupApparatus, $streamSize, $numberMode, $blockMinutes, $data, &$groupsCreated, &$streamsCreated) {
+            $groups = collect();
             foreach ($pools as $pool) {
                 $birthYear = $pool->birth_year !== null ? (int) $pool->birth_year : null;
                 $division = $pool->division !== null && trim((string) $pool->division) !== ''
                     ? strtoupper(trim((string) $pool->division))
                     : null;
 
-                $group = $this->createGroupFromPool($tournament, $pool->program, $birthYear, $division, $apparatus, $numberMode);
-                $groupsCreated++;
-
-                $count = Entry::query()->where('group_id', $group->id)->count();
-                $streamCount = (int) ceil($count / $streamSize);
-
-                // Каскад времени: этой группе — блоки от курсора, затем сдвигаем курсор.
-                $times = [];
-                if ($cursor !== null) {
-                    for ($i = 0; $i < $streamCount; $i++) {
-                        $start = $cursor->format('H:i');
-                        $cursor = $cursor->copy()->addMinutes($blockMinutes);
-                        $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
-                    }
-                }
-
-                $builder->generateStreams($group, $streamSize, $times, $numberMode);
-                $streamsCreated += $streamCount;
+                $apparatus = $pool->program === 'group' ? $groupApparatus : $indivApparatus;
+                $groups->push($this->createGroupFromPool($tournament, $pool->program, $birthYear, $division, $apparatus, $numberMode));
             }
+
+            $groupsCreated = $groups->count();
+            $streamsCreated = $this->cascadeStreams($groups, $streamSize, $data['start_time'] ?? null, $blockMinutes, $numberMode, $builder);
         });
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', "Турнир собран: групп создано {$groupsCreated}, потоков {$streamsCreated}. Предметы/время можно поправить по каждой группе.");
+    }
+
+    /**
+     * Массовое формирование потоков сразу по всем группам турнира (единый размер
+     * потока + каскадное расписание дня). Предметы каждой группы сохраняются.
+     */
+    public function generateAllStreams(Request $request, Tournament $tournament, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
+            'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
+            'start_time' => ['nullable', 'date_format:H:i'],
+            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+        ]);
+
+        $groups = $tournament->groups()
+            ->orderByRaw("case when program = 'individual' then 0 else 1 end")
+            ->orderByDesc('birth_year')
+            ->orderBy('division')
+            ->orderBy('order_index')
+            ->get();
+
+        if ($groups->isEmpty()) {
+            return back()->withErrors(['streams' => 'Сначала создайте группы.']);
+        }
+
+        $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
+        $streamsCreated = 0;
+
+        DB::transaction(function () use ($groups, $data, $blockMinutes, $builder, &$streamsCreated) {
+            $streamsCreated = $this->cascadeStreams(
+                $groups,
+                (int) $data['stream_size'],
+                $data['start_time'] ?? null,
+                $blockMinutes,
+                $data['number_mode'] ?? null, // null → у каждой группы свой режим
+                $builder,
+            );
+        });
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Потоки сформированы по всем группам ({$groups->count()}): всего потоков {$streamsCreated}.");
+    }
+
+    /**
+     * Нарезать потоки для набора групп подряд с каскадным расписанием дня:
+     * следующая группа стартует, когда закончилась предыдущая.
+     *
+     * @param  Collection<int, Group>  $groups
+     * @return int число сформированных потоков
+     */
+    private function cascadeStreams($groups, int $streamSize, ?string $startTime, ?int $blockMinutes, ?string $numberModeOverride, StreamBuilderService $builder): int
+    {
+        $streamSize = max(1, $streamSize);
+        $cursor = ($startTime !== null && $blockMinutes !== null)
+            ? Carbon::createFromFormat('H:i', $startTime)->startOfMinute()
+            : null;
+
+        $streamsCreated = 0;
+        foreach ($groups as $group) {
+            $count = Entry::query()->where('group_id', $group->id)->count();
+            $streamCount = (int) ceil($count / $streamSize);
+
+            $times = [];
+            if ($cursor !== null) {
+                for ($i = 0; $i < $streamCount; $i++) {
+                    $start = $cursor->format('H:i');
+                    $cursor = $cursor->copy()->addMinutes($blockMinutes);
+                    $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
+                }
+            }
+
+            $mode = $numberModeOverride ?? $group->number_mode ?? 'continuous';
+            $builder->generateStreams($group, $streamSize, $times, $mode);
+            $streamsCreated += $streamCount;
+        }
+
+        return $streamsCreated;
     }
 
     /**
@@ -906,10 +1014,6 @@ class SecretaryController extends Controller
                 ->get()
             : collect();
 
-        $protocolGroups = $tournament
-            ? app(FinalProtocolService::class)->groups($tournament)
-            : collect();
-
         // История выставления оценок по слотам (для модалки по клику на оценку).
         $scoreHistory = [];
         foreach (SecretaryLiveUi::scoreRowsBySlot($currentPerformance, $category) as $slot => $row) {
@@ -929,7 +1033,6 @@ class SecretaryController extends Controller
         return [
             'category' => $category,
             'tournamentCategories' => $tournamentCategories,
-            'protocolGroups' => $protocolGroups,
             'performances' => $performances,
             'orderedPerformances' => $ordered,
             'currentPerformance' => $currentPerformance,
@@ -1124,6 +1227,41 @@ class SecretaryController extends Controller
         });
 
         return back()->with('status', 'Ручной режим снят — итог снова считается по оценкам судей.');
+    }
+
+    /**
+     * Снять выступление со старта: статус «withdrawn», стартовый номер сохраняется,
+     * очередь его пропускает, в протокол не идёт. Если было текущим — вызовется следующая.
+     */
+    public function withdrawPerformance(Performance $performance): RedirectResponse
+    {
+        if ($performance->isWithdrawn()) {
+            return back()->with('status', 'Выступление уже снято.');
+        }
+
+        $performance->status = 'withdrawn';
+        $performance->withdrawn_at = now();
+        $performance->save();
+
+        $name = $performance->loadMissing('athlete')->athlete?->last_name ?? 'участница';
+
+        return back()->with('status', "Снята со старта: {$name} (№ {$performance->start_number} сохранён).");
+    }
+
+    /**
+     * Вернуть снятое выступление в очередь (scheduled).
+     */
+    public function restorePerformance(Performance $performance): RedirectResponse
+    {
+        if (! $performance->isWithdrawn()) {
+            return back()->with('status', 'Выступление и так в очереди.');
+        }
+
+        $performance->status = 'scheduled';
+        $performance->withdrawn_at = null;
+        $performance->save();
+
+        return back()->with('status', 'Возвращена в очередь.');
     }
 
     public function addToQueue(Request $request, Category $category): RedirectResponse

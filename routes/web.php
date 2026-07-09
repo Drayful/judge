@@ -82,6 +82,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/assemble', [SecretaryController::class, 'assembleTournament'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.assemble');
+    Route::post('/secretary/tournaments/{tournament}/streams-all', [SecretaryController::class, 'generateAllStreams'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.streams.all');
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/streams', [SecretaryController::class, 'generateStreams'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.streams');
@@ -142,6 +145,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/performances/{performance}/clear-final-override', [SecretaryController::class, 'clearFinalOverride'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.performance.clearFinalOverride');
+    Route::post('/secretary/performances/{performance}/withdraw', [SecretaryController::class, 'withdrawPerformance'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.performance.withdraw');
+    Route::post('/secretary/performances/{performance}/restore', [SecretaryController::class, 'restorePerformance'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.performance.restore');
 
     Route::get('/judge', [JudgeController::class, 'tournaments'])
         ->middleware('role:judge,admin')

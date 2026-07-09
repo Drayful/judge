@@ -27,13 +27,13 @@
                     </a>
                     <form method="POST"
                           action="{{ route('secretary.tournament.categories.clear', $tr) }}"
-                          onsubmit="return confirm('Удалить ВСЕ потоки этого турнира?\n\nВместе с потоками будут удалены выступления, оценки судей, запросы и загруженная музыка.\n\nДействие необратимо. Продолжить?');"
+                          onsubmit="return confirm('Полностью очистить турнир?\n\nБудут удалены: потоки, группы, весь пул участниц, выступления, оценки судей, запросы, музыка, а также атлеты, привязанные к этому турниру (если они не участвуют в других турнирах).\n\nДействие необратимо. Продолжить?');"
                           class="inline-block">
                         @csrf
                         @method('DELETE')
                         <button type="submit"
                                 class="rounded-lg border border-rose-700/60 bg-rose-950/40 px-3 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-900/60 hover:border-rose-600 transition">
-                            Очистить все потоки
+                            Полностью очистить турнир
                         </button>
                     </form>
                 @endif

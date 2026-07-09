@@ -19,14 +19,67 @@ class FinalProtocolExporter
      */
     public function build(Tournament $tournament, array $data): Spreadsheet
     {
+        $spreadsheet = new Spreadsheet;
+        $this->renderSheet($spreadsheet->getActiveSheet(), $tournament, $data);
+
+        return $spreadsheet;
+    }
+
+    /**
+     * Протоколы ПО ВИДАМ: одна книга, по листу на предмет.
+     *
+     * @param  array{title:string, birth_year:?int, division:?string, apparatus:list<array{label:string, rows:list<array{place:int, name:string, year:?int, club:string, score:float}>}>}  $data
+     */
+    public function buildByApparatus(Tournament $tournament, array $data): Spreadsheet
+    {
+        $spreadsheet = new Spreadsheet;
+        $first = true;
+        $usedTitles = [];
+
+        foreach ($data['apparatus'] as $ap) {
+            $sheet = $first ? $spreadsheet->getActiveSheet() : $spreadsheet->createSheet();
+            $first = false;
+
+            $rows = array_map(fn ($r) => [
+                'place' => $r['place'],
+                'name' => $r['name'],
+                'year' => $r['year'],
+                'club' => $r['club'],
+                'vidi' => [$r['score']],
+                'total' => $r['score'],
+            ], $ap['rows']);
+
+            $this->renderSheet($sheet, $tournament, [
+                'title' => $data['title'].' · '.$ap['label'],
+                'birth_year' => $data['birth_year'],
+                'division' => $data['division'],
+                'max_vidi' => 1,
+                'vidi_headers' => [$ap['label']],
+                'rows' => $rows,
+            ]);
+
+            $sheet->setTitle($this->uniqueSheetTitle($ap['label'], $usedTitles));
+        }
+
+        if ($first) {
+            // не было ни одного предмета — вернём пустой лист-заглушку.
+            $spreadsheet->getActiveSheet()->setCellValue('A1', 'Нет результатов по видам.');
+        }
+
+        return $spreadsheet;
+    }
+
+    /**
+     * @param  array{title:string, birth_year:?int, division:?string, max_vidi:int, vidi_headers?:list<string>, rows:list<array{place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}  $data
+     */
+    private function renderSheet(Worksheet $sheet, Tournament $tournament, array $data): void
+    {
         $maxVidi = max(1, (int) $data['max_vidi']);
 
         // Колонки: № | Гимнастка | Год | Город | Вид 1..N | Итог | Место
         $totalCols = 4 + $maxVidi + 2;
         $lastColLetter = Coordinate::stringFromColumnIndex($totalCols);
 
-        $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle($this->safeSheetTitle($data['birth_year'], $data['division']));
 
         // Шапка
@@ -50,8 +103,9 @@ class FinalProtocolExporter
         // Заголовки таблицы (строка 5)
         $headerRow = 5;
         $headers = ['№', 'Гимнастка', 'Год', 'Город'];
+        $vidiHeaders = $data['vidi_headers'] ?? [];
         for ($i = 1; $i <= $maxVidi; $i++) {
-            $headers[] = 'Вид '.$i;
+            $headers[] = $vidiHeaders[$i - 1] ?? ('Вид '.$i);
         }
         $headers[] = 'Итог';
         $headers[] = 'Место';
@@ -106,8 +160,6 @@ class FinalProtocolExporter
         $sheet->setCellValue('D'.($signRow + 2), '____________________');
 
         $this->autoSizeColumns($sheet, $totalCols);
-
-        return $spreadsheet;
     }
 
     private function datesLine(Tournament $tournament): string
@@ -128,6 +180,23 @@ class FinalProtocolExporter
         $title = preg_replace('/[\\\\\/\?\*\[\]:]/u', '_', $title) ?? 'Протокол';
 
         return mb_substr($title !== '' ? $title : 'Протокол', 0, 31);
+    }
+
+    /**
+     * @param  array<string, bool>  $used
+     */
+    private function uniqueSheetTitle(string $label, array &$used): string
+    {
+        $base = preg_replace('/[\\\\\/\?\*\[\]:]/u', '_', trim($label)) ?: 'Вид';
+        $base = mb_substr($base, 0, 28);
+        $title = $base;
+        $n = 1;
+        while (isset($used[$title])) {
+            $title = mb_substr($base, 0, 25).' '.(++$n);
+        }
+        $used[$title] = true;
+
+        return $title;
     }
 
     private function autoSizeColumns(Worksheet $sheet, int $totalCols): void

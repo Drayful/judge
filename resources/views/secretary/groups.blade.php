@@ -44,8 +44,9 @@
                           class="mt-4 space-y-3"
                           onsubmit="return confirm('Создать группы по всем {{ $pool->count() }} пулам и нарезать потоки?');">
                         @csrf
+                        @php($hasGroupPool = $pool->contains(fn ($p) => $p['program'] === 'group'))
                         <div>
-                            <x-input-label value="Предметы по умолчанию (для всех групп)" />
+                            <x-input-label :value="$hasGroupPool ? 'Предметы — индивидуальные' : 'Предметы по умолчанию'" />
                             <div class="mt-1 flex flex-wrap gap-2">
                                 @foreach($apparatusOptions as $ap)
                                     <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-emerald-600">
@@ -58,6 +59,24 @@
                             @error('apparatus') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
                             @error('assemble') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
                         </div>
+
+                        @if($hasGroupPool)
+                            <div class="rounded-lg border border-amber-800/40 bg-amber-950/15 p-3">
+                                <x-input-label value="Предметы — групповые команды (отдельно)" />
+                                <div class="mt-1 flex flex-wrap gap-2">
+                                    @foreach($apparatusOptions as $ap)
+                                        <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-amber-600">
+                                            <input type="checkbox" name="group_apparatus[]" value="{{ $ap }}"
+                                                   class="rounded border-slate-600 bg-slate-950 text-amber-500 focus:ring-amber-500">
+                                            {{ $ap }}
+                                        </label>
+                                    @endforeach
+                                </div>
+                                <p class="mt-1 text-[11px] text-slate-500">
+                                    Групповые команды идут отдельной секцией после индивидуальных. Если ничего не выбрать — возьмутся индивидуальные предметы.
+                                </p>
+                            </div>
+                        @endif
 
                         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
                             <div>
@@ -204,6 +223,49 @@
                     <div class="font-semibold text-slate-100">Группы</div>
                     <x-badge tone="gray">{{ $tournament->groups->count() }} групп</x-badge>
                 </div>
+
+                {{-- Массовое формирование потоков по всем группам --}}
+                @if($tournament->groups->isNotEmpty())
+                    <div class="mb-4 rounded-xl border border-sky-800/50 bg-sky-950/20 p-4">
+                        <div class="text-sm font-semibold text-sky-100">Массовое формирование потоков (все группы)</div>
+                        <p class="mt-1 text-xs text-slate-400">
+                            Нарезать потоки сразу во всех {{ $tournament->groups->count() }} группах единым размером и каскадным
+                            расписанием дня. Предметы каждой группы сохраняются. Уже начатые/завершённые выступления не трогаются.
+                        </p>
+                        <form method="POST" action="{{ route('secretary.tournament.streams.all', $tournament) }}"
+                              class="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3 items-end"
+                              onsubmit="return confirm('Пересобрать потоки во всех группах?');">
+                            @csrf
+                            <div>
+                                <x-input-label value="Размер потока" />
+                                <x-text-input name="stream_size" type="number" min="1" max="200" value="12"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Начало дня (ЧЧ:ММ)" />
+                                <x-text-input name="start_time" type="time" value="08:00"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Блок, мин" />
+                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                              class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                            </div>
+                            <div>
+                                <x-input-label value="Нумерация" />
+                                <select name="number_mode" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
+                                    <option value="">как у группы</option>
+                                    <option value="continuous">сквозная</option>
+                                    <option value="per_stream">с начала в потоке</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="rounded-lg border border-sky-600/70 bg-sky-800/40 px-3 py-2 text-sm font-semibold text-sky-50 hover:bg-sky-700/50">
+                                Сформировать во всех
+                            </button>
+                        </form>
+                        @error('streams') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                    </div>
+                @endif
 
                 @forelse($tournament->groups as $group)
                     <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40 mb-3">

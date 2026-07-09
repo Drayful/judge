@@ -39,6 +39,7 @@ class Performance extends Model
         'finalized_at',
         'approved_at',
         'published_at',
+        'withdrawn_at',
     ];
 
     protected $casts = [
@@ -50,9 +51,15 @@ class Performance extends Model
         'approved_at' => 'datetime',
         'published_at' => 'datetime',
         'scores_overridden_at' => 'datetime',
+        'withdrawn_at' => 'datetime',
         'is_counted' => 'bool',
         'scores_overridden' => 'bool',
     ];
+
+    public function isWithdrawn(): bool
+    {
+        return $this->status === 'withdrawn' || $this->withdrawn_at !== null;
+    }
 
     public function originalPerformance(): BelongsTo
     {

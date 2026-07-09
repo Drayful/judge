@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Athlete;
 use App\Models\Entry;
 use App\Models\Tournament;
 use App\Services\StartProtocolImportService;
@@ -79,9 +80,14 @@ class ParticipantRosterImportTest extends TestCase
         $this->assertSame(1, $stats['sheets_skipped']);
         $this->assertSame(3, $stats['sheets_processed']);
 
-        // Кириллическая «С» нормализована в латинскую «C»; год строки переопределяет лист.
-        $this->assertSame(2, Entry::where('birth_year', 2018)->where('division', 'C')->count());
-        $this->assertSame(1, Entry::where('birth_year', 2017)->where('division', 'C')->count());
+        // Кириллическая «С» нормализована в латинскую «C». Категория — по ЛИСТУ:
+        // все три строки листа «2018С» попадают в 2018/C, даже строка с годом 2017.
+        $this->assertSame(3, Entry::where('birth_year', 2018)->where('division', 'C')->count());
+        $this->assertSame(0, Entry::where('birth_year', 2017)->count());
+
+        // При этом реальный год рождения сохранён в дате рождения атлета.
+        $sidorova = Athlete::where('last_name', 'Сидорова')->firstOrFail();
+        $this->assertSame(2017, $sidorova->birthdate->year);
 
         // Латинская «А» с пробелом.
         $this->assertSame(1, Entry::where('birth_year', 2019)->where('division', 'A')->count());

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Support\PerformanceApparatus;
 use Illuminate\Support\Collection;
 
 /**
@@ -34,7 +35,7 @@ class FinalProtocolService
 
         return $categories
             ->groupBy(fn (Category $c) => $this->key($c->resolvedBirthYear(), $c->resolvedDivision()))
-            ->map(function (Collection $cats) use ($tournament) {
+            ->map(function (Collection $cats) {
                 /** @var Category $first */
                 $first = $cats->first();
                 $year = $first->resolvedBirthYear();
@@ -44,6 +45,7 @@ class FinalProtocolService
                     ->whereIn('category_id', $cats->pluck('id'))
                     ->whereNotNull('total')
                     ->where('is_counted', true)
+                    ->whereNull('withdrawn_at')
                     ->distinct('athlete_id')
                     ->count('athlete_id');
 
@@ -124,6 +126,7 @@ class FinalProtocolService
             ->whereIn('category_id', $categories->pluck('id'))
             ->whereNotNull('total')
             ->where('is_counted', true)
+            ->whereNull('withdrawn_at')
             ->when($publishedOnly, fn ($q) => $q->whereNotNull('published_at'))
             ->orderBy('athlete_id')
             ->orderBy('order_index')
@@ -178,6 +181,90 @@ class FinalProtocolService
             'division' => $division,
             'max_vidi' => max(1, $maxVidi),
             'rows' => $rows,
+        ];
+    }
+
+    /**
+     * Протоколы ПО ВИДАМ (по предметам) для группы (год + категория): для каждого
+     * предмета — отдельный ранжированный список по оценке этого вида.
+     *
+     * @return array{title:string, birth_year:?int, division:?string, apparatus:list<array{label:string, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, score:float}>}>}
+     */
+    public function buildByApparatus(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly = false): array
+    {
+        $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
+
+        $categories = $tournament->categories()->get()->filter(
+            fn (Category $c) => $c->resolvedBirthYear() === $birthYear
+                && $c->resolvedDivision() === $division
+        );
+
+        $performances = Performance::query()
+            ->with('athlete')
+            ->whereIn('category_id', $categories->pluck('id'))
+            ->whereNotNull('total')
+            ->where('is_counted', true)
+            ->whereNull('withdrawn_at')
+            ->when($publishedOnly, fn ($q) => $q->whereNotNull('published_at'))
+            ->get();
+
+        $byApparatus = $performances->groupBy(fn (Performance $p) => trim((string) ($p->apparatus ?? '—')) ?: '—');
+
+        $apparatus = [];
+        foreach ($byApparatus as $label => $perfs) {
+            $rows = [];
+            foreach ($perfs as $perf) {
+                $athlete = $perf->athlete;
+                if ($athlete === null) {
+                    continue;
+                }
+                // На одну гимнастку по одному предмету — одна строка (на всякий случай — лучший результат).
+                $score = round((float) $perf->total, 3);
+                if (isset($rows[$athlete->id]) && $rows[$athlete->id]['score'] >= $score) {
+                    continue;
+                }
+                $rows[$athlete->id] = [
+                    'athlete_id' => $athlete->id,
+                    'name' => trim(($athlete->last_name ?? '').' '.($athlete->first_name ?? '')),
+                    'year' => $athlete->birthdate?->year ?? $birthYear,
+                    'club' => trim((string) ($athlete->club ?? '')),
+                    'score' => $score,
+                ];
+            }
+
+            $rows = array_values($rows);
+            usort($rows, fn ($a, $b) => $b['score'] <=> $a['score']);
+
+            $place = 0;
+            $prevRounded = null;
+            foreach ($rows as &$row) {
+                $rounded = round($row['score'], self::PLACE_PRECISION);
+                if ($prevRounded === null || $rounded !== $prevRounded) {
+                    $place++;
+                    $prevRounded = $rounded;
+                }
+                $row['place'] = $place;
+            }
+            unset($row);
+
+            $apparatus[] = ['label' => (string) $label, 'rows' => $rows];
+        }
+
+        // Порядок предметов: как в справочнике РГ, затем прочие по алфавиту.
+        $order = array_flip(PerformanceApparatus::RG_APPARATUS);
+        $order[PerformanceApparatus::BODY_ONLY_LABEL] = -1; // БП вперёд
+        usort($apparatus, function ($a, $b) use ($order) {
+            $ra = $order[$a['label']] ?? 999;
+            $rb = $order[$b['label']] ?? 999;
+
+            return $ra !== $rb ? $ra <=> $rb : strcmp($a['label'], $b['label']);
+        });
+
+        return [
+            'title' => $this->label($birthYear, $division),
+            'birth_year' => $birthYear,
+            'division' => $division,
+            'apparatus' => $apparatus,
         ];
     }
 

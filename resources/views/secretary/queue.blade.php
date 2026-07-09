@@ -23,25 +23,11 @@
     <x-slot name="header">
         <div class="flex flex-wrap items-center justify-between gap-3 w-full">
             <a class="text-sm text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.tournament', $category->tournament_id) }}">← {{ $category->tournament?->name ?? 'Турнир' }}</a>
-            @if($category->tournament)
-                <a class="text-sm font-medium text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.tournament', $category->tournament) }}#protocols">
-                    Итоговые протоколы →
-                </a>
-            @endif
         </div>
     </x-slot>
 
     <div class="py-6 space-y-6 max-w-[1600px] mx-auto">
         <x-flash />
-
-        @if($category->tournament && ($protocolGroups ?? collect())->isNotEmpty())
-            <x-card>
-                @include('secretary.partials.protocol-downloads', [
-                    'tournament' => $category->tournament,
-                    'protocolGroups' => $protocolGroups,
-                ])
-            </x-card>
-        @endif
 
         @if($category->tournament)
             <x-card>
@@ -159,6 +145,13 @@
                                 Завершить
                             </button>
                         </form>
+                        <form method="POST" action="{{ route('secretary.performance.withdraw', $currentPerformance) }}"
+                              onsubmit="return confirm('Снять {{ $currentPerformance->athlete->last_name }} {{ $currentPerformance->athlete->first_name }} со старта? Стартовый № сохранится, очередь перейдёт к следующей.');">
+                            @csrf
+                            <button type="submit" class="rounded-xl border border-amber-700/70 bg-amber-950/40 px-4 py-2.5 text-sm font-medium text-amber-100 hover:bg-amber-900/60">
+                                Снять со старта
+                            </button>
+                        </form>
                     @endif
                 </div>
                 @if($nextPerformance)
@@ -174,14 +167,23 @@
                     @foreach($orderedPerformances as $p)
                         @php
                             $isCurrent = $currentPerformance && $currentPerformance->id === $p->id;
+                            $isWithdrawn = $p->isWithdrawn();
                             $tag = $p->apparatus ?? $category->apparatus ?? '—';
                         @endphp
-                        <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isCurrent ? 'bg-emerald-950/50 ring-1 ring-emerald-700/40' : 'bg-slate-950/40 hover:bg-slate-900/60' }}">
-                            <span class="text-slate-500 w-6 text-right font-mono">{{ $loop->iteration }}</span>
-                            <span class="flex-1 min-w-0 text-slate-100 truncate">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
-                            <span class="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-300">{{ $tag }}</span>
-                            @if($isCurrent)
-                                <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"></span>
+                        <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-emerald-950/50 ring-1 ring-emerald-700/40' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
+                            <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $loop->iteration }}</span>
+                            <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
+                            @if($isWithdrawn)
+                                <span class="shrink-0 rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">снята</span>
+                                <form method="POST" action="{{ route('secretary.performance.restore', $p) }}" class="shrink-0">
+                                    @csrf
+                                    <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline" title="Вернуть в очередь">↩</button>
+                                </form>
+                            @else
+                                <span class="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-300">{{ $tag }}</span>
+                                @if($isCurrent)
+                                    <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"></span>
+                                @endif
                             @endif
                         </li>
                     @endforeach

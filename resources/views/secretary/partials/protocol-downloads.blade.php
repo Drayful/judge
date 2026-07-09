@@ -31,15 +31,22 @@
                             </div>
                         </div>
                         @if($g['athletes'] > 0)
-                            <a class="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-950/30 hover:bg-emerald-500 transition"
-                               href="{{ route('secretary.tournament.protocol', $tournament) }}?birth_year={{ $g['birth_year'] }}&division={{ urlencode((string) ($g['division'] ?? '')) }}"
-                               title="Скачать итоговый протокол">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                    <path d="M10 2a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L9 11.586V3a1 1 0 0 1 1-1z" />
-                                    <path d="M4 16a1 1 0 0 0-1 1 1 1 0 0 0 1 1h12a1 1 0 0 0 1-1 1 1 0 0 0-1-1H4z" />
-                                </svg>
-                                Скачать
-                            </a>
+                            <div class="shrink-0 flex flex-col gap-1.5">
+                                <a class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-950/30 hover:bg-emerald-500 transition"
+                                   href="{{ route('secretary.tournament.protocol', $tournament) }}?birth_year={{ $g['birth_year'] }}&division={{ urlencode((string) ($g['division'] ?? '')) }}"
+                                   title="Итоговый протокол (многоборье)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path d="M10 2a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L9 11.586V3a1 1 0 0 1 1-1z" />
+                                        <path d="M4 16a1 1 0 0 0-1 1 1 1 0 0 0 1 1h12a1 1 0 0 0 1-1 1 1 0 0 0-1-1H4z" />
+                                    </svg>
+                                    Многоборье
+                                </a>
+                                <a class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-900/60 transition"
+                                   href="{{ route('secretary.tournament.protocol', $tournament) }}?birth_year={{ $g['birth_year'] }}&division={{ urlencode((string) ($g['division'] ?? '')) }}&mode=by_apparatus"
+                                   title="Протоколы по видам (по каждому предмету)">
+                                    По видам
+                                </a>
+                            </div>
                         @else
                             <span class="shrink-0 text-xs text-slate-500">нет итогов</span>
                         @endif
