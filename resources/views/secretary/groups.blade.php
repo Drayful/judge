@@ -154,12 +154,17 @@
                             </select>
                         </div>
                         <x-primary-button class="justify-center">В пул</x-primary-button>
-                        <div class="sm:col-span-6">
+                        <div class="sm:col-span-4">
                             <x-text-input name="club" placeholder="Клуб (необязательно)"
                                           class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                         </div>
+                        <div class="sm:col-span-2">
+                            <x-text-input name="iin" placeholder="ИИН (12 цифр)" inputmode="numeric" pattern="\d{12}" maxlength="12"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 font-mono" />
+                        </div>
                     </form>
                     @error('full_name') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                    @error('iin') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
                 </details>
 
                 @if($pool->isEmpty())
@@ -180,6 +185,21 @@
                                         <x-badge tone="violet">{{ $p['count'] }} уч.</x-badge>
                                     </div>
                                 </div>
+
+                                {{-- Состав пула ДО создания группы --}}
+                                <details class="mb-3">
+                                    <summary class="cursor-pointer text-xs text-emerald-300 hover:text-emerald-200">Показать состав ({{ $p['count'] }})</summary>
+                                    <ol class="mt-2 max-h-52 overflow-y-auto space-y-0.5 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300 list-decimal list-inside">
+                                        @foreach($p['participants'] as $pt)
+                                            <li class="truncate">
+                                                {{ $pt['name'] }}
+                                                @if($pt['year'])<span class="text-slate-500">{{ $pt['year'] }}</span>@endif
+                                                @if($pt['club'])<span class="text-slate-500">· {{ $pt['club'] }}</span>@endif
+                                                @if($pt['iin'])<span class="text-slate-600 font-mono">· {{ $pt['iin'] }}</span>@endif
+                                            </li>
+                                        @endforeach
+                                    </ol>
+                                </details>
 
                                 <form method="POST" action="{{ route('secretary.tournament.groups.store', $tournament) }}" class="space-y-3">
                                     @csrf
@@ -338,14 +358,47 @@
                                     </div>
                                 @endforeach
                             </div>
-                            <div class="mt-3">
+                            <div class="mt-3 flex flex-wrap items-center gap-4">
+                                <form method="POST" action="{{ route('secretary.tournament.groups.shuffle', [$tournament, $group]) }}" class="inline-block"
+                                      onsubmit="return confirm('Перемешать порядок участниц в потоках (жеребьёвка)? Состав потоков сохранится, изменится порядок и номера внутри.');">
+                                    @csrf
+                                    <button type="submit" class="text-xs text-sky-300 hover:text-sky-200 hover:underline">🎲 Перемешать (жеребьёвка)</button>
+                                </form>
                                 <form method="POST" action="{{ route('secretary.tournament.groups.renumber', [$tournament, $group]) }}" class="inline-block">
                                     @csrf
-                                    <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline">
-                                        Пересчитать номера и очереди
-                                    </button>
+                                    <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline">Пересчитать номера и очереди</button>
                                 </form>
                             </div>
+
+                            {{-- Состав по потокам + ручной перенос --}}
+                            @php($streamNos = $group->categories->pluck('stream_no')->filter()->unique()->sort()->values())
+                            <details class="mt-3 rounded-lg border border-slate-800 bg-slate-900/30 p-3">
+                                <summary class="cursor-pointer text-xs font-medium text-sky-300 hover:text-sky-200">Состав по потокам / перенос</summary>
+                                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    @foreach($streamNos as $sn)
+                                        <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+                                            <div class="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Поток {{ $sn }}</div>
+                                            <ul class="space-y-1">
+                                                @foreach($group->entries->where('stream_no', $sn)->sortBy('start_number') as $entry)
+                                                    <li class="flex items-center gap-2 text-xs">
+                                                        <span class="w-7 shrink-0 text-right font-mono text-slate-500">{{ $entry->start_number }}</span>
+                                                        <span class="flex-1 min-w-0 truncate text-slate-200">{{ $entry->athlete?->last_name }} {{ $entry->athlete?->first_name }}</span>
+                                                        <form method="POST" action="{{ route('secretary.entries.move', $entry) }}" class="flex items-center gap-1 shrink-0">
+                                                            @csrf
+                                                            <select name="stream_no" class="rounded-md border-slate-700 bg-slate-950 text-slate-200 text-[11px] py-0.5">
+                                                                @foreach($streamNos as $opt)
+                                                                    <option value="{{ $opt }}" @selected($opt === $sn)>П{{ $opt }}</option>
+                                                                @endforeach
+                                                            </select>
+                                                            <button type="submit" class="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800" title="Перенести">→</button>
+                                                        </form>
+                                                    </li>
+                                                @endforeach
+                                            </ul>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </details>
                         @else
                             <div class="mt-3 text-sm text-slate-500">Потоки ещё не сформированы.</div>
                         @endif
@@ -369,6 +422,11 @@
                                     <label class="block text-[10px] uppercase tracking-wider text-slate-500">Клуб</label>
                                     <x-text-input name="club" placeholder="Клуб (необязательно)"
                                                   class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 text-sm" />
+                                </div>
+                                <div class="min-w-[140px]">
+                                    <label class="block text-[10px] uppercase tracking-wider text-slate-500">ИИН</label>
+                                    <x-text-input name="iin" placeholder="12 цифр" inputmode="numeric" pattern="\d{12}" maxlength="12"
+                                                  class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 text-sm font-mono" />
                                 </div>
                                 <button type="submit" class="rounded-md border border-emerald-700/70 bg-emerald-900/40 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-800/50">
                                     Добавить

@@ -65,17 +65,47 @@ class StreamBuilderService
     }
 
     /**
-     * Перенести участницу в другой поток (ручная правка) и пересобрать номера/очереди.
+     * Перенести участницу в другой поток (ручная правка): встаёт в конец нового
+     * потока, затем пересчёт номеров/очередей.
      */
     public function moveEntryToStream(Entry $entry, int $streamNo): void
     {
+        $group = $entry->group;
+
         $entry->stream_no = max(1, $streamNo);
+        if ($group !== null) {
+            $entry->order_index = (int) (Entry::query()->where('group_id', $group->id)->max('order_index') ?? 0) + 1;
+        }
         $entry->save();
 
-        $group = $entry->group;
         if ($group !== null) {
             $this->renumber($group);
         }
+    }
+
+    /**
+     * Перемешать порядок участниц ВНУТРИ каждого потока (жеребьёвка): состав потоков
+     * и их диапазоны номеров сохраняются, меняется только порядок выхода/номера внутри.
+     */
+    public function shuffle(Group $group): void
+    {
+        DB::transaction(function () use ($group) {
+            $byStream = $group->entries()
+                ->whereNotNull('stream_no')
+                ->orderBy('stream_no')
+                ->get()
+                ->groupBy('stream_no');
+
+            $order = 0;
+            foreach ($byStream as $chunk) {
+                foreach ($chunk->shuffle() as $entry) {
+                    $entry->order_index = ++$order;
+                    $entry->save();
+                }
+            }
+
+            $this->renumber($group);
+        });
     }
 
     /**
@@ -87,7 +117,6 @@ class StreamBuilderService
             $entries = $group->entries()
                 ->whereNotNull('stream_no')
                 ->orderBy('stream_no')
-                ->orderBy('start_number')
                 ->orderBy('order_index')
                 ->orderBy('id')
                 ->get();

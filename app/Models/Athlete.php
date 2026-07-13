@@ -13,6 +13,7 @@ class Athlete extends Model
         'first_name',
         'last_name',
         'birthdate',
+        'iin',
         'club',
         'coach',
     ];

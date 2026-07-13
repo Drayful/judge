@@ -21,12 +21,13 @@ class ParticipantRosterImportTest extends TestCase
         $ss->removeSheetByIndex(0);
 
         // Индивидуальный лист с кириллической буквой «С» → должна нормализоваться в «C».
+        // Колонка D — ИИН (12 цифр); у Сидоровой 11 цифр (потерян ведущий ноль).
         $s1 = $ss->createSheet();
         $s1->setTitle('2018С');
         $s1->fromArray([
-            ['Иванова Мария', 2018, 'Клуб А'],
-            ['Петрова Аня', 2018, 'Клуб Б'],
-            ['Сидорова Ольга', 2017, 'Клуб А'], // год строки переопределяет лист
+            ['Иванова Мария', 2018, 'Клуб А', '181234567890'],
+            ['Петрова Аня', 2018, 'Клуб Б', 121212121212],
+            ['Сидорова Ольга', 2017, 'Клуб А', 51234567890], // 11 цифр → дополнится до 12
         ], null, 'A1');
 
         // Лист с латинской буквой + пробел.
@@ -89,6 +90,10 @@ class ParticipantRosterImportTest extends TestCase
         $sidorova = Athlete::where('last_name', 'Сидорова')->firstOrFail();
         $this->assertSame(2017, $sidorova->birthdate->year);
 
+        // ИИН распознан из колонки D; 11-значный дополнен ведущим нулём до 12.
+        $this->assertSame('181234567890', Athlete::where('last_name', 'Иванова')->value('iin'));
+        $this->assertSame('051234567890', $sidorova->iin);
+
         // Латинская «А» с пробелом.
         $this->assertSame(1, Entry::where('birth_year', 2019)->where('division', 'A')->count());
 
@@ -114,5 +119,33 @@ class ParticipantRosterImportTest extends TestCase
             ->whereHas('athlete', fn ($q) => $q->where('last_name', 'Eveline'))
             ->firstOrFail();
         $this->assertCount(2, $eveline->meta['members']);
+    }
+
+    public function test_iin_is_authoritative_for_dedup(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        // Существующий атлет с ИИН, но другим написанием ФИО.
+        $existing = Athlete::create(['first_name' => 'Мария', 'last_name' => 'Иванова', 'iin' => '181234567890']);
+
+        $ss = new Spreadsheet;
+        $ss->removeSheetByIndex(0);
+        $s = $ss->createSheet();
+        $s->setTitle('2018A');
+        $s->fromArray([
+            ['Иваннова Марья', 2018, 'Клуб', '181234567890'], // опечатка в ФИО, тот же ИИН
+        ], null, 'A1');
+        $path = tempnam(sys_get_temp_dir(), 'iin').'.xlsx';
+        (new XlsxWriter($ss))->save($path);
+
+        try {
+            $stats = app(StartProtocolImportService::class)->importFromPath($tournament, $path);
+        } finally {
+            @unlink($path);
+        }
+
+        // Новый атлет не создан — привязались к существующему по ИИН.
+        $this->assertSame(0, $stats['athletes_created']);
+        $this->assertSame(1, Athlete::where('iin', '181234567890')->count());
+        $this->assertSame($existing->id, Entry::where('tournament_id', $tournament->id)->value('athlete_id'));
     }
 }

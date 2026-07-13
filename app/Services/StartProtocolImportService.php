@@ -7,6 +7,7 @@ use App\Models\Entry;
 use App\Models\Tournament;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use RuntimeException;
@@ -86,6 +87,7 @@ class StartProtocolImportService
     {
         [$sheetYear, $division, $label] = $this->parseIndividualTitle($title);
         $highestRow = (int) $sheet->getHighestRow();
+        $iinCol = $this->detectIinColumn($sheet, $highestRow);
         $order = 0;
 
         for ($row = 1; $row <= $highestRow; $row++) {
@@ -99,12 +101,13 @@ class StartProtocolImportService
             // берём из листа: так «2020 и младше» и т.п. не разъезжаются по годам.
             $rowYear = $this->parseYear($sheet->getCell('B'.$row)->getValue());
             $club = $this->cellStr($sheet, $row, 'C');
+            $iin = $this->readIin($sheet, $row, $iinCol);
 
             [$lastName, $firstName] = $this->splitName($name);
             $realYear = $rowYear ?? $sheetYear;
             $birthdate = $realYear !== null ? Carbon::createFromDate($realYear, 1, 1)->startOfDay() : null;
 
-            $athlete = $this->resolveAthlete($lastName, $firstName, $birthdate, $club, $stats);
+            $athlete = $this->resolveAthlete($lastName, $firstName, $birthdate, $club, $stats, $iin);
 
             if ($this->entryExists($tournament, $athlete->id, 'individual')) {
                 $stats['entries_skipped']++;
@@ -304,8 +307,21 @@ class StartProtocolImportService
         return trim((string) preg_replace('/^\s*\d+\s*[.)]\s*/u', '', $a));
     }
 
-    private function resolveAthlete(string $lastName, string $firstName, ?Carbon $birthdate, string $clubFromRow, array &$stats): Athlete
+    private function resolveAthlete(string $lastName, string $firstName, ?Carbon $birthdate, string $clubFromRow, array &$stats, ?string $iin = null): Athlete
     {
+        // ИИН — самый надёжный идентификатор: если есть, ищем в первую очередь по нему.
+        if ($iin !== null) {
+            $byIin = Athlete::query()->where('iin', $iin)->first();
+            if ($byIin) {
+                if ($clubFromRow !== '' && ($byIin->club === null || $byIin->club === '')) {
+                    $byIin->club = $clubFromRow;
+                    $byIin->save();
+                }
+
+                return $byIin;
+            }
+        }
+
         $q = Athlete::query()
             ->whereRaw('LOWER(last_name) = ?', [mb_strtolower($lastName)])
             ->whereRaw('LOWER(first_name) = ?', [mb_strtolower($firstName)]);
@@ -319,8 +335,16 @@ class StartProtocolImportService
         $found = $q->first();
 
         if ($found) {
+            $dirty = false;
             if ($clubFromRow !== '' && ($found->club === null || $found->club === '')) {
                 $found->club = $clubFromRow;
+                $dirty = true;
+            }
+            if ($iin !== null && ($found->iin === null || $found->iin === '')) {
+                $found->iin = $iin;
+                $dirty = true;
+            }
+            if ($dirty) {
                 $found->save();
             }
 
@@ -333,8 +357,88 @@ class StartProtocolImportService
             'first_name' => $firstName,
             'last_name' => $lastName,
             'birthdate' => $birthdate,
+            'iin' => $iin,
             'club' => $clubFromRow !== '' ? $clubFromRow : null,
         ]);
+    }
+
+    /**
+     * Определяет столбец с ИИН: тот, где чаще всего встречаются значения из 11–12 цифр
+     * (11 — если Excel потерял ведущий ноль у годов 200x). Возвращает индекс столбца.
+     */
+    private function detectIinColumn(Worksheet $sheet, int $highestRow): ?int
+    {
+        $maxCol = min(Coordinate::columnIndexFromString($sheet->getHighestColumn()), 15);
+        $rows = min($highestRow, 80);
+
+        $best = null;
+        $bestHits = 0;
+        for ($c = 1; $c <= $maxCol; $c++) {
+            $letter = Coordinate::stringFromColumnIndex($c);
+            $hits = 0;
+            for ($r = 1; $r <= $rows; $r++) {
+                if ($this->iinDigits($sheet->getCell($letter.$r)->getValue()) !== null) {
+                    $hits++;
+                }
+            }
+            if ($hits > $bestHits) {
+                $bestHits = $hits;
+                $best = $c;
+            }
+        }
+
+        return $bestHits >= 2 ? $best : null;
+    }
+
+    /**
+     * Читает ИИН из строки: сперва из найденного столбца, иначе — скан по строке.
+     */
+    private function readIin(Worksheet $sheet, int $row, ?int $iinCol): ?string
+    {
+        if ($iinCol !== null) {
+            $v = $this->iinDigits($sheet->getCell(Coordinate::stringFromColumnIndex($iinCol).$row)->getValue());
+            if ($v !== null) {
+                return $v;
+            }
+        }
+
+        // Фоллбэк: ищем в строке ячейку с 11–12 цифрами (год=4 цифры и текст отсеются).
+        for ($c = 1; $c <= 15; $c++) {
+            $v = $this->iinDigits($sheet->getCell(Coordinate::stringFromColumnIndex($c).$row)->getValue());
+            if ($v !== null) {
+                return $v;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Нормализует значение к 12-значному ИИН или null. Принимает 11 цифр (потерянный
+     * ведущий ноль) и дополняет слева. Ячейка должна быть «числовой» (цифры/пробелы).
+     */
+    private function iinDigits(mixed $v): ?string
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_int($v) || is_float($v)) {
+            $v = sprintf('%.0f', $v);
+        }
+        $v = (string) $v;
+        if (! preg_match('/^\s*\d[\d\s]*\d\s*$/u', $v)) {
+            return null;
+        }
+        $digits = (string) preg_replace('/\D+/', '', $v);
+        $len = strlen($digits);
+        if ($len === 12) {
+            return $digits;
+        }
+        if ($len === 11) {
+            return '0'.$digits;
+        }
+
+        return null;
     }
 
     private function cellStr(Worksheet $sheet, int $row, string $col): string

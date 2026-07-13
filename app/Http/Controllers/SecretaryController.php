@@ -299,10 +299,14 @@ class SecretaryController extends Controller
         $tournament->load([
             'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
             'groups.categories' => fn ($q) => $q->orderBy('stream_no'),
+            'groups.entries' => fn ($q) => $q->orderBy('stream_no')->orderBy('start_number')->orderBy('order_index'),
+            'groups.entries.athlete',
         ]);
 
         // Пул: entries, ещё не привязанные к группе, сгруппированные по (программа, год, категория).
+        // Включаем список участниц — чтобы видеть состав ДО создания группы.
         $pool = Entry::query()
+            ->with('athlete')
             ->where('tournament_id', $tournament->id)
             ->whereNull('group_id')
             ->orderBy('program')
@@ -314,12 +318,27 @@ class SecretaryController extends Controller
                 /** @var Entry $first */
                 $first = $rows->first();
 
+                $participants = $rows->map(function (Entry $e) {
+                    $athlete = $e->athlete;
+                    $name = $athlete
+                        ? trim(($athlete->last_name ?? '').' '.($athlete->first_name ?? ''))
+                        : '—';
+
+                    return [
+                        'name' => $name,
+                        'club' => $e->club ?? $athlete?->club,
+                        'iin' => $athlete?->iin,
+                        'year' => $athlete?->birthdate?->year,
+                    ];
+                })->sortBy('name')->values();
+
                 return [
                     'program' => $first->program,
                     'birth_year' => $first->birth_year,
                     'division' => $first->division,
                     'label' => $first->meta['label'] ?? null,
                     'count' => $rows->count(),
+                    'participants' => $participants,
                 ];
             })
             ->values();
@@ -574,7 +593,10 @@ class SecretaryController extends Controller
             'birth_year' => ['nullable', 'integer', 'min:1990', 'max:2035'],
             'division' => ['nullable', 'string', 'max:16'],
             'club' => ['nullable', 'string', 'max:255'],
+            'iin' => ['nullable', 'string', 'regex:/^\d{12}$/'],
             'group_id' => ['nullable', 'integer'],
+        ], [
+            'iin.regex' => 'ИИН должен состоять из 12 цифр.',
         ]);
 
         $group = null;
@@ -594,6 +616,7 @@ class SecretaryController extends Controller
             ? $group->division
             : (isset($data['division']) && trim($data['division']) !== '' ? strtoupper(trim($data['division'])) : null);
         $club = isset($data['club']) && trim($data['club']) !== '' ? trim($data['club']) : null;
+        $iin = isset($data['iin']) && $data['iin'] !== '' ? $data['iin'] : null;
 
         $fullName = trim((string) preg_replace('/\s+/u', ' ', $data['full_name']));
         if ($program === 'group') {
@@ -608,8 +631,8 @@ class SecretaryController extends Controller
 
         $birthdate = $birthYear !== null ? Carbon::createFromDate($birthYear, 1, 1)->startOfDay() : null;
 
-        DB::transaction(function () use ($tournament, $group, $program, $birthYear, $division, $club, $lastName, $firstName, $birthdate, $builder) {
-            $athlete = $this->resolveOrCreateAthlete($lastName, $firstName, $birthdate, $club);
+        DB::transaction(function () use ($tournament, $group, $program, $birthYear, $division, $club, $iin, $lastName, $firstName, $birthdate, $builder) {
+            $athlete = $this->resolveOrCreateAthlete($lastName, $firstName, $birthdate, $club, $iin);
 
             $entry = Entry::query()->create([
                 'tournament_id' => $tournament->id,
@@ -643,8 +666,19 @@ class SecretaryController extends Controller
         return redirect()->route('secretary.tournament.groups', $tournament)->with('status', $msg);
     }
 
-    private function resolveOrCreateAthlete(string $lastName, string $firstName, ?Carbon $birthdate, ?string $club): Athlete
+    private function resolveOrCreateAthlete(string $lastName, string $firstName, ?Carbon $birthdate, ?string $club, ?string $iin = null): Athlete
     {
+        if ($iin !== null) {
+            $byIin = Athlete::query()->where('iin', $iin)->first();
+            if ($byIin !== null) {
+                if ($club !== null && ($byIin->club === null || $byIin->club === '')) {
+                    $byIin->update(['club' => $club]);
+                }
+
+                return $byIin;
+            }
+        }
+
         $q = Athlete::query()
             ->whereRaw('LOWER(last_name) = ?', [mb_strtolower($lastName)])
             ->whereRaw('LOWER(first_name) = ?', [mb_strtolower($firstName)]);
@@ -653,8 +687,15 @@ class SecretaryController extends Controller
 
         $found = $q->first();
         if ($found !== null) {
+            $patch = [];
             if ($club !== null && ($found->club === null || $found->club === '')) {
-                $found->update(['club' => $club]);
+                $patch['club'] = $club;
+            }
+            if ($iin !== null && ($found->iin === null || $found->iin === '')) {
+                $patch['iin'] = $iin;
+            }
+            if ($patch !== []) {
+                $found->update($patch);
             }
 
             return $found;
@@ -664,6 +705,7 @@ class SecretaryController extends Controller
             'first_name' => $firstName,
             'last_name' => $lastName,
             'birthdate' => $birthdate,
+            'iin' => $iin,
             'club' => $club,
         ]);
     }
@@ -792,6 +834,25 @@ class SecretaryController extends Controller
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', 'Номера и очереди пересчитаны.');
+    }
+
+    /**
+     * Перемешать порядок участниц внутри потоков группы (жеребьёвка).
+     */
+    public function shuffleGroup(Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse
+    {
+        if ((int) $group->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        if (! Category::query()->where('group_id', $group->id)->exists()) {
+            return back()->withErrors(['shuffle' => 'Сначала сформируйте потоки в группе.']);
+        }
+
+        $builder->shuffle($group);
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', 'Жеребьёвка выполнена: порядок в потоках перемешан.');
     }
 
     private function groupName(?int $birthYear, ?string $division, ?string $label): string

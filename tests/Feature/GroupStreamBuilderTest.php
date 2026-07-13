@@ -98,6 +98,76 @@ class GroupStreamBuilderTest extends TestCase
         $this->assertSame(1, (int) $firstPerf->start_number);
     }
 
+    public function test_shuffle_keeps_stream_membership_and_number_set(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 20, 2018, 'A');
+        $secretary = $this->secretary();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.store', $tournament), [
+            'program' => 'individual', 'birth_year' => 2018, 'division' => 'A',
+            'apparatus' => ['Б.П.'], 'number_mode' => 'continuous',
+        ]);
+        $group = $tournament->groups()->firstOrFail();
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.streams', [$tournament, $group]), [
+            'stream_size' => 10, // 2 потока по 10
+        ]);
+
+        $membershipBefore = Entry::where('group_id', $group->id)->pluck('stream_no', 'athlete_id')->toArray();
+        ksort($membershipBefore);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.groups.shuffle', [$tournament, $group]))
+            ->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        $membershipAfter = Entry::where('group_id', $group->id)->pluck('stream_no', 'athlete_id')->toArray();
+        ksort($membershipAfter);
+        $numbersAfter = Entry::where('group_id', $group->id)->pluck('start_number')->sort()->values()->toArray();
+
+        // Кто в каком потоке — не изменилось; набор номеров 1..20 сохранился.
+        $this->assertSame($membershipBefore, $membershipAfter);
+        $this->assertSame(range(1, 20), $numbersAfter);
+
+        // Очередь пересобрана: у каждого потока по 10 выступлений.
+        foreach (Category::where('group_id', $group->id)->get() as $cat) {
+            $this->assertSame(10, Performance::where('category_id', $cat->id)->count());
+        }
+    }
+
+    public function test_move_entry_between_streams(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 20, 2018, 'A');
+        $secretary = $this->secretary();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.store', $tournament), [
+            'program' => 'individual', 'birth_year' => 2018, 'division' => 'A',
+            'apparatus' => ['Б.П.'], 'number_mode' => 'continuous',
+        ]);
+        $group = $tournament->groups()->firstOrFail();
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.streams', [$tournament, $group]), [
+            'stream_size' => 10,
+        ]);
+
+        // Берём участницу из потока 1 и переносим в поток 2.
+        $entry = Entry::where('group_id', $group->id)->where('stream_no', 1)->orderBy('start_number')->firstOrFail();
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.entries.move', $entry), ['stream_no' => 2])
+            ->assertRedirect(route('secretary.tournament.groups', $tournament));
+
+        $entry->refresh();
+        $this->assertSame(2, (int) $entry->stream_no);
+
+        // Поток 1 → 9, поток 2 → 11; номера остались сквозными 1..20.
+        $this->assertSame(9, Entry::where('group_id', $group->id)->where('stream_no', 1)->count());
+        $this->assertSame(11, Entry::where('group_id', $group->id)->where('stream_no', 2)->count());
+        $this->assertSame(range(1, 20), Entry::where('group_id', $group->id)->pluck('start_number')->sort()->values()->toArray());
+
+        $cat2 = Category::where('group_id', $group->id)->where('stream_no', 2)->firstOrFail();
+        $this->assertSame(11, Performance::where('category_id', $cat2->id)->count());
+    }
+
     public function test_manual_entry_added_to_group_with_streams(): void
     {
         $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);

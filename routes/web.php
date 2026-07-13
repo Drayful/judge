@@ -91,6 +91,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/renumber', [SecretaryController::class, 'renumberGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.renumber');
+    Route::post('/secretary/tournaments/{tournament}/groups/{group}/shuffle', [SecretaryController::class, 'shuffleGroup'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.shuffle');
     Route::delete('/secretary/tournaments/{tournament}/groups/{group}', [SecretaryController::class, 'destroyGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.destroy');
