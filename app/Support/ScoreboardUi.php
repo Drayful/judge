@@ -4,13 +4,14 @@ namespace App\Support;
 
 use App\Models\Category;
 use App\Models\Performance;
+use App\Models\Tournament;
 use Illuminate\Support\Collection;
 
 class ScoreboardUi
 {
-  /**
-   * @return array<string, string>
-   */
+    /**
+     * @return array<string, string>
+     */
     public static function apparatusLabels(): array
     {
         return [
@@ -19,10 +20,10 @@ class ScoreboardUi
             'clubs' => 'Булавы',
             'ribbon' => 'Лента',
             'rope' => 'Скакалка',
-            'free' => 'Б/П',
-            'бп' => 'Б/П',
-            'б.п.' => 'Б/П',
-            'bp' => 'Б/П',
+            'free' => 'БП',
+            'бп' => 'БП',
+            'б.п.' => 'БП',
+            'bp' => 'БП',
         ];
     }
 
@@ -87,41 +88,83 @@ class ScoreboardUi
     }
 
     /**
-     * Предварительное место гимнастки среди опубликованных результатов потока + её текущий итог.
+     * Категории одной группы (год + буква) — предварительное место считаем по группе,
+     * а не по одному потоку, чтобы оно совпадало с итоговой таблицей.
+     *
+     * @return list<int>
+     */
+    private static function groupCategoryIds(Category $category): array
+    {
+        $category->loadMissing('tournament');
+        $tournament = $category->tournament;
+        if ($tournament === null) {
+            return [$category->id];
+        }
+
+        $year = $category->resolvedBirthYear();
+        $division = $category->resolvedDivision();
+
+        return $tournament->categories()->get()
+            ->filter(fn (Category $c) => $c->resolvedBirthYear() === $year && $c->resolvedDivision() === $division)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
+     * Предварительное место гимнастки по группе (год + буква): считаем лучших
+     * соперниц (по опубликованному итогу) с итогом выше текущего.
      */
     public static function provisionalPlace(Category $category, Performance $perf): ?int
     {
-        $perf->recalculateTotals();
         $currentTotal = $perf->total;
         if ($currentTotal === null) {
             return null;
         }
 
         $higher = Performance::query()
-            ->where('category_id', $category->id)
+            ->whereIn('category_id', self::groupCategoryIds($category))
             ->where('is_counted', true)
             ->whereNotNull('total')
-            ->where('id', '!=', $perf->id)
             ->whereNotNull('published_at')
-            ->get()
-            ->filter(function (Performance $p) use ($currentTotal) {
-                return (float) $p->total > (float) $currentTotal + 0.0004;
-            })
+            ->whereNull('withdrawn_at')
+            ->where('athlete_id', '!=', $perf->athlete_id)
+            ->get(['athlete_id', 'total'])
+            ->groupBy('athlete_id')
+            ->map(fn ($g) => (float) $g->max('total'))
+            ->filter(fn (float $t) => $t > (float) $currentTotal + 0.0004)
             ->count();
 
         return $higher + 1;
     }
 
+    /**
+     * Сколько всего участниц в группе с опубликованным результатом (+ текущая).
+     */
     public static function provisionalPlaceOf(Category $category, Performance $perf): int
     {
-        $published = Performance::query()
-            ->where('category_id', $category->id)
+        $distinct = Performance::query()
+            ->whereIn('category_id', self::groupCategoryIds($category))
             ->where('is_counted', true)
             ->whereNotNull('total')
             ->whereNotNull('published_at')
-            ->count();
+            ->whereNull('withdrawn_at')
+            ->where('athlete_id', '!=', $perf->athlete_id)
+            ->distinct('athlete_id')
+            ->count('athlete_id');
 
-        return max($published, 0) + 1;
+        return $distinct + 1;
+    }
+
+    /**
+     * Пересчитывать итог «на лету» нужно только для выступающей гимнастки без
+     * зафиксированного/ручного итога — иначе берём сохранённые оценки.
+     */
+    private static function needsLiveRecalc(Performance $perf): bool
+    {
+        return $perf->status === 'performing'
+            && $perf->finalized_at === null
+            && ! $perf->scores_overridden;
     }
 
     /**
@@ -134,11 +177,14 @@ class ScoreboardUi
                 'performance' => null,
                 'phase' => 'empty',
                 'phase_label' => self::phaseLabel('empty'),
+                'rev' => 'empty',
                 'updated_at' => now()->toIso8601String(),
             ];
         }
 
-        $perf->recalculateTotals();
+        if (self::needsLiveRecalc($perf)) {
+            $perf->recalculateTotals();
+        }
 
         $phase = self::performancePhase($perf);
         $inq = $perf->inquiries->sortByDesc('id')->first();
@@ -149,8 +195,18 @@ class ScoreboardUi
         $submittedMain = $mainSlots->where('ok', true)->count();
         $requiredMain = $mainSlots->count();
         $place = self::provisionalPlace($category, $perf);
+        $placeOf = self::provisionalPlaceOf($category, $perf);
+
+        $rev = md5(implode('|', [
+            $perf->id, $perf->status, $phase,
+            $perf->d_score, $perf->a_score, $perf->e_score, $perf->penalty, $perf->total,
+            $place, $placeOf, $submittedMain, $requiredMain,
+            $perf->finalized_at?->getTimestamp(), $perf->published_at?->getTimestamp(),
+            $inq?->status,
+        ]));
 
         return [
+            'rev' => $rev,
             'performance' => [
                 'id' => $perf->id,
                 'start_number' => $perf->start_number,
@@ -165,7 +221,7 @@ class ScoreboardUi
                 'penalty' => $perf->penalty,
                 'total' => $perf->total,
                 'place' => $place,
-                'place_of' => self::provisionalPlaceOf($category, $perf),
+                'place_of' => $placeOf,
                 'finalized_at' => $perf->finalized_at?->toIso8601String(),
                 'published_at' => $perf->published_at?->toIso8601String(),
                 'inquiry_status' => $inq?->status,
@@ -182,11 +238,11 @@ class ScoreboardUi
     }
 
     /**
-     * @return Collection<int, \App\Models\Tournament>
+     * @return Collection<int, Tournament>
      */
     public static function publishedTournaments(): Collection
     {
-        return \App\Models\Tournament::query()
+        return Tournament::query()
             ->where('is_published', true)
             ->whereHas('categories', fn ($q) => $q->where('is_published', true))
             ->with(['categories' => fn ($q) => $q->where('is_published', true)->orderBy('id')])

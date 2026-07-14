@@ -59,9 +59,13 @@
                         <div class="text-xs text-slate-500 truncate hidden sm:block">{{ $p->athlete->club ?? '' }}</div>
                     </div>
                     <div class="hidden sm:flex gap-3 text-xs tabular-nums text-slate-400">
-                        <span>D {{ $p->d_score !== null ? number_format($p->d_score, 3) : '—' }}</span>
-                        <span>A {{ $p->a_score !== null ? number_format($p->a_score, 3) : '—' }}</span>
-                        <span>E {{ $p->e_score !== null ? number_format($p->e_score, 3) : '—' }}</span>
+                        @if(count($p->vidi ?? []) > 1)
+                            <span>Виды: {{ collect($p->vidi)->map(fn ($v) => number_format($v, 3))->implode(' + ') }}</span>
+                        @else
+                            <span>D {{ $p->d_score !== null ? number_format($p->d_score, 3) : '—' }}</span>
+                            <span>A {{ $p->a_score !== null ? number_format($p->a_score, 3) : '—' }}</span>
+                            <span>E {{ $p->e_score !== null ? number_format($p->e_score, 3) : '—' }}</span>
+                        @endif
                     </div>
                     <div class="sb-total">{{ number_format($p->total, 3) }}</div>
                 </div>
@@ -147,7 +151,9 @@
                         <div class="text-xs text-slate-500 truncate hidden sm:block">${esc(r.club ?? '')}</div>
                     </div>
                     <div class="hidden sm:flex gap-3 text-xs tabular-nums text-slate-400">
-                        <span>D ${fmt3(r.d)}</span><span>A ${fmt3(r.a)}</span><span>E ${fmt3(r.e)}</span>
+                        ${(r.vidi && r.vidi.length > 1)
+                            ? '<span>Виды: ' + r.vidi.map(fmt3).join(' + ') + '</span>'
+                            : '<span>D ' + fmt3(r.d) + '</span><span>A ' + fmt3(r.a) + '</span><span>E ' + fmt3(r.e) + '</span>'}
                     </div>
                     <div class="sb-total">${totalStr}</div>
                 </div>
@@ -167,14 +173,17 @@
     }
 
     let lastUpdated = null;
+    let lastRev = null;
     async function tick() {
         try {
             const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             lastUpdated = new Date(data.updated_at);
-            render(data.rows);
             status.textContent = 'Live · ' + data.rows.length + ' участниц';
+            if (data.rev && data.rev === lastRev) return; // без изменений — не перерисовываем
+            lastRev = data.rev;
+            render(data.rows);
         } catch (e) {
             status.textContent = 'Ошибка обновления';
         }

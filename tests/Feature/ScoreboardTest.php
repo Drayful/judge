@@ -226,6 +226,121 @@ class ScoreboardTest extends TestCase
             ->assertJsonPath('performance.place', 2);
     }
 
+    public function test_withdrawn_athlete_excluded_from_results_table(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2015 г.р., A',
+            'birth_year' => 2015, 'division' => 'A', 'is_published' => true,
+        ]);
+        $ok = Athlete::create(['first_name' => 'Оля', 'last_name' => 'Активная']);
+        $out = Athlete::create(['first_name' => 'Вера', 'last_name' => 'Снятая']);
+
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $ok->id, 'order_index' => 1,
+            'status' => 'published', 'total' => 20.0, 'published_at' => now(), 'is_counted' => true,
+        ]);
+        // снятая, хотя и с оценкой/публикацией — не должна попасть в табло
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $out->id, 'order_index' => 2,
+            'status' => 'withdrawn', 'total' => 25.0, 'published_at' => now(), 'is_counted' => true,
+            'withdrawn_at' => now(),
+        ]);
+
+        $response = $this->getJson(route('scoreboard.category.live', $category));
+        $response->assertOk();
+        $response->assertJsonCount(1, 'rows');
+        $response->assertJsonPath('rows.0.athlete', 'Активная Оля');
+    }
+
+    public function test_withdrawn_not_counted_in_provisional_place_of(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id, 'name' => 'S', 'is_published' => true,
+        ]);
+        $a = Athlete::create(['first_name' => 'A', 'last_name' => 'One']);
+        $b = Athlete::create(['first_name' => 'B', 'last_name' => 'Two']);
+        $c = Athlete::create(['first_name' => 'C', 'last_name' => 'Live']);
+
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $a->id, 'order_index' => 1,
+            'status' => 'published', 'total' => 20.0, 'published_at' => now(), 'is_counted' => true,
+        ]);
+        Performance::create([ // снятая опубликованная — не должна учитываться в «из N»
+            'category_id' => $category->id, 'athlete_id' => $b->id, 'order_index' => 2,
+            'status' => 'withdrawn', 'total' => 22.0, 'published_at' => now(), 'is_counted' => true,
+            'withdrawn_at' => now(),
+        ]);
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $c->id, 'order_index' => 3,
+            'status' => 'performing', 'is_counted' => true,
+        ]);
+
+        // place_of = опубликованные (без снятых) + 1 = 1 + 1 = 2
+        $this->getJson(route('scoreboard.performance.live', $category))
+            ->assertOk()
+            ->assertJsonPath('performance.place_of', 2);
+    }
+
+    public function test_results_table_includes_vidi_breakdown(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2015 г.р., A',
+            'birth_year' => 2015, 'division' => 'A', 'is_published' => true,
+        ]);
+        $athlete = Athlete::create(['first_name' => 'Мила', 'last_name' => 'Многоборка']);
+
+        foreach ([['БП', 10.0, 1], ['Мяч', 12.0, 2]] as [$app, $total, $order]) {
+            Performance::create([
+                'category_id' => $category->id, 'athlete_id' => $athlete->id, 'apparatus' => $app,
+                'order_index' => $order, 'status' => 'published', 'total' => $total,
+                'published_at' => now(), 'is_counted' => true,
+            ]);
+        }
+
+        $response = $this->getJson(route('scoreboard.category.live', $category));
+        $response->assertOk();
+        $response->assertJsonPath('rows.0.total', 22);
+        $response->assertJsonCount(2, 'rows.0.vidi');
+        $response->assertJsonPath('rows.0.vidi.0', 10);
+        $response->assertJsonPath('rows.0.vidi.1', 12);
+    }
+
+    public function test_provisional_place_spans_whole_group(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $stream1 = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2015 A — поток 1',
+            'birth_year' => 2015, 'division' => 'A', 'is_published' => true,
+        ]);
+        $stream2 = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2015 A — поток 2',
+            'birth_year' => 2015, 'division' => 'A', 'is_published' => true,
+        ]);
+        $leader = Athlete::create(['first_name' => 'Л', 'last_name' => 'Лидер']);
+        $live = Athlete::create(['first_name' => 'Ж', 'last_name' => 'Живая']);
+
+        // Лидер опубликован в ДРУГОМ потоке той же группы.
+        Performance::create([
+            'category_id' => $stream2->id, 'athlete_id' => $leader->id, 'order_index' => 1,
+            'status' => 'published', 'total' => 30.0, 'published_at' => now(), 'is_counted' => true,
+        ]);
+        // Текущая выступает в потоке 1, ручной итог 25 (< 30).
+        Performance::create([
+            'category_id' => $stream1->id, 'athlete_id' => $live->id, 'order_index' => 1,
+            'status' => 'performing', 'is_counted' => true,
+            'scores_overridden' => true, 'd_score' => 8, 'a_score' => 8.5, 'e_score' => 8.5, 'total' => 25.0,
+        ]);
+
+        // Место 2 (лидер из другого потока учтён), «из 2».
+        $this->getJson(route('scoreboard.performance.live', $stream1))
+            ->assertOk()
+            ->assertJsonPath('performance.place', 2)
+            ->assertJsonPath('performance.place_of', 2);
+    }
+
     public function test_table_ranks_by_protocol_group_not_stream(): void
     {
         $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);

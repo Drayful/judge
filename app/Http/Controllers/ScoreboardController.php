@@ -9,6 +9,7 @@ use App\Services\FinalProtocolService;
 use App\Support\ScoreboardUi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 
 class ScoreboardController extends Controller
@@ -51,10 +52,14 @@ class ScoreboardController extends Controller
     {
         $this->ensurePublic($category);
 
+        $rows = $this->publishedRowPayloads($category);
+        $rev = md5(collect($rows)->map(fn ($r) => $r['id'].':'.$r['place'].':'.$r['total'].':'.($r['inquiry_status'] ?? ''))->implode('|'));
+
         return response()->json([
             'category' => ['id' => $category->id, 'name' => $category->name],
+            'rev' => $rev,
             'updated_at' => now()->toIso8601String(),
-            'rows' => $this->publishedRowPayloads($category),
+            'rows' => $rows,
         ]);
     }
 
@@ -122,7 +127,7 @@ class ScoreboardController extends Controller
     /**
      * Опубликованные участницы потока с местами по группе (год + категория), как в итоговом протоколе.
      *
-     * @return \Illuminate\Support\Collection<int, object>
+     * @return Collection<int, object>
      */
     private function publishedRows(Category $category)
     {
@@ -134,6 +139,7 @@ class ScoreboardController extends Controller
             ->whereNotNull('total')
             ->whereNotNull('published_at')
             ->where('is_counted', true)
+            ->whereNull('withdrawn_at')
             ->orderBy('order_index')
             ->orderBy('id')
             ->get()
@@ -149,6 +155,8 @@ class ScoreboardController extends Controller
                 /** @var Performance $latest */
                 $latest = $performances->last();
 
+                $vidi = array_map(fn ($v) => round((float) $v, 3), $rank['vidi'] ?? []);
+
                 return (object) [
                     'id' => (int) $athleteId,
                     'place' => $rank['place'],
@@ -159,6 +167,7 @@ class ScoreboardController extends Controller
                     'a_score' => $latest->a_score,
                     'e_score' => $latest->e_score,
                     'penalty' => $latest->penalty,
+                    'vidi' => $vidi,
                     'total' => $rank['total'],
                 ];
             })
@@ -189,6 +198,7 @@ class ScoreboardController extends Controller
                     'a' => $row->a_score,
                     'e' => $row->e_score,
                     'penalty' => $row->penalty,
+                    'vidi' => $row->vidi,
                     'total' => $row->total,
                 ];
             })

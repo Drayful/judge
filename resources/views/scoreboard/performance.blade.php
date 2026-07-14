@@ -205,12 +205,16 @@
                 (judges.required > 0 ? Math.round(100 * judges.submitted / judges.required) : 0) + '%';
         }
 
+        let lastRev = null;
         async function tick() {
             try {
                 const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                render(await res.json());
+                const data = await res.json();
                 liveStatus.textContent = 'Обновлено';
+                if (data.rev && data.rev === lastRev) return; // без изменений — пропускаем перерисовку
+                lastRev = data.rev;
+                render(data);
             } catch (e) {
                 liveStatus.textContent = 'Ошибка';
             }
