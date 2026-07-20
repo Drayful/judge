@@ -79,6 +79,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/entries', [SecretaryController::class, 'storeEntry'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.entries.store');
+    Route::post('/secretary/tournaments/{tournament}/teams', [SecretaryController::class, 'storeTeam'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.teams.store');
+    Route::post('/secretary/teams/{team}', [SecretaryController::class, 'updateTeam'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.teams.update');
     Route::post('/secretary/tournaments/{tournament}/assemble', [SecretaryController::class, 'assembleTournament'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.assemble');

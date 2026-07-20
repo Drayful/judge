@@ -107,16 +107,31 @@
                 @endif
 
                 @if($currentPerformance)
-                    <div class="mt-4 rounded-xl border border-slate-700/80 bg-slate-950/60 p-4">
-                        <div class="text-xs uppercase tracking-wider text-slate-500">Текущая гимнастка</div>
+                    @php($isGroupProgram = $category->program === 'group' || $currentPerformance->athlete?->is_team)
+                    <div class="mt-4 rounded-xl border {{ $isGroupProgram ? 'border-amber-700/60 bg-amber-950/15' : 'border-slate-700/80 bg-slate-950/60' }} p-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="text-xs uppercase tracking-wider text-slate-500">{{ $isGroupProgram ? 'Текущая команда' : 'Текущая гимнастка' }}</div>
+                            @if($isGroupProgram)
+                                <span class="rounded-md border border-amber-600/60 bg-amber-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-100">Групповое выступление</span>
+                            @endif
+                        </div>
                         <div class="mt-2 text-lg font-medium text-white">
-                            {{ $currentPerformance->athlete->last_name }} {{ $currentPerformance->athlete->first_name }}
+                            {{ $currentPerformance->athlete->last_name }}@if(! $isGroupProgram) {{ $currentPerformance->athlete->first_name }}@endif
                         </div>
                         <div class="mt-1 text-sm text-slate-400">
-                            Год: {{ $currentPerformance->athlete->birthdate?->format('Y') ?? '—' }}
-                            • Кат.: —
-                            • {{ Str::limit($currentPerformance->athlete->club ?? '—', 48) }}
+                            @if(! $isGroupProgram)Год: {{ $currentPerformance->athlete->birthdate?->format('Y') ?? '—' }} • Кат.: — • @endif
+                            {{ Str::limit($currentPerformance->athlete->club ?? '—', 48) }}
                         </div>
+                        @if($isGroupProgram && $currentPerformance->athlete && $currentPerformance->athlete->members->isNotEmpty())
+                            <div class="mt-3">
+                                <div class="text-[10px] uppercase tracking-wider text-amber-200/80 mb-1">Состав команды ({{ $currentPerformance->athlete->members->count() }})</div>
+                                <ol class="text-sm text-slate-200 list-decimal list-inside space-y-0.5">
+                                    @foreach($currentPerformance->athlete->members as $m)
+                                        <li>{{ $m->last_name }} {{ $m->first_name }}@if($m->birthdate) <span class="text-slate-500">{{ $m->birthdate->format('Y') }}</span>@endif</li>
+                                    @endforeach
+                                </ol>
+                            </div>
+                        @endif
                         <div class="mt-4">
                             <label class="block text-xs font-medium text-slate-400 mb-1">Предмет для этой гимнастки</label>
                             <div class="flex flex-wrap gap-2 items-center">

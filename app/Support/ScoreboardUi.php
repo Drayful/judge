@@ -44,7 +44,7 @@ class ScoreboardUi
     {
         $ordered = SecretaryLiveUi::orderedPerformances(
             $category->performances()
-                ->with(['athlete', 'judgeScores.judge', 'inquiries'])
+                ->with(['athlete.members', 'judgeScores.judge', 'inquiries'])
                 ->get()
         );
 
@@ -214,6 +214,10 @@ class ScoreboardUi
                 'club' => $perf->athlete?->club,
                 'apparatus' => $perf->apparatus,
                 'apparatus_label' => self::apparatusLabel($perf->apparatus),
+                'is_group' => $category->program === 'group' || (bool) $perf->athlete?->is_team,
+                'members' => (bool) $perf->athlete?->is_team
+                    ? $perf->athlete->members->map(fn ($m) => trim(($m->last_name ?? '').' '.($m->first_name ?? '')))->values()->all()
+                    : [],
                 'status' => $perf->status,
                 'd' => $perf->d_score,
                 'a' => $perf->a_score,

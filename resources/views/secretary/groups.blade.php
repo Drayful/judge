@@ -167,6 +167,41 @@
                     @error('iin') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
                 </details>
 
+                {{-- Создание команды группового выступления (с составом) --}}
+                <details class="mb-4 rounded-xl border border-amber-800/40 bg-amber-950/15 p-3">
+                    <summary class="cursor-pointer text-sm font-medium text-amber-200 hover:text-amber-100">
+                        ＋ Создать команду (групповое выступление)
+                    </summary>
+                    <form method="POST" action="{{ route('secretary.tournament.teams.store', $tournament) }}"
+                          class="mt-3 grid grid-cols-1 sm:grid-cols-6 gap-2 items-start">
+                        @csrf
+                        <div class="sm:col-span-3">
+                            <x-input-label value="Название команды" />
+                            <x-text-input name="name" required placeholder="Nova"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                        <div class="sm:col-span-1">
+                            <x-input-label value="Год" />
+                            <x-text-input name="birth_year" type="number" min="1990" max="2035" placeholder="2014"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                        <div class="sm:col-span-2">
+                            <x-input-label value="Клуб" />
+                            <x-text-input name="club" placeholder="Клуб (необязательно)"
+                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                        </div>
+                        <div class="sm:col-span-6">
+                            <x-input-label value="Состав (по одной участнице в строке: Фамилия Имя ГГГГ)" />
+                            <textarea name="members" rows="5" placeholder="Фех София 2014&#10;Дайрабай Раяна 2015"
+                                      class="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-950/50 text-slate-100 text-sm p-2 font-mono"></textarea>
+                        </div>
+                        <div class="sm:col-span-6 flex justify-end">
+                            <x-primary-button>Создать команду</x-primary-button>
+                        </div>
+                    </form>
+                    @error('name') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                </details>
+
                 @if($pool->isEmpty())
                     <div class="text-sm text-slate-400">
                         Пул пуст. Импортируйте список участвующих на странице турнира.
@@ -188,14 +223,35 @@
 
                                 {{-- Состав пула ДО создания группы --}}
                                 <details class="mb-3">
-                                    <summary class="cursor-pointer text-xs text-emerald-300 hover:text-emerald-200">Показать состав ({{ $p['count'] }})</summary>
-                                    <ol class="mt-2 max-h-52 overflow-y-auto space-y-0.5 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300 list-decimal list-inside">
+                                    <summary class="cursor-pointer text-xs text-emerald-300 hover:text-emerald-200">
+                                        {{ $p['program'] === 'group' ? 'Команды' : 'Показать состав' }} ({{ $p['count'] }})
+                                    </summary>
+                                    <ol class="mt-2 max-h-64 overflow-y-auto space-y-1 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300 list-decimal list-inside">
                                         @foreach($p['participants'] as $pt)
                                             <li class="truncate">
-                                                {{ $pt['name'] }}
+                                                <span class="{{ ($pt['is_team'] ?? false) ? 'text-amber-200 font-medium' : '' }}">{{ $pt['name'] }}</span>
                                                 @if($pt['year'])<span class="text-slate-500">{{ $pt['year'] }}</span>@endif
                                                 @if($pt['club'])<span class="text-slate-500">· {{ $pt['club'] }}</span>@endif
                                                 @if($pt['iin'])<span class="text-slate-600 font-mono">· {{ $pt['iin'] }}</span>@endif
+                                                @if(($pt['is_team'] ?? false))
+                                                    <span class="text-slate-500">· состав {{ count($pt['members']) }}</span>
+                                                    <details class="mt-1 ml-4">
+                                                        <summary class="cursor-pointer text-[11px] text-sky-300 hover:text-sky-200">состав / изменить</summary>
+                                                        @if(count($pt['members']))
+                                                            <ol class="mt-1 list-decimal list-inside text-slate-400">
+                                                                @foreach($pt['members'] as $mm)<li>{{ $mm }}</li>@endforeach
+                                                            </ol>
+                                                        @endif
+                                                        <form method="POST" action="{{ route('secretary.teams.update', $pt['team_id']) }}" class="mt-2 space-y-1">
+                                                            @csrf
+                                                            <input type="hidden" name="tournament_id" value="{{ $tournament->id }}">
+                                                            <input type="hidden" name="name" value="{{ $pt['name'] }}">
+                                                            <textarea name="members" rows="4" placeholder="По одной участнице в строке: Фамилия Имя 2014"
+                                                                      class="block w-full rounded-md border border-slate-700 bg-slate-950 text-slate-200 text-[11px] p-1.5">{{ collect($pt['members'])->implode("\n") }}</textarea>
+                                                            <button type="submit" class="rounded border border-sky-700/60 bg-sky-900/30 px-2 py-0.5 text-[10px] text-sky-100 hover:bg-sky-800/40">Сохранить состав</button>
+                                                        </form>
+                                                    </details>
+                                                @endif
                                             </li>
                                         @endforeach
                                     </ol>

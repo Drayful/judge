@@ -186,8 +186,23 @@ class StartProtocolImportService
 
             $teamName = $team['name'] !== '' ? $team['name'] : ($label !== '' ? $label : $title);
             $birthdate = $team['year'] !== null ? Carbon::createFromDate($team['year'], 1, 1)->startOfDay() : null;
+            $teamClub = $team['club'] !== '' ? $team['club'] : '';
 
-            $athlete = $this->resolveAthlete($teamName, '—', $birthdate, $team['club'], $stats);
+            $athlete = $this->resolveAthlete($teamName, '—', $birthdate, $teamClub, $stats, null, true);
+
+            // Ростер команды: настоящие участницы как отдельные athletes.
+            $rosterSync = [];
+            $position = 0;
+            foreach ($team['members'] as $memberRaw) {
+                [$mLast, $mFirst, $mYear] = $this->parseMember($memberRaw);
+                if (mb_strlen($mLast) < 2) {
+                    continue;
+                }
+                $mBirth = $mYear !== null ? Carbon::createFromDate($mYear, 1, 1)->startOfDay() : null;
+                $member = $this->resolveAthlete($mLast, $mFirst, $mBirth, $teamClub, $stats);
+                $rosterSync[$member->id] = ['position' => ++$position];
+            }
+            $athlete->members()->sync($rosterSync);
 
             if ($this->entryExists($tournament, $athlete->id, 'group')) {
                 $stats['entries_skipped']++;
@@ -307,7 +322,7 @@ class StartProtocolImportService
         return trim((string) preg_replace('/^\s*\d+\s*[.)]\s*/u', '', $a));
     }
 
-    private function resolveAthlete(string $lastName, string $firstName, ?Carbon $birthdate, string $clubFromRow, array &$stats, ?string $iin = null): Athlete
+    private function resolveAthlete(string $lastName, string $firstName, ?Carbon $birthdate, string $clubFromRow, array &$stats, ?string $iin = null, bool $isTeam = false): Athlete
     {
         // ИИН — самый надёжный идентификатор: если есть, ищем в первую очередь по нему.
         if ($iin !== null) {
@@ -323,6 +338,7 @@ class StartProtocolImportService
         }
 
         $q = Athlete::query()
+            ->where('is_team', $isTeam)
             ->whereRaw('LOWER(last_name) = ?', [mb_strtolower($lastName)])
             ->whereRaw('LOWER(first_name) = ?', [mb_strtolower($firstName)]);
 
@@ -358,8 +374,29 @@ class StartProtocolImportService
             'last_name' => $lastName,
             'birthdate' => $birthdate,
             'iin' => $iin,
+            'is_team' => $isTeam,
             'club' => $clubFromRow !== '' ? $clubFromRow : null,
         ]);
+    }
+
+    /**
+     * Разбор строки участницы команды: «Фех София 2014» → [фамилия, имя, год].
+     *
+     * @return array{0:string,1:string,2:?int}
+     */
+    private function parseMember(string $raw): array
+    {
+        $s = $this->cleanMemberName($raw);
+        $year = null;
+        if (preg_match('/\b((?:19|20)\d{2})\b\s*$/u', $s, $m)) {
+            $year = (int) $m[1];
+            $s = trim((string) preg_replace('/\b'.$m[1].'\b\s*$/u', '', $s));
+        }
+        $parts = preg_split('/\s+/u', trim($s), 2);
+        $last = $parts[0] ?? $s;
+        $first = ($parts[1] ?? '') !== '' ? $parts[1] : '—';
+
+        return [$last, $first, $year];
     }
 
     /**

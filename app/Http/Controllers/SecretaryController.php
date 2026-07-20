@@ -300,13 +300,13 @@ class SecretaryController extends Controller
             'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
             'groups.categories' => fn ($q) => $q->orderBy('stream_no'),
             'groups.entries' => fn ($q) => $q->orderBy('stream_no')->orderBy('start_number')->orderBy('order_index'),
-            'groups.entries.athlete',
+            'groups.entries.athlete.members',
         ]);
 
         // Пул: entries, ещё не привязанные к группе, сгруппированные по (программа, год, категория).
         // Включаем список участниц — чтобы видеть состав ДО создания группы.
         $pool = Entry::query()
-            ->with('athlete')
+            ->with('athlete.members')
             ->where('tournament_id', $tournament->id)
             ->whereNull('group_id')
             ->orderBy('program')
@@ -329,6 +329,11 @@ class SecretaryController extends Controller
                         'club' => $e->club ?? $athlete?->club,
                         'iin' => $athlete?->iin,
                         'year' => $athlete?->birthdate?->year,
+                        'is_team' => (bool) $athlete?->is_team,
+                        'team_id' => $athlete?->is_team ? $athlete->id : null,
+                        'members' => $athlete?->is_team
+                            ? $athlete->members->map(fn ($m) => trim($m->last_name.' '.$m->first_name).($m->birthdate ? ' '.$m->birthdate->year : ''))->all()
+                            : [],
                     ];
                 })->sortBy('name')->values();
 
@@ -666,7 +671,7 @@ class SecretaryController extends Controller
         return redirect()->route('secretary.tournament.groups', $tournament)->with('status', $msg);
     }
 
-    private function resolveOrCreateAthlete(string $lastName, string $firstName, ?Carbon $birthdate, ?string $club, ?string $iin = null): Athlete
+    private function resolveOrCreateAthlete(string $lastName, string $firstName, ?Carbon $birthdate, ?string $club, ?string $iin = null, bool $isTeam = false): Athlete
     {
         if ($iin !== null) {
             $byIin = Athlete::query()->where('iin', $iin)->first();
@@ -680,6 +685,7 @@ class SecretaryController extends Controller
         }
 
         $q = Athlete::query()
+            ->where('is_team', $isTeam)
             ->whereRaw('LOWER(last_name) = ?', [mb_strtolower($lastName)])
             ->whereRaw('LOWER(first_name) = ?', [mb_strtolower($firstName)]);
 
@@ -706,8 +712,135 @@ class SecretaryController extends Controller
             'last_name' => $lastName,
             'birthdate' => $birthdate,
             'iin' => $iin,
+            'is_team' => $isTeam,
             'club' => $club,
         ]);
+    }
+
+    /**
+     * Ростер команды из текста (по одной участнице в строке: «ФИО [ГГГГ]»).
+     * Возвращает sync-массив [athlete_id => ['position' => n]].
+     *
+     * @return array<int, array{position:int}>
+     */
+    private function rosterFromText(?string $text, ?string $club): array
+    {
+        $sync = [];
+        $position = 0;
+        foreach (preg_split('/\r\n|\r|\n/u', (string) $text) as $line) {
+            $line = trim((string) preg_replace('/\s+/u', ' ', $line));
+            if ($line === '') {
+                continue;
+            }
+            $year = null;
+            if (preg_match('/\b((?:19|20)\d{2})\b\s*$/u', $line, $m)) {
+                $year = (int) $m[1];
+                $line = trim((string) preg_replace('/\b'.$m[1].'\b\s*$/u', '', $line));
+            }
+            if (mb_strlen($line) < 2) {
+                continue;
+            }
+            $parts = preg_split('/\s+/u', $line, 2);
+            $last = $parts[0];
+            $first = ($parts[1] ?? '') !== '' ? $parts[1] : '—';
+            $birthdate = $year !== null ? Carbon::createFromDate($year, 1, 1)->startOfDay() : null;
+            $member = $this->resolveOrCreateAthlete($last, $first, $birthdate, $club);
+            $sync[$member->id] = ['position' => ++$position];
+        }
+
+        return $sync;
+    }
+
+    /**
+     * Создать команду группового выступления (athlete.is_team) с ростером и завести
+     * её в пул (Entry program=group). Если указана группа с потоками — добавить в поток.
+     */
+    public function storeTeam(Request $request, Tournament $tournament, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'birth_year' => ['nullable', 'integer', 'min:1990', 'max:2035'],
+            'division' => ['nullable', 'string', 'max:16'],
+            'club' => ['nullable', 'string', 'max:255'],
+            'members' => ['nullable', 'string', 'max:5000'],
+            'group_id' => ['nullable', 'integer'],
+        ]);
+
+        $group = null;
+        if (! empty($data['group_id'])) {
+            $group = Group::query()->where('tournament_id', $tournament->id)->find($data['group_id']);
+            if ($group === null || $group->program !== 'group') {
+                abort(404);
+            }
+        }
+
+        $birthYear = $group?->birth_year ?? (isset($data['birth_year']) ? (int) $data['birth_year'] : null);
+        $division = $group !== null
+            ? $group->division
+            : (isset($data['division']) && trim($data['division']) !== '' ? strtoupper(trim($data['division'])) : null);
+        $club = isset($data['club']) && trim($data['club']) !== '' ? trim($data['club']) : null;
+        $name = trim((string) preg_replace('/\s+/u', ' ', $data['name']));
+        $birthdate = $birthYear !== null ? Carbon::createFromDate($birthYear, 1, 1)->startOfDay() : null;
+
+        DB::transaction(function () use ($tournament, $group, $name, $birthdate, $birthYear, $division, $club, $data, $builder) {
+            $team = $this->resolveOrCreateAthlete($name, '—', $birthdate, $club, null, true);
+            $team->members()->sync($this->rosterFromText($data['members'] ?? null, $club));
+
+            $entry = Entry::query()->firstOrCreate(
+                ['tournament_id' => $tournament->id, 'athlete_id' => $team->id, 'program' => 'group'],
+                [
+                    'group_id' => $group?->id,
+                    'birth_year' => $birthYear,
+                    'division' => $division,
+                    'club' => $club,
+                    'order_index' => (int) (Entry::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
+                    'meta' => ['manual' => true],
+                ],
+            );
+
+            if ($group !== null) {
+                $entry->group_id = $group->id;
+                $maxStream = (int) (Category::query()->where('group_id', $group->id)->max('stream_no') ?? 0);
+                if ($maxStream > 0) {
+                    $entry->stream_no = $maxStream;
+                }
+                $entry->save();
+                if ($maxStream > 0) {
+                    $builder->renumber($group);
+                }
+            }
+        });
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Команда «{$name}» создана (групповое выступление).");
+    }
+
+    /**
+     * Обновить название и ростер команды.
+     */
+    public function updateTeam(Request $request, Athlete $team): RedirectResponse
+    {
+        abort_unless($team->is_team, 404);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'club' => ['nullable', 'string', 'max:255'],
+            'members' => ['nullable', 'string', 'max:5000'],
+            'tournament_id' => ['required', 'integer'],
+        ]);
+
+        $club = isset($data['club']) && trim($data['club']) !== '' ? trim($data['club']) : $team->club;
+
+        DB::transaction(function () use ($team, $data, $club) {
+            $team->update([
+                'last_name' => trim((string) preg_replace('/\s+/u', ' ', $data['name'])),
+                'club' => $club,
+            ]);
+            $team->members()->sync($this->rosterFromText($data['members'] ?? null, $club));
+        });
+
+        return redirect()->route('secretary.tournament.groups', $data['tournament_id'])
+            ->with('status', 'Состав команды обновлён.');
     }
 
     /**
@@ -1035,7 +1168,7 @@ class SecretaryController extends Controller
         $performances = Performance::query()
             ->with([
                 'category.tournament',
-                'athlete',
+                'athlete.members',
                 'judgeScores',
                 'track',
                 'trackBackup',

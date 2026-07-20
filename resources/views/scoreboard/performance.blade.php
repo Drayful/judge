@@ -62,6 +62,13 @@
                         <span id="apparatusBadge" class="inline-block rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-1.5 text-sm text-slate-200">
                             {{ $perf['apparatus_label'] ?? '—' }}
                         </span>
+
+                        <div id="groupWrap" class="{{ ($perf['is_group'] ?? false) ? '' : 'hidden' }} mt-3">
+                            <span class="inline-block rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-200">
+                                Групповое выступление
+                            </span>
+                            <div id="groupMembers" class="mt-2 text-base text-slate-300">{{ isset($perf['members']) ? implode(' · ', $perf['members']) : '' }}</div>
+                        </div>
                     </div>
 
                     <div class="sb-scores">
@@ -184,6 +191,12 @@
             document.getElementById('athleteName').textContent = perf.athlete || '—';
             document.getElementById('athleteClub').textContent = perf.club || '—';
             document.getElementById('apparatusBadge').textContent = perf.apparatus_label || '—';
+
+            const groupWrap = document.getElementById('groupWrap');
+            if (groupWrap) {
+                groupWrap.classList.toggle('hidden', !perf.is_group);
+                document.getElementById('groupMembers').textContent = (perf.members || []).join(' · ');
+            }
 
             const startWrap = document.getElementById('startNumberWrap');
             startWrap.innerHTML = perf.start_number

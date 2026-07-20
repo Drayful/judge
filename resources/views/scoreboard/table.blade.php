@@ -11,6 +11,9 @@
                     <div class="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-emerald-400/90 font-medium">
                         <span class="h-2 w-2 rounded-full bg-emerald-400 live-pulse"></span>
                         Результаты потока
+                        @if($category->program === 'group')
+                            <span class="rounded border border-amber-500/50 bg-amber-950/40 px-2 py-0.5 text-[10px] text-amber-200 tracking-normal">Групповые выступления</span>
+                        @endif
                     </div>
                     @if($tournament)
                         <p class="mt-1 text-sm text-slate-400 truncate">{{ $tournament->name }}</p>
