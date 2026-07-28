@@ -115,6 +115,7 @@
                     :age-group="$myScore?->age_group ?? 'junior'"
                     :group-program="$isGroupProgram"
                     :tournament="$tournament"
+                    :performance="$current"
                 />
             @endif
         </div>
@@ -133,6 +134,7 @@
                 subpanel: opts.subpanel,
                 penaltyType: opts.penaltyType,
                 submitUrl: opts.submitUrl,
+                liveActionUrl: opts.liveActionUrl,
                 tabletUrl: opts.tabletUrl,
                 tournamentId: opts.tournamentId,
 
@@ -210,6 +212,40 @@
                         this.draft = opts.initial;
                         this.actions = [{ v: opts.initial, cat: null, label: '' }];
                     }
+
+                    this.$watch('actions', () => this.publishLiveAction('Изменён черновик оценки'));
+                    this.$watch('pendingSymbol', (value) => {
+                        if (value) this.publishLiveAction('Выбран элемент: ' + (value.label || value.symbol));
+                    });
+                    this.$watch('pendingDc', (value) => {
+                        if (value) this.publishLiveAction('Выбран тип сотрудничества: ' + (value.label || value.symbol));
+                    });
+                    this.$watch('acroPending', (value) => {
+                        if (value) this.publishLiveAction('Включён режим: акробатика');
+                    });
+                    this.$watch('ageGroup', (value) => this.publishLiveAction('Выбрана возрастная группа: ' + value));
+                },
+
+                publishLiveAction(action) {
+                    if (! this.liveActionUrl) return;
+
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                    const body = new FormData();
+                    body.append('_token', csrfToken);
+                    body.append('action', action);
+                    body.append('draft_score', this.submitValue());
+                    body.append('entries', JSON.stringify(this.historyForSubmit()));
+                    body.append('age_group', this.ageGroup || '');
+                    fetch(this.liveActionUrl, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'Accept': 'application/json',
+                        },
+                        body,
+                    }).catch(() => {});
                 },
 
                 catFromLabel(label) {

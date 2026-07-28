@@ -92,6 +92,11 @@ class Performance extends Model
         return $this->hasMany(JudgeScore::class);
     }
 
+    public function judgeScoreActions(): HasMany
+    {
+        return $this->hasMany(JudgeScoreAction::class);
+    }
+
     public function inquiries(): HasMany
     {
         return $this->hasMany(Inquiry::class);

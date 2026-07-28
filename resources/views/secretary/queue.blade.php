@@ -366,6 +366,40 @@
                 </table>
             </div>
 
+            <div class="mt-5 rounded-xl border border-cyan-900/60 bg-slate-950/45 overflow-hidden">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
+                    <div>
+                        <h3 class="text-sm font-semibold text-cyan-50">Live-действия судей</h3>
+                        <p class="mt-0.5 text-xs text-slate-500">Каждое нажатие на планшете: выбор элемента, добавление, отмена и черновой результат. Обновляется автоматически.</p>
+                    </div>
+                    <span class="rounded-full border border-cyan-800/70 bg-cyan-950/40 px-2.5 py-1 text-xs font-mono text-cyan-100">{{ count($liveJudgeActions ?? []) }} действий</span>
+                </div>
+                <div class="max-h-72 overflow-y-auto divide-y divide-slate-800/80">
+                    @forelse($liveJudgeActions ?? [] as $action)
+                        <div class="flex items-start gap-3 px-4 py-3">
+                            <div class="shrink-0 rounded-md border border-emerald-800/70 bg-emerald-950/40 px-2 py-1 font-mono text-xs font-bold text-emerald-200">{{ $action['slot'] }}</div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm text-slate-100">{{ $action['action'] }}</div>
+                                <div class="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-slate-500">
+                                    <span>{{ $action['judge'] }}</span>
+                                    @if($action['entry_label'] !== '')<span>· {{ $action['entry_label'] }}</span>@endif
+                                    @if($action['entries_count'] > 0)<span>· элементов: {{ $action['entries_count'] }}</span>@endif
+                                    <span>· {{ $action['created_at'] }}</span>
+                                </div>
+                            </div>
+                            @if($action['draft_score'] !== null)
+                                <div class="shrink-0 text-right">
+                                    <div class="text-[10px] uppercase text-slate-500">Черновик</div>
+                                    <div class="font-mono text-sm font-semibold text-cyan-100">{{ $action['draft_score'] }}</div>
+                                </div>
+                            @endif
+                        </div>
+                    @empty
+                        <div class="px-4 py-7 text-center text-sm text-slate-500">Судьи ещё не сделали действий на планшетах для этой гимнастки.</div>
+                    @endforelse
+                </div>
+            </div>
+
             {{-- Управление оценками: редактирование и возврат на доработку (любой слот) --}}
             @if($currentPerformance)
                 @php

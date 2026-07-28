@@ -9,6 +9,7 @@
     'ageGroup' => 'junior',
     'groupProgram' => false,
     'tournament',
+    'performance',
 ])
 
 @php
@@ -28,6 +29,7 @@
         initialEntries: @js($entries),
         initialAgeGroup: @js($ageGroup),
         submitUrl: @js(route('judge.submit-score')),
+        liveActionUrl: @js(route('judge.performance.live-actions', $performance)),
         tabletUrl: @js(route('judge.tournament.tablet', $tournament)),
         tournamentId: {{ (int) $tournament->id }},
         panel: @js($type),

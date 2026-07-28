@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\ScoreUpdated;
 use App\Models\Category;
 use App\Models\JudgeScore;
+use App\Models\JudgeScoreAction;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Services\StreamAdvanceService;
@@ -210,6 +211,56 @@ class JudgeController extends Controller
             'score' => (float) $data['score'],
             'redirect_url' => route('judge.tournament.tablet', $tournament),
         ]);
+    }
+
+    /**
+     * Промежуточное действие на планшете судьи. Это отдельный неизменяемый журнал:
+     * он не создаёт финальную оценку и не влияет на подсчёт до нажатия «Отправить».
+     */
+    public function recordLiveAction(Performance $performance, Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $panel = $user->judgePanel();
+        if (! $panel && ! $user->isAdmin()) {
+            abort(403);
+        }
+
+        $performance->loadMissing('category.tournament');
+        $category = $performance->category;
+        if ($category === null || $category->tournament === null) {
+            abort(404);
+        }
+
+        $activeCategory = $this->resolveJudgeCategoryForTournament($category->tournament);
+        if ($activeCategory === null || $activeCategory->id !== $category->id) {
+            abort(422, 'Этот поток сейчас не открыт для судей.');
+        }
+
+        $data = $request->validate([
+            'action' => ['required', 'string', 'max:120'],
+            'draft_score' => ['nullable', 'numeric', 'min:0', 'max:99.999'],
+            'entries' => ['nullable', 'array', 'max:60'],
+            'age_group' => ['nullable', Rule::in(['junior', 'senior'])],
+        ]);
+
+        $effectivePanel = $user->isAdmin()
+            ? ['panel' => 'd', 'subpanel' => null, 'penalty_type' => null, 'slot' => $user->slot]
+            : $this->effectiveJudgePanel($performance, $panel);
+
+        JudgeScoreAction::query()->create([
+            'performance_id' => $performance->id,
+            'judge_id' => $user->id,
+            'slot' => $effectivePanel['slot'] ?? $user->slot,
+            'panel' => $effectivePanel['panel'],
+            'subpanel' => $effectivePanel['subpanel'] ?? null,
+            'penalty_type' => $effectivePanel['penalty_type'] ?? null,
+            'action' => $data['action'],
+            'draft_score' => $data['draft_score'] ?? null,
+            'entries' => isset($data['entries']) ? array_slice($data['entries'], 0, 60) : null,
+            'age_group' => $data['age_group'] ?? null,
+        ]);
+
+        return response()->json(['ok' => true]);
     }
 
     /**

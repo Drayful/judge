@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Group;
 use App\Models\JudgeScore;
+use App\Models\JudgeScoreAction;
 use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Models\StreamSession;
@@ -1370,6 +1371,7 @@ class SecretaryController extends Controller
 
         $pids = $performances->pluck('id');
         $scoresDigest = '';
+        $actionsDigest = '';
         if ($pids->isNotEmpty()) {
             $scoresDigest = JudgeScore::query()
                 ->whereIn('performance_id', $pids)
@@ -1388,11 +1390,26 @@ class SecretaryController extends Controller
                     (string) ($s->updated_at?->getTimestamp() ?? 0),
                 ]))
                 ->implode(';');
+
+            $actionsDigest = JudgeScoreAction::query()
+                ->whereIn('performance_id', $pids)
+                ->orderBy('id')
+                ->get(['id', 'performance_id', 'judge_id', 'slot', 'action', 'draft_score', 'created_at'])
+                ->map(fn (JudgeScoreAction $action) => implode(':', [
+                    (string) $action->id,
+                    (string) $action->performance_id,
+                    (string) $action->judge_id,
+                    (string) ($action->slot ?? ''),
+                    $action->action,
+                    (string) ($action->draft_score ?? ''),
+                    (string) ($action->created_at?->getTimestamp() ?? 0),
+                ]))
+                ->implode(';');
         }
 
         $catSig = $category->id.':'.($session?->id ?? 'all').':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
 
-        $rev = md5($perfSig."\n".$scoresDigest."\n".$catSig);
+        $rev = md5($perfSig."\n".$scoresDigest."\n".$actionsDigest."\n".$catSig);
 
         return response()->json([
             'rev' => $rev,
@@ -1465,6 +1482,35 @@ class SecretaryController extends Controller
             ];
         }
 
+        $liveJudgeActions = $currentPerformance
+            ? JudgeScoreAction::query()
+                ->with('judge:id,name')
+                ->where('performance_id', $currentPerformance->id)
+                ->latest('id')
+                ->limit(100)
+                ->get()
+                ->reverse()
+                ->values()
+                ->map(function (JudgeScoreAction $action) {
+                    $lastEntry = collect($action->entries ?? [])->last();
+                    $entryLabel = is_array($lastEntry)
+                        ? trim((string) ($lastEntry['label'] ?? $lastEntry['symbol'] ?? ''))
+                        : '';
+
+                    return [
+                        'id' => $action->id,
+                        'slot' => $action->slot ?? strtoupper($action->panel),
+                        'judge' => $action->judge?->name ?? 'Судья',
+                        'action' => $action->action,
+                        'draft_score' => $action->draft_score !== null ? number_format($action->draft_score, 3, '.', '') : null,
+                        'entry_label' => $entryLabel,
+                        'entries_count' => count($action->entries ?? []),
+                        'created_at' => $action->created_at?->format('H:i:s'),
+                    ];
+                })
+                ->all()
+            : [];
+
         return [
             'category' => $category,
             'streamSession' => $session,
@@ -1483,6 +1529,7 @@ class SecretaryController extends Controller
             'activeJudgeSlots' => $activeJudgeSlots,
             'athletes' => $athletes,
             'scoreHistory' => $scoreHistory,
+            'liveJudgeActions' => $liveJudgeActions,
         ];
     }
 

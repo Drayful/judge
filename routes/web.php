@@ -213,6 +213,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/judge/submit-score', [JudgeController::class, 'submitScoreAjax'])
         ->middleware('role:judge,admin')
         ->name('judge.submit-score');
+    Route::post('/judge/performances/{performance}/live-actions', [JudgeController::class, 'recordLiveAction'])
+        ->middleware('role:judge,admin')
+        ->name('judge.performance.live-actions');
     Route::post('/judge/performances/{performance}/finalize', [JudgeController::class, 'finalize'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('judge.finalize');
