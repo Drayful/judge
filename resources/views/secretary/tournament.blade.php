@@ -197,9 +197,14 @@
                         В этом турнире пока нет атлетов. Импортируйте протокол или добавьте их в очередь категории.
                     </div>
                 @else
+                    <div x-data="{ search: '' }">
+                        <input x-model="search" type="search" placeholder="Поиск по ФИО или ИИН"
+                               class="mb-4 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:ring-emerald-500">
                     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                         @foreach($athletes as $a)
-                            <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40">
+                            <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40"
+                                 data-search="{{ mb_strtolower($a->last_name.' '.$a->first_name.' '.$a->iin) }}"
+                                 x-show="!search || $el.dataset.search.includes(search.toLowerCase())">
                                 <div class="font-medium text-slate-100 truncate">
                                     {{ $a->last_name }} {{ $a->first_name }}
                                 </div>
@@ -209,12 +214,35 @@
                                 <div class="text-xs text-slate-500 mt-2">
                                     {{ $a->birthdate?->format('Y-m-d') ?? '—' }}
                                 </div>
+                                <div class="text-xs text-slate-500 mt-1 font-mono">
+                                    ИИН: {{ $a->iin ?? '—' }}
+                                </div>
+
+                                <details class="mt-3 border-t border-slate-800 pt-3">
+                                    <summary class="cursor-pointer text-sm font-medium text-emerald-300 hover:text-emerald-200">Редактировать</summary>
+                                    <form method="POST" action="{{ route('secretary.tournament.athletes.update', [$tournament, $a]) }}" class="mt-3 space-y-3">
+                                        @csrf
+                                        <div>
+                                            <x-input-label value="Фамилия" />
+                                            <x-text-input name="last_name" value="{{ $a->last_name }}" required class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                                        </div>
+                                        <div>
+                                            <x-input-label value="Имя" />
+                                            <x-text-input name="first_name" value="{{ $a->first_name }}" required class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                                        </div>
+                                        <div>
+                                            <x-input-label value="ИИН" />
+                                            <x-text-input name="iin" value="{{ $a->iin }}" inputmode="numeric" pattern="\d{12}" maxlength="12" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 font-mono" />
+                                        </div>
+                                        <x-primary-button class="w-full justify-center">Сохранить</x-primary-button>
+                                    </form>
+                                </details>
                             </div>
                         @endforeach
+                    </div>
                     </div>
                 @endif
             </x-card>
         </div>
     </div>
 </x-app-layout>
-

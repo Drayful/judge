@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Athlete;
 use App\Models\Category;
+use App\Models\Entry;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Models\User;
@@ -48,6 +49,48 @@ class GroupPerformanceTest extends TestCase
         $this->assertFalse((bool) $team->members[0]->is_team);
         // Команда заведена в пул как групповое выступление.
         $this->assertDatabaseHas('entries', ['athlete_id' => $team->id, 'program' => 'group']);
+    }
+
+    public function test_imports_secretary_group_sheet_with_short_team_names_and_age_blocks(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+
+        $spreadsheet = new Spreadsheet;
+        $spreadsheet->removeSheetByIndex(0);
+        $sheet = $spreadsheet->createSheet();
+        $sheet->setTitle('групповые 2020');
+        $sheet->fromArray([
+            ['Кербез', null, 'Федерация г. Шымкент'],
+            ['Әмірәлі Айзада', 2020],
+            ['Серік Алина', 2020],
+            [null],
+            ['г. Конаев ШХГ "Fire Star"', null, 'г. Конаев ШХГ "Fire Star"'],
+            ['Донская Евангелина', 2020],
+            ['Жантемір Сафия', 2020],
+            [null],
+            ['Групповые 2019гр', null, 'г. Усть-Каменогорск КГУ "Радмила"'],
+            ['Тренев Феденевна Н.В 2019'],
+            ['Ларионова Ангелина 2019'],
+        ], null, 'A1');
+        $path = tempnam(sys_get_temp_dir(), 'group-layout').'.xlsx';
+        (new XlsxWriter($spreadsheet))->save($path);
+
+        try {
+            $stats = app(StartProtocolImportService::class)->importFromPath($tournament, $path);
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertSame(3, $stats['group_teams_created']);
+        $kerbez = Athlete::query()->where('is_team', true)->where('last_name', 'Кербез')->firstOrFail();
+        $fireStar = Athlete::query()->where('is_team', true)->where('last_name', 'Fire Star')->firstOrFail();
+        $radmila = Athlete::query()->where('is_team', true)->where('last_name', 'Радмила')->firstOrFail();
+
+        $this->assertCount(2, $kerbez->members);
+        $this->assertSame('Федерация г. Шымкент', $kerbez->club);
+        $this->assertCount(2, $fireStar->members);
+        $this->assertCount(2, $radmila->members);
+        $this->assertSame(2019, Entry::query()->where('athlete_id', $radmila->id)->value('birth_year'));
     }
 
     public function test_secretary_creates_team_with_roster(): void

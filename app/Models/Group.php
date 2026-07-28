@@ -16,12 +16,15 @@ class Group extends Model
         'division',
         'name',
         'apparatus',
+        'apparatus_selection_mode',
+        'apparatus_count',
         'number_mode',
         'order_index',
     ];
 
     protected $casts = [
         'apparatus' => 'array',
+        'apparatus_count' => 'integer',
         'birth_year' => 'integer',
         'order_index' => 'integer',
     ];
@@ -42,6 +45,17 @@ class Group extends Model
             static fn ($v) => is_string($v) ? trim($v) : '',
             $raw,
         ), static fn ($v) => $v !== ''));
+    }
+
+    public function hasPendingApparatusSelection(): bool
+    {
+        return $this->usesApparatusChoice()
+            && count($this->apparatusLabels()) < (int) $this->apparatus_count;
+    }
+
+    public function usesApparatusChoice(): bool
+    {
+        return $this->apparatus_selection_mode === 'choice';
     }
 
     public function tournament(): BelongsTo

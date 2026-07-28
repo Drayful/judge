@@ -24,7 +24,7 @@ class StreamBuilderService
      *
      * @param  list<array{start:?string,end:?string}>  $times  метки времени по индексу потока (0-based)
      */
-    public function generateStreams(Group $group, int $streamSize, array $times = [], string $numberMode = 'continuous'): void
+    public function generateStreams(Group $group, int $streamSize, array $times = [], string $numberMode = 'per_stream'): void
     {
         $streamSize = max(1, $streamSize);
 
@@ -81,6 +81,41 @@ class StreamBuilderService
         if ($group !== null) {
             $this->renumber($group);
         }
+    }
+
+    public function moveEntryWithinStream(Entry $entry, string $direction): bool
+    {
+        $group = $entry->group;
+        if ($group === null || $entry->stream_no === null) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($entry, $group, $direction) {
+            $entries = $group->entries()
+                ->where('stream_no', $entry->stream_no)
+                ->orderBy('order_index')
+                ->orderBy('id')
+                ->get()
+                ->values();
+
+            $position = $entries->search(fn (Entry $candidate) => $candidate->id === $entry->id);
+            $targetPosition = $position === false ? -1 : $position + ($direction === 'up' ? -1 : 1);
+
+            if ($targetPosition < 0 || $targetPosition >= $entries->count()) {
+                return false;
+            }
+
+            $target = $entries[$targetPosition];
+            $entryOrder = $entry->order_index;
+            $entry->order_index = $target->order_index;
+            $target->order_index = $entryOrder;
+            $entry->save();
+            $target->save();
+
+            $this->renumber($group);
+
+            return true;
+        });
     }
 
     /**
@@ -198,7 +233,7 @@ class StreamBuilderService
 
         $labels = $group->apparatusLabels();
         if ($labels === []) {
-            $labels = ['Вид 1'];
+            return;
         }
 
         $expanded = [];
@@ -221,6 +256,12 @@ class StreamBuilderService
 
         $occurrence = [];
         $orderIndex = 0;
+        $sessionIdByApparatus = [];
+        foreach ($category->sessions()->get() as $session) {
+            foreach ($session->apparatus ?? [] as $sessionApparatus) {
+                $sessionIdByApparatus[(string) $sessionApparatus] = $session->id;
+            }
+        }
         foreach ($expanded as $it) {
             /** @var Entry $entry */
             $entry = $it['entry'];
@@ -244,6 +285,7 @@ class StreamBuilderService
 
             Performance::query()->create([
                 'category_id' => $category->id,
+                'stream_session_id' => $sessionIdByApparatus[$base] ?? null,
                 'athlete_id' => $athleteId,
                 'start_number' => $entry->start_number,
                 'order_index' => ++$orderIndex,
@@ -285,6 +327,12 @@ class StreamBuilderService
     {
         $labels = $group->apparatusLabels();
 
-        return $labels === [] ? null : implode(', ', $labels);
+        if ($labels !== []) {
+            return implode(', ', $labels);
+        }
+
+        return $group->hasPendingApparatusSelection()
+            ? 'Вид на выбор ('.((int) $group->apparatus_count).')'
+            : null;
     }
 }

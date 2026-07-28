@@ -14,6 +14,7 @@ class Performance extends Model
 {
     protected $fillable = [
         'category_id',
+        'stream_session_id',
         'athlete_id',
         'original_performance_id',
         'attempt_no',
@@ -74,6 +75,11 @@ class Performance extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function streamSession(): BelongsTo
+    {
+        return $this->belongsTo(StreamSession::class);
     }
 
     public function athlete(): BelongsTo

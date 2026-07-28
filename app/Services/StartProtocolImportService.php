@@ -138,6 +138,7 @@ class StartProtocolImportService
     {
         [$sheetYear, , $label] = $this->parseGroupTitle($title);
         $highestRow = (int) $sheet->getHighestRow();
+        $currentYear = $sheetYear;
 
         /** @var list<array{name:string, club:string, year:?int, members:list<string>}> $teams */
         $teams = [];
@@ -148,14 +149,30 @@ class StartProtocolImportService
                 continue;
             }
             $b = $this->cellStr($sheet, $row, 'B');
+            $c = $this->cellStr($sheet, $row, 'C');
+
+            if ($this->isGroupSectionHeader($a)) {
+                $currentYear = $this->firstYearIn($a) ?? $currentYear;
+
+                if ($c !== '') {
+                    $teams[] = $this->newImportedTeam($this->teamName($c), $c, $currentYear);
+                }
+
+                continue;
+            }
 
             if ($this->isTeamHeader($a)) {
-                $teams[] = [
-                    'name' => $this->teamName($a),
-                    'club' => $a,
-                    'year' => $this->firstYearIn($a) ?? $sheetYear,
-                    'members' => [],
-                ];
+                $teams[] = $this->newImportedTeam(
+                    $this->teamName($a),
+                    $c !== '' ? $c : $a,
+                    $this->firstYearIn($a) ?? $currentYear,
+                );
+
+                continue;
+            }
+
+            if ($this->isShortTeamHeader($a, $b, $c)) {
+                $teams[] = $this->newImportedTeam($this->teamName($a), $c, $currentYear);
 
                 continue;
             }
@@ -165,7 +182,7 @@ class StartProtocolImportService
                 $teams[] = [
                     'name' => $label !== '' ? $label : $title,
                     'club' => '',
-                    'year' => $sheetYear,
+                    'year' => $currentYear,
                     'members' => [],
                 ];
             }
@@ -216,7 +233,7 @@ class StartProtocolImportService
                 'program' => 'group',
                 // Категория = лист (год листа), а не год конкретной команды — иначе
                 // «2014-2015», «КМС» и т.п. разъезжаются по годам.
-                'birth_year' => $sheetYear,
+                'birth_year' => $team['year'] ?? $sheetYear,
                 'division' => null,
                 'club' => $team['club'] !== '' ? $team['club'] : null,
                 'meta' => [
@@ -292,6 +309,30 @@ class StartProtocolImportService
         }
 
         return (bool) preg_match('/[«»“”"]|федерац|\bteam\b|ШХГ|СХГ|СДЮ|г\.\s*алмат|MGS/iu', $a);
+    }
+
+    private function isShortTeamHeader(string $a, string $b, string $c): bool
+    {
+        return $b === ''
+            && $c !== ''
+            && mb_strlen($a) >= 2
+            && $this->parseYear($a) === null;
+    }
+
+    private function isGroupSectionHeader(string $a): bool
+    {
+        return (bool) preg_match('/^\s*груп\S*.*(?:19|20)\d{2}/iu', $a);
+    }
+
+    /** @return array{name:string,club:string,year:?int,members:list<string>} */
+    private function newImportedTeam(string $name, string $club, ?int $year): array
+    {
+        return [
+            'name' => $name,
+            'club' => $club,
+            'year' => $year,
+            'members' => [],
+        ];
     }
 
     private function teamName(string $header): string

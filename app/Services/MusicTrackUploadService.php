@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\MusicTrack;
 use App\Models\Performance;
-use App\Models\User;
 use DomainException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -16,14 +15,14 @@ class MusicTrackUploadService
      *
      * @throws DomainException дедлайн категории и нет права обойти
      */
-    public function store(Performance $performance, UploadedFile $file, User $uploadedBy, string $type = 'primary'): MusicTrack
+    public function store(Performance $performance, UploadedFile $file, ?User $uploadedBy, string $type = 'primary'): MusicTrack
     {
         $type = in_array($type, ['primary', 'backup'], true) ? $type : 'primary';
 
         $performance->loadMissing('category.tournament');
 
         $deadline = $performance->category?->music_deadline_at;
-        if ($deadline && now()->greaterThan($deadline) && ! $uploadedBy->canUploadMusicAfterDeadline()) {
+        if ($deadline && now()->greaterThan($deadline) && ! $uploadedBy?->canUploadMusicAfterDeadline()) {
             throw new DomainException('Загрузка/замена музыки закрыта по дедлайну обмена. Обратитесь к администратору или секретариату.');
         }
 
@@ -53,7 +52,7 @@ class MusicTrackUploadService
             'performance_id' => $performance->id,
             'type' => $type,
             'version' => $nextVersion,
-            'uploaded_by' => $uploadedBy->id,
+            'uploaded_by' => $uploadedBy?->id,
             'is_active' => true,
             'original_name' => $file->getClientOriginalName(),
             'disk' => $disk,

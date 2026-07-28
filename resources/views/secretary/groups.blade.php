@@ -97,8 +97,8 @@
                             <div>
                                 <x-input-label value="Нумерация" />
                                 <select name="number_mode" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
-                                    <option value="continuous">сквозная</option>
                                     <option value="per_stream">с начала в потоке</option>
+                                    <option value="continuous">сквозная</option>
                                 </select>
                             </div>
                             <button type="submit" class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500">
@@ -257,15 +257,30 @@
                                     </ol>
                                 </details>
 
-                                <form method="POST" action="{{ route('secretary.tournament.groups.store', $tournament) }}" class="space-y-3">
+                                <form method="POST" action="{{ route('secretary.tournament.groups.store', $tournament) }}" class="space-y-3" x-data="{ apparatusMode: 'fixed' }">
                                     @csrf
                                     <input type="hidden" name="program" value="{{ $p['program'] }}">
                                     <input type="hidden" name="birth_year" value="{{ $p['birth_year'] }}">
                                     <input type="hidden" name="division" value="{{ $p['division'] }}">
 
                                     <div>
-                                        <x-input-label value="Предметы (круги, по порядку)" />
-                                        <div class="mt-1 flex flex-wrap gap-2">
+                                        <x-input-label value="Виды выступлений" />
+                                        <div class="mt-1 flex flex-wrap gap-3 text-sm text-slate-200">
+                                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                                <input type="radio" name="apparatus_mode" value="fixed" x-model="apparatusMode" checked
+                                                       class="border-slate-600 bg-slate-950 text-emerald-500 focus:ring-emerald-500">
+                                                Указать предметы сейчас
+                                            </label>
+                                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                                <input type="radio" name="apparatus_mode" value="choice" x-model="apparatusMode"
+                                                       class="border-slate-600 bg-slate-950 text-amber-500 focus:ring-amber-500">
+                                                Вид на выбор
+                                            </label>
+                                        </div>
+
+                                        <div x-show="apparatusMode === 'fixed'" class="mt-3">
+                                            <div class="text-xs text-slate-400">Предметы (круги, по порядку)</div>
+                                            <div class="mt-1 flex flex-wrap gap-2">
                                             @foreach($apparatusOptions as $ap)
                                                 <label class="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-emerald-600">
                                                     <input type="checkbox" name="apparatus[]" value="{{ $ap }}"
@@ -273,15 +288,25 @@
                                                     {{ $ap }}
                                                 </label>
                                             @endforeach
+                                            </div>
                                         </div>
+
+                                        <div x-show="apparatusMode === 'choice'" class="mt-3 max-w-xs">
+                                            <x-input-label value="Количество предметов" />
+                                            <x-text-input name="apparatus_count" type="number" min="1" max="6" value="3"
+                                                          class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
+                                            <p class="mt-1 text-xs text-amber-200">Сначала сформируйте потоки, затем выберите предметы для этой группы.</p>
+                                        </div>
+                                        @error('apparatus') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
+                                        @error('apparatus_count') <p class="mt-1 text-xs text-rose-300">{{ $message }}</p> @enderror
                                     </div>
 
                                     <div class="flex items-end justify-between gap-3">
                                         <div>
                                             <x-input-label value="Нумерация" />
                                             <select name="number_mode" class="mt-1 rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 text-sm focus:ring-emerald-500 focus:border-emerald-500">
-                                                <option value="continuous">сквозная по группе</option>
                                                 <option value="per_stream">с начала в каждом потоке</option>
+                                                <option value="continuous">сквозная по группе</option>
                                             </select>
                                         </div>
                                         <x-primary-button>Создать группу</x-primary-button>
@@ -353,6 +378,9 @@
                                     @foreach($group->apparatusLabels() as $ap)
                                         <x-badge tone="violet">{{ $ap }}</x-badge>
                                     @endforeach
+                                    @if($group->hasPendingApparatusSelection())
+                                        <x-badge tone="amber">Вид на выбор: {{ $group->apparatus_count }}</x-badge>
+                                    @endif
                                     <span class="text-slate-400">· {{ $groupEntryCounts[$group->id] ?? 0 }} уч.</span>
                                     <span class="text-slate-500">· нумерация: {{ $group->number_mode === 'per_stream' ? 'с начала в потоке' : 'сквозная' }}</span>
                                 </div>
@@ -396,6 +424,28 @@
                             <x-primary-button class="justify-center">Сформировать потоки</x-primary-button>
                         </form>
 
+                        @if($group->usesApparatusChoice() && $group->categories->isNotEmpty())
+                            <form method="POST" action="{{ route('secretary.tournament.groups.apparatus', [$tournament, $group]) }}"
+                                  class="mt-4 rounded-xl border border-amber-700/60 bg-amber-950/30 p-4">
+                                @csrf
+                                <div class="font-medium text-amber-100">
+                                    {{ $group->hasPendingApparatusSelection() ? 'Выберите' : 'Измените' }} {{ $group->apparatus_count }} предмета(ов) для группы
+                                </div>
+                                <p class="mt-1 text-xs text-amber-200/80">После сохранения система обновит выступления и очереди во всех потоках. Изменение недоступно после начала выступлений.</p>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    @foreach($apparatusOptions as $ap)
+                                        <label class="inline-flex items-center gap-1.5 rounded-md border border-amber-900/70 bg-slate-950/50 px-2.5 py-1.5 text-sm text-slate-200 cursor-pointer hover:border-amber-500">
+                                            <input type="checkbox" name="apparatus[]" value="{{ $ap }}" @checked(in_array($ap, $group->apparatusLabels(), true))
+                                                   class="rounded border-slate-600 bg-slate-950 text-amber-500 focus:ring-amber-500">
+                                            {{ $ap }}
+                                        </label>
+                                    @endforeach
+                                </div>
+                                @error('apparatus') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                                <button type="submit" class="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500">Сохранить предметы</button>
+                            </form>
+                        @endif
+
                         {{-- Список потоков группы --}}
                         @if($group->categories->isNotEmpty())
                             <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -412,6 +462,70 @@
                                             Очередь →
                                         </a>
                                     </div>
+                                    <details class="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 sm:col-span-2">
+                                        <summary class="cursor-pointer text-xs font-medium text-sky-300 hover:text-sky-200">
+                                            Расписание по дням ({{ $cat->sessions->count() }})
+                                        </summary>
+                                        <div class="mt-3 space-y-2">
+                                            @foreach($cat->sessions as $session)
+                                                <div class="rounded-lg border border-slate-700/80 bg-slate-900/60 p-3">
+                                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                                        <div class="text-sm font-medium text-slate-100">
+                                                            Сессия {{ $session->session_no }} · {{ $session->scheduled_on?->format('d.m.Y') }}
+                                                            @if($session->starts_at)<span class="ml-1 text-slate-400">{{ substr($session->starts_at, 0, 5) }}@if($session->ends_at)–{{ substr($session->ends_at, 0, 5) }}@endif</span>@endif
+                                                            @if($session->title)<span class="ml-1 text-slate-400">· {{ $session->title }}</span>@endif
+                                                        </div>
+                                                        <a href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $cat->id }}&session={{ $session->id }}" class="text-xs font-semibold text-emerald-300 hover:text-emerald-200">Открыть Live →</a>
+                                                    </div>
+                                                    <div class="mt-2 flex flex-wrap gap-1">
+                                                        @foreach($session->apparatus ?? [] as $apparatus)
+                                                            <span class="rounded-full border border-sky-700/60 bg-sky-950/40 px-2 py-0.5 text-[11px] text-sky-100">{{ $apparatus }}</span>
+                                                        @endforeach
+                                                    </div>
+                                                    <details class="mt-3">
+                                                        <summary class="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Изменить сессию</summary>
+                                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.update', [$tournament, $cat, $session]) }}" class="mt-2 space-y-2">
+                                                            @csrf
+                                                            @method('PATCH')
+                                                            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                                                <input name="scheduled_on" type="date" value="{{ $session->scheduled_on?->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                                <input name="starts_at" type="time" value="{{ $session->starts_at ? substr($session->starts_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                                <input name="ends_at" type="time" value="{{ $session->ends_at ? substr($session->ends_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                            </div>
+                                                            <input name="title" value="{{ $session->title }}" placeholder="Название, например: Финалы" class="w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                            <div class="flex flex-wrap gap-x-3 gap-y-1">
+                                                                @foreach($apparatusOptions as $apparatus)
+                                                                    <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" @checked(in_array($apparatus, $session->apparatus ?? [], true)) class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
+                                                                @endforeach
+                                                            </div>
+                                                            <button class="text-xs text-sky-300 hover:text-sky-200">Сохранить</button>
+                                                        </form>
+                                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.destroy', [$tournament, $cat, $session]) }}" class="mt-2" onsubmit="return confirm('Удалить сессию? Выступления останутся в потоке без даты.');">
+                                                            @csrf
+                                                            @method('DELETE')
+                                                            <button class="text-xs text-rose-300 hover:text-rose-200">Удалить сессию</button>
+                                                        </form>
+                                                    </details>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.store', [$tournament, $cat]) }}" class="mt-3 rounded-lg border border-dashed border-slate-700 p-3">
+                                            @csrf
+                                            <div class="text-xs font-semibold text-slate-200">Добавить день / сессию</div>
+                                            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                                <input name="scheduled_on" type="date" value="{{ now()->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                <input name="starts_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                <input name="ends_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                            </div>
+                                            <input name="title" placeholder="Название (необязательно)" class="mt-2 w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                            <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                                                @foreach($apparatusOptions as $apparatus)
+                                                    <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
+                                                @endforeach
+                                            </div>
+                                            <button class="mt-3 text-xs font-semibold text-emerald-300 hover:text-emerald-200">+ Добавить сессию</button>
+                                        </form>
+                                    </details>
                                 @endforeach
                             </div>
                             <div class="mt-3 flex flex-wrap items-center gap-4">
@@ -439,6 +553,18 @@
                                                     <li class="flex items-center gap-2 text-xs">
                                                         <span class="w-7 shrink-0 text-right font-mono text-slate-500">{{ $entry->start_number }}</span>
                                                         <span class="flex-1 min-w-0 truncate text-slate-200">{{ $entry->athlete?->last_name }} {{ $entry->athlete?->first_name }}</span>
+                                                        <div class="flex items-center gap-1 shrink-0">
+                                                            <form method="POST" action="{{ route('secretary.entries.reorder', $entry) }}">
+                                                                @csrf
+                                                                <input type="hidden" name="direction" value="up">
+                                                                <button type="submit" class="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800" title="Выше в очереди">↑</button>
+                                                            </form>
+                                                            <form method="POST" action="{{ route('secretary.entries.reorder', $entry) }}">
+                                                                @csrf
+                                                                <input type="hidden" name="direction" value="down">
+                                                                <button type="submit" class="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800" title="Ниже в очереди">↓</button>
+                                                            </form>
+                                                        </div>
                                                         <form method="POST" action="{{ route('secretary.entries.move', $entry) }}" class="flex items-center gap-1 shrink-0">
                                                             @csrf
                                                             <select name="stream_no" class="rounded-md border-slate-700 bg-slate-950 text-slate-200 text-[11px] py-0.5">

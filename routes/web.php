@@ -4,6 +4,7 @@ use App\Http\Controllers\AthleteMusicController;
 use App\Http\Controllers\InquiryController;
 use App\Http\Controllers\JudgeController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PublicAthleteUploadController;
 use App\Http\Controllers\ScoreboardController;
 use App\Http\Controllers\SecretaryController;
 use App\Http\Controllers\SupervisorController;
@@ -12,6 +13,15 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::get('/upload-music', [PublicAthleteUploadController::class, 'index'])
+    ->name('public-athlete-upload.index');
+Route::post('/upload-music/search', [PublicAthleteUploadController::class, 'search'])
+    ->middleware('throttle:10,1')
+    ->name('public-athlete-upload.search');
+Route::post('/upload-music/{athlete}', [PublicAthleteUploadController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('public-athlete-upload.store');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
@@ -79,6 +89,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/entries', [SecretaryController::class, 'storeEntry'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.entries.store');
+    Route::post('/secretary/tournaments/{tournament}/athletes/{athlete}', [SecretaryController::class, 'updateTournamentAthlete'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.athletes.update');
     Route::post('/secretary/tournaments/{tournament}/teams', [SecretaryController::class, 'storeTeam'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.teams.store');
@@ -94,6 +107,18 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/streams', [SecretaryController::class, 'generateStreams'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.streams');
+    Route::post('/secretary/tournaments/{tournament}/categories/{category}/sessions', [SecretaryController::class, 'storeStreamSession'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.categories.sessions.store');
+    Route::patch('/secretary/tournaments/{tournament}/categories/{category}/sessions/{session}', [SecretaryController::class, 'updateStreamSession'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.categories.sessions.update');
+    Route::delete('/secretary/tournaments/{tournament}/categories/{category}/sessions/{session}', [SecretaryController::class, 'destroyStreamSession'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.categories.sessions.destroy');
+    Route::post('/secretary/tournaments/{tournament}/groups/{group}/apparatus', [SecretaryController::class, 'setGroupApparatus'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.apparatus');
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/renumber', [SecretaryController::class, 'renumberGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.renumber');
@@ -106,6 +131,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/entries/{entry}/move', [SecretaryController::class, 'moveEntry'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.entries.move');
+    Route::post('/secretary/entries/{entry}/reorder', [SecretaryController::class, 'reorderEntry'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.entries.reorder');
     Route::post('/secretary/tournaments/{tournament}/categories', [SecretaryController::class, 'storeCategory'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.categories.store');

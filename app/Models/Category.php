@@ -110,4 +110,12 @@ class Category extends Model
     {
         return $this->hasMany(Performance::class);
     }
+
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(StreamSession::class)
+            ->orderBy('scheduled_on')
+            ->orderBy('starts_at')
+            ->orderBy('session_no');
+    }
 }

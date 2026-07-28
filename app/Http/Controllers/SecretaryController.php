@@ -9,6 +9,7 @@ use App\Models\Group;
 use App\Models\JudgeScore;
 use App\Models\MusicTrack;
 use App\Models\Performance;
+use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Services\FinalProtocolExporter;
 use App\Services\FinalProtocolService;
@@ -89,6 +90,37 @@ class SecretaryController extends Controller
             'athletes' => $athletes,
             'protocolGroups' => $protocols->groups($tournament),
         ]);
+    }
+
+    public function updateTournamentAthlete(Request $request, Tournament $tournament, Athlete $athlete): RedirectResponse
+    {
+        $belongsToTournament = Performance::query()
+            ->join('categories', 'categories.id', '=', 'performances.category_id')
+            ->where('categories.tournament_id', $tournament->id)
+            ->where('performances.athlete_id', $athlete->id)
+            ->exists();
+
+        if (! $belongsToTournament) {
+            abort(404);
+        }
+
+        $data = $request->validate([
+            'last_name' => ['required', 'string', 'max:100'],
+            'first_name' => ['required', 'string', 'max:100'],
+            'iin' => ['nullable', 'string', 'regex:/^\d{12}$/', Rule::unique('athletes', 'iin')->ignore($athlete->id)],
+        ], [
+            'iin.regex' => 'ИИН должен состоять из 12 цифр.',
+            'iin.unique' => 'Этот ИИН уже указан у другой атлетки.',
+        ]);
+
+        $athlete->update([
+            'last_name' => trim($data['last_name']),
+            'first_name' => trim($data['first_name']),
+            'iin' => $data['iin'] ?: null,
+        ]);
+
+        return redirect()->route('secretary.tournament', $tournament)
+            ->with('status', 'Данные атлетки обновлены.');
     }
 
     /**
@@ -299,6 +331,7 @@ class SecretaryController extends Controller
         $tournament->load([
             'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
             'groups.categories' => fn ($q) => $q->orderBy('stream_no'),
+            'groups.categories.sessions',
             'groups.entries' => fn ($q) => $q->orderBy('stream_no')->orderBy('start_number')->orderBy('order_index'),
             'groups.entries.athlete.members',
         ]);
@@ -374,13 +407,16 @@ class SecretaryController extends Controller
             'program' => ['required', 'string', 'in:individual,group'],
             'birth_year' => ['nullable', 'integer', 'min:1990', 'max:2035'],
             'division' => ['nullable', 'string', 'max:16'],
-            'apparatus' => ['required', 'array', 'min:1'],
+            'apparatus_mode' => ['nullable', 'string', 'in:fixed,choice'],
+            'apparatus' => ['required_if:apparatus_mode,fixed', 'array', 'min:1'],
             'apparatus.*' => ['string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+            'apparatus_count' => ['required_if:apparatus_mode,choice', 'nullable', 'integer', 'min:1', 'max:6'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
         ], [
             'apparatus.required' => 'Выберите хотя бы один предмет.',
         ]);
 
+        $apparatusMode = $data['apparatus_mode'] ?? 'fixed';
         $division = isset($data['division']) && trim($data['division']) !== ''
             ? strtoupper(trim($data['division']))
             : null;
@@ -391,8 +427,10 @@ class SecretaryController extends Controller
             $data['program'],
             $birthYear,
             $division,
-            array_values($data['apparatus']),
-            $data['number_mode'] ?? 'continuous',
+            $apparatusMode === 'fixed' ? array_values($data['apparatus'] ?? []) : [],
+            $data['number_mode'] ?? 'per_stream',
+            $apparatusMode,
+            $apparatusMode === 'choice' ? (int) $data['apparatus_count'] : null,
         ));
 
         $attached = Entry::query()->where('group_id', $group->id)->count();
@@ -426,7 +464,7 @@ class SecretaryController extends Controller
         // Групповым — свои предметы; если не указаны, берём индивидуальные.
         $groupApparatus = ! empty($data['group_apparatus']) ? array_values($data['group_apparatus']) : $indivApparatus;
         $streamSize = (int) $data['stream_size'];
-        $numberMode = $data['number_mode'] ?? 'continuous';
+        $numberMode = $data['number_mode'] ?? 'per_stream';
         $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
 
         // Пулы: непривязанные entries по (программа, год, категория) в порядке дня —
@@ -538,7 +576,7 @@ class SecretaryController extends Controller
                 }
             }
 
-            $mode = $numberModeOverride ?? $group->number_mode ?? 'continuous';
+            $mode = $numberModeOverride ?? $group->number_mode ?? 'per_stream';
             $builder->generateStreams($group, $streamSize, $times, $mode);
             $streamsCreated += $streamCount;
         }
@@ -551,7 +589,7 @@ class SecretaryController extends Controller
      *
      * @param  list<string>  $apparatus
      */
-    private function createGroupFromPool(Tournament $tournament, string $program, ?int $birthYear, ?string $division, array $apparatus, string $numberMode): Group
+    private function createGroupFromPool(Tournament $tournament, string $program, ?int $birthYear, ?string $division, array $apparatus, string $numberMode, string $apparatusMode = 'fixed', ?int $apparatusCount = null): Group
     {
         // метка пула («2020 и мл» и т.п.), если есть у entries.
         $label = Entry::query()
@@ -570,6 +608,8 @@ class SecretaryController extends Controller
             'division' => $division,
             'name' => $this->groupName($birthYear, $division, is_string($label) ? $label : null),
             'apparatus' => $apparatus,
+            'apparatus_selection_mode' => $apparatusMode,
+            'apparatus_count' => $apparatusCount,
             'number_mode' => $numberMode,
             'order_index' => (int) (Group::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
         ]);
@@ -870,13 +910,46 @@ class SecretaryController extends Controller
             $group,
             (int) $data['stream_size'],
             $times,
-            $data['number_mode'] ?? $group->number_mode ?? 'continuous',
+            $data['number_mode'] ?? $group->number_mode ?? 'per_stream',
         );
 
         $streams = $group->categories()->count();
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', "Потоки сформированы: {$streams}. Стартовые номера и очереди готовы.");
+    }
+
+    public function setGroupApparatus(Request $request, Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse
+    {
+        if ((int) $group->tournament_id !== (int) $tournament->id) {
+            abort(404);
+        }
+
+        if (! $group->usesApparatusChoice()) {
+            return back()->withErrors(['apparatus' => 'Эта группа создана с фиксированным набором предметов.']);
+        }
+
+        $data = $request->validate([
+            'apparatus' => ['required', 'array', 'size:'.$group->apparatus_count],
+            'apparatus.*' => ['string', 'distinct', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+        ], [
+            'apparatus.size' => "Выберите ровно {$group->apparatus_count} предмета(ов).",
+        ]);
+
+        $hasStartedPerformances = Performance::query()
+            ->whereIn('category_id', $group->categories()->select('id'))
+            ->where('status', '!=', 'scheduled')
+            ->exists();
+
+        if ($hasStartedPerformances) {
+            return back()->withErrors(['apparatus' => 'Нельзя изменить предметы: в одном из потоков уже начались выступления.']);
+        }
+
+        $group->update(['apparatus' => array_values($data['apparatus'])]);
+        $builder->renumber($group);
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', 'Предметы сохранены, выступления и очереди обновлены.');
     }
 
     /**
@@ -957,6 +1030,35 @@ class SecretaryController extends Controller
     /**
      * Ручная правка: пересчитать стартовые номера и очереди по текущему распределению.
      */
+    public function reorderEntry(Request $request, Entry $entry, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'direction' => ['required', 'string', 'in:up,down'],
+        ]);
+
+        $group = $entry->group;
+        $tournament = $entry->tournament;
+        if ($group === null || $tournament === null || $entry->stream_no === null) {
+            return back()->withErrors(['entry' => 'Участница ещё не распределена по потоку.']);
+        }
+
+        $hasStartedPerformances = Performance::query()
+            ->whereIn('category_id', $group->categories()->select('id'))
+            ->where('status', '!=', 'scheduled')
+            ->exists();
+
+        if ($hasStartedPerformances) {
+            return back()->withErrors(['entry' => 'Нельзя изменить очередь: в этой группе уже начались выступления.']);
+        }
+
+        if (! $builder->moveEntryWithinStream($entry, $data['direction'])) {
+            return back()->withErrors(['entry' => 'Эту участницу уже нельзя переместить дальше.']);
+        }
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', 'Очередность выступлений обновлена.');
+    }
+
     public function renumberGroup(Tournament $tournament, Group $group, StreamBuilderService $builder): RedirectResponse
     {
         if ((int) $group->tournament_id !== (int) $tournament->id) {
@@ -1091,24 +1193,157 @@ class SecretaryController extends Controller
 
         $tournament->update(['active_category_id' => $category->id]);
 
-        return view('secretary.queue', $this->queueViewData($category));
+        $session = $this->requestedStreamSession($request, $category);
+
+        return view('secretary.queue', $this->queueViewData($category, $session));
     }
 
-    public function queue(Category $category): View
+    public function storeStreamSession(Request $request, Tournament $tournament, Category $category): RedirectResponse
+    {
+        $this->ensureCategoryInTournament($category, $tournament);
+        $data = $this->validateStreamSession($request);
+        $this->ensureSessionApparatusAvailable($category, $data['apparatus']);
+
+        $session = StreamSession::query()->create([
+            ...$data,
+            'category_id' => $category->id,
+            'session_no' => ((int) $category->sessions()->max('session_no')) + 1,
+        ]);
+
+        $this->syncSessionPerformances($category, $session);
+
+        return back()->with('status', 'Сессия потока добавлена. Выступления по выбранным предметам распределены автоматически.');
+    }
+
+    public function updateStreamSession(Request $request, Tournament $tournament, Category $category, StreamSession $session): RedirectResponse
+    {
+        $this->ensureCategoryInTournament($category, $tournament);
+        abort_unless($session->category_id === $category->id, 404);
+
+        if ($session->performances()->where('status', '!=', 'scheduled')->exists()) {
+            return back()->withErrors(['session' => 'Нельзя изменить сессию, в которой уже начались выступления.']);
+        }
+
+        $data = $this->validateStreamSession($request);
+        $this->ensureSessionApparatusAvailable($category, $data['apparatus'], $session);
+        $session->update($data);
+        $this->syncSessionPerformances($category, $session);
+
+        return back()->with('status', 'Расписание сессии обновлено.');
+    }
+
+    public function destroyStreamSession(Tournament $tournament, Category $category, StreamSession $session): RedirectResponse
+    {
+        $this->ensureCategoryInTournament($category, $tournament);
+        abort_unless($session->category_id === $category->id, 404);
+
+        if ($session->performances()->where('status', '!=', 'scheduled')->exists()) {
+            return back()->withErrors(['session' => 'Нельзя удалить сессию, в которой уже начались выступления.']);
+        }
+
+        $session->performances()->where('status', 'scheduled')->update(['stream_session_id' => null]);
+        $session->delete();
+
+        return back()->with('status', 'Сессия удалена. Её выступления остались в потоке без даты.');
+    }
+
+    /** @return array<string, mixed> */
+    private function validateStreamSession(Request $request): array
+    {
+        $data = $request->validate([
+            'title' => ['nullable', 'string', 'max:100'],
+            'scheduled_on' => ['required', 'date'],
+            'starts_at' => ['nullable', 'date_format:H:i'],
+            'ends_at' => ['nullable', 'date_format:H:i', 'after:starts_at'],
+            'apparatus' => ['required', 'array', 'min:1'],
+            'apparatus.*' => ['required', 'string', Rule::in(PerformanceApparatus::RG_APPARATUS)],
+        ]);
+
+        $data['apparatus'] = array_values(array_unique($data['apparatus']));
+
+        return $data;
+    }
+
+    /** @param array<int, string> $apparatus */
+    private function ensureSessionApparatusAvailable(Category $category, array $apparatus, ?StreamSession $except = null): void
+    {
+        $conflicts = $category->sessions()
+            ->when($except, fn ($q) => $q->whereKeyNot($except->id))
+            ->get()
+            ->filter(fn (StreamSession $other) => array_intersect($other->apparatus ?? [], $apparatus) !== []);
+
+        if ($conflicts->isNotEmpty()) {
+            abort(422, 'Один предмет нельзя назначить в несколько сессий одного потока.');
+        }
+    }
+
+    private function syncSessionPerformances(Category $category, StreamSession $session): void
+    {
+        Performance::query()
+            ->where('category_id', $category->id)
+            ->where('stream_session_id', $session->id)
+            ->where('status', 'scheduled')
+            ->update(['stream_session_id' => null]);
+
+        Performance::query()
+            ->where('category_id', $category->id)
+            ->where('status', 'scheduled')
+            ->get(['id', 'apparatus'])
+            ->filter(fn (Performance $performance) => in_array(PerformanceApparatus::baseLabel($performance->apparatus), $session->apparatus ?? [], true))
+            ->each(fn (Performance $performance) => $performance->update(['stream_session_id' => $session->id]));
+    }
+
+    private function requestedStreamSession(Request $request, Category $category): ?StreamSession
+    {
+        $requestedId = $request->integer('session');
+        if ($requestedId > 0) {
+            return $this->findStreamSession($category, $requestedId, true);
+        }
+
+        return $category->sessions()->first();
+    }
+
+    private function findStreamSession(Category $category, mixed $sessionId, bool $required = false): ?StreamSession
+    {
+        if (! $sessionId) {
+            return null;
+        }
+
+        $session = StreamSession::query()
+            ->where('category_id', $category->id)
+            ->find((int) $sessionId);
+
+        if ($required && $session === null) {
+            abort(404);
+        }
+
+        return $session;
+    }
+
+    private function ensureCategoryInTournament(Category $category, Tournament $tournament): void
+    {
+        abort_unless($category->tournament_id === $tournament->id, 404);
+    }
+
+    public function queue(Request $request, Category $category): View
     {
         $category->loadMissing('tournament');
         $category->tournament?->update(['active_category_id' => $category->id]);
 
-        return view('secretary.queue', $this->queueViewData($category));
+        $session = $this->requestedStreamSession($request, $category);
+
+        return view('secretary.queue', $this->queueViewData($category, $session));
     }
 
     /**
      * Лёгкий опрос для автообновления Live/очереди (оценки судей без WebSocket).
      */
-    public function queuePing(Category $category): JsonResponse
+    public function queuePing(Request $request, Category $category): JsonResponse
     {
+        $session = $this->requestedStreamSession($request, $category);
         $performances = Performance::query()
             ->where('category_id', $category->id)
+            ->when($session, fn ($q) => $q->where('stream_session_id', $session->id))
             ->orderBy('order_index')
             ->orderBy('id')
             ->get(['id', 'status', 'order_index', 'updated_at', 'finalized_at', 'd_score', 'a_score', 'e_score', 'penalty', 'total']);
@@ -1150,7 +1385,7 @@ class SecretaryController extends Controller
                 ->implode(';');
         }
 
-        $catSig = $category->id.':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
+        $catSig = $category->id.':'.($session?->id ?? 'all').':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
 
         $rev = md5($perfSig."\n".$scoresDigest."\n".$catSig);
 
@@ -1163,7 +1398,7 @@ class SecretaryController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function queueViewData(Category $category): array
+    private function queueViewData(Category $category, ?StreamSession $session = null): array
     {
         $performances = Performance::query()
             ->with([
@@ -1177,6 +1412,7 @@ class SecretaryController extends Controller
                 },
             ])
             ->where('category_id', $category->id)
+            ->when($session, fn ($q) => $q->where('stream_session_id', $session->id))
             ->orderBy('order_index')
             ->orderBy('id')
             ->get();
@@ -1226,6 +1462,8 @@ class SecretaryController extends Controller
 
         return [
             'category' => $category,
+            'streamSession' => $session,
+            'categorySessions' => $category->sessions()->get(),
             'tournamentCategories' => $tournamentCategories,
             'performances' => $performances,
             'orderedPerformances' => $ordered,
@@ -1262,7 +1500,7 @@ class SecretaryController extends Controller
             $performance->save();
 
             if ($category?->auto_advance) {
-                $moved = StreamAdvanceService::advanceToNextInCategory($category);
+                $moved = StreamAdvanceService::advanceToNextInCategory($category, $performance->stream_session_id);
             }
         });
 
@@ -1498,33 +1736,51 @@ class SecretaryController extends Controller
         $data = $request->validate([
             'ids' => ['required', 'array', 'min:1'],
             'ids.*' => ['required', 'integer'],
+            'stream_session_id' => ['nullable', 'integer'],
         ]);
+
+        $session = $this->findStreamSession($category, $data['stream_session_id'] ?? null);
 
         $ids = array_values(array_map('intval', $data['ids']));
         $ids = array_values(array_unique($ids));
 
-        $existing = Performance::query()
+        $performances = Performance::query()
             ->where('category_id', $category->id)
+            ->when($session, fn ($q) => $q->where('stream_session_id', $session->id))
             ->whereIn('id', $ids)
-            ->pluck('id')
-            ->all();
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get(['id', 'status']);
+
+        $existing = $performances->pluck('id')->all();
 
         sort($existing);
         $check = $ids;
         sort($check);
 
+        foreach ($performances as $position => $performance) {
+            if ($existing === $check && $performance->status !== 'scheduled' && (int) $ids[$position] !== (int) $performance->id) {
+                abort(422, 'Current, called, and completed performances cannot be moved.');
+            }
+        }
+
         if ($existing !== $check) {
             abort(422, 'Некорректный список выходов для этой категории.');
         }
 
-        DB::transaction(function () use ($ids, $category) {
+        DB::transaction(function () use ($ids, $category, $session) {
             $i = 1;
             foreach ($ids as $id) {
                 Performance::query()
                     ->where('category_id', $category->id)
+                    ->when($session, fn ($q) => $q->where('stream_session_id', $session->id))
                     ->where('id', $id)
                     ->update(['order_index' => $i]);
                 $i++;
+            }
+
+            if ($session !== null) {
+                $this->synchronizeSessionOrder($category, $session);
             }
         });
 
@@ -1558,9 +1814,15 @@ class SecretaryController extends Controller
         $dir = $data['dir'];
         $categoryId = $performance->category_id;
 
+        if ($performance->status !== 'scheduled') {
+            return back()->withErrors(['queue' => 'Only scheduled performances can be moved.']);
+        }
+
         $neighbor = Performance::query()
             ->where('category_id', $categoryId)
+            ->where('stream_session_id', $performance->stream_session_id)
             ->where('id', '!=', $performance->id)
+            ->where('status', 'scheduled')
             ->when($dir === 'up', function ($q) use ($performance) {
                 $q->where('order_index', '<', $performance->order_index)->orderByDesc('order_index')->orderByDesc('id');
             })
@@ -1581,12 +1843,68 @@ class SecretaryController extends Controller
         $performance->save();
         $neighbor->save();
 
-        return back();
+        if ($performance->stream_session_id !== null) {
+            $session = $this->findStreamSession($performance->category, $performance->stream_session_id, true);
+            $this->synchronizeSessionOrder($performance->category, $session);
+        }
+
+        return back()->with('status', 'Порядок обновлён во всех ещё не начатых сессиях этого потока.');
     }
 
-    public function callNext(Category $category): RedirectResponse
+    /**
+     * Переносит порядок спортсменок из одной сессии во все ещё не начатые сессии
+     * потока. Исторические/текущие сессии не меняем, чтобы не нарушить Live.
+     */
+    private function synchronizeSessionOrder(Category $category, StreamSession $source): void
     {
-        StreamAdvanceService::advanceToNextInCategory($category);
+        $sourcePerformances = Performance::query()
+            ->where('category_id', $category->id)
+            ->where('stream_session_id', $source->id)
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get(['id', 'athlete_id', 'order_index']);
+
+        $positionByAthlete = [];
+        foreach ($sourcePerformances as $position => $performance) {
+            $athleteId = (int) $performance->athlete_id;
+            if (! array_key_exists($athleteId, $positionByAthlete)) {
+                $positionByAthlete[$athleteId] = $position;
+            }
+        }
+
+        if ($positionByAthlete === []) {
+            return;
+        }
+
+        foreach ($category->sessions()->whereKeyNot($source->id)->get() as $targetSession) {
+            $targetQuery = Performance::query()
+                ->where('category_id', $category->id)
+                ->where('stream_session_id', $targetSession->id);
+
+            if ((clone $targetQuery)->where('status', '!=', 'scheduled')->exists()) {
+                continue;
+            }
+
+            $targetPerformances = $targetQuery
+                ->orderBy('order_index')
+                ->orderBy('id')
+                ->get(['id', 'athlete_id', 'order_index']);
+
+            $targetPerformances = $targetPerformances
+                ->sortBy(fn (Performance $performance) => $positionByAthlete[(int) $performance->athlete_id] ?? PHP_INT_MAX)
+                ->values();
+
+            foreach ($targetPerformances as $position => $performance) {
+                $performance->update(['order_index' => $position + 1]);
+            }
+        }
+    }
+
+    public function callNext(Request $request, Category $category): RedirectResponse
+    {
+        $session = $this->findStreamSession($category, $request->input('stream_session_id'));
+        $session ??= $category->sessions()->first();
+        StreamAdvanceService::advanceToNextInCategory($category, $session?->id);
 
         return back();
     }

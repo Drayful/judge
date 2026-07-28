@@ -18,6 +18,9 @@ class Athlete extends Model
         'is_team',
         'club',
         'coach',
+        'photo_disk',
+        'photo_path',
+        'photo_original_name',
     ];
 
     protected $casts = [

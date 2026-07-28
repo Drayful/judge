@@ -103,11 +103,23 @@
                                 @endforeach
                             </select>
                         </div>
+                        @if(isset($categorySessions) && $categorySessions->isNotEmpty())
+                            <div class="min-w-[min(100%,280px)] flex-1">
+                                <label for="session_select" class="block text-xs font-medium text-slate-400 mb-1">День / сессия</label>
+                                <select id="session_select" class="block w-full rounded-xl border border-sky-800/70 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" onchange="if (this.value) window.location.href = this.value;">
+                                    @foreach($categorySessions as $session)
+                                        <option value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $category->id }}&session={{ $session->id }}" @selected($streamSession?->id === $session->id)>
+                                            {{ $session->scheduled_on?->format('d.m.Y') }}@if($session->starts_at) · {{ substr($session->starts_at, 0, 5) }}@endif · {{ implode(', ', $session->apparatus ?? []) }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        @endif
                     </div>
                 @endif
 
                 @if($currentPerformance)
-                    @php($isGroupProgram = $category->program === 'group' || $currentPerformance->athlete?->is_team)
+                    <?php $isGroupProgram = $category->program === 'group' || $currentPerformance->athlete?->is_team; ?>
                     <div class="mt-4 rounded-xl border {{ $isGroupProgram ? 'border-amber-700/60 bg-amber-950/15' : 'border-slate-700/80 bg-slate-950/60' }} p-4">
                         <div class="flex items-center justify-between gap-2">
                             <div class="text-xs uppercase tracking-wider text-slate-500">{{ $isGroupProgram ? 'Текущая команда' : 'Текущая гимнастка' }}</div>
@@ -149,6 +161,7 @@
                 <div class="mt-5 flex flex-wrap gap-2">
                     <form method="POST" action="{{ route('secretary.callNext', $category) }}">
                         @csrf
+                        @if($streamSession)<input type="hidden" name="stream_session_id" value="{{ $streamSession->id }}">@endif
                         <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500">
                             {{ $currentPerformance ? 'Следующая гимнастка' : 'Начать поток' }}
                         </button>
@@ -179,29 +192,29 @@
                 <h2 class="text-base font-semibold text-white">Порядок выступления потока</h2>
                 <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Текущая — подсвечена.</p>
                 <ul class="mt-4 max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
-                    @foreach($orderedPerformances as $p)
-                        @php
+                    <?php $queuePosition = 0; foreach ($orderedPerformances as $p): $queuePosition++; ?>
+                        <?php
                             $isCurrent = $currentPerformance && $currentPerformance->id === $p->id;
                             $isWithdrawn = $p->isWithdrawn();
                             $tag = $p->apparatus ?? $category->apparatus ?? '—';
-                        @endphp
+                        ?>
                         <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-emerald-950/50 ring-1 ring-emerald-700/40' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
-                            <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $loop->iteration }}</span>
+                            <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $queuePosition }}</span>
                             <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
-                            @if($isWithdrawn)
+                            <?php if ($isWithdrawn): ?>
                                 <span class="shrink-0 rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">снята</span>
                                 <form method="POST" action="{{ route('secretary.performance.restore', $p) }}" class="shrink-0">
                                     @csrf
                                     <button type="submit" class="text-xs text-slate-400 hover:text-slate-200 hover:underline" title="Вернуть в очередь">↩</button>
                                 </form>
-                            @else
+                            <?php else: ?>
                                 <span class="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-300">{{ $tag }}</span>
-                                @if($isCurrent)
+                                <?php if ($isCurrent): ?>
                                     <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"></span>
-                                @endif
-                            @endif
+                                <?php endif; ?>
+                            <?php endif; ?>
                         </li>
-                    @endforeach
+                    <?php endforeach; ?>
                 </ul>
             </div>
 
@@ -601,9 +614,9 @@
                         <div class="lg:col-span-5">
                             <x-input-label for="sec_perf_music" value="Выход" />
                             <select id="sec_perf_music" name="performance_id" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" required>
-                                @php($defPerfId = old('performance_id', optional($performances->first())->id))
+                                <?php $defPerfId = old('performance_id', optional($performances->first())->id); ?>
                                 @foreach($performances as $p)
-                                    @php($lab = ($p->start_number ?? '—').' · '.($p->apparatus ?? $category->apparatus ?? '—').' · '.$p->athlete->last_name.' '.$p->athlete->first_name)
+                                    <?php $lab = ($p->start_number ?? '—').' · '.($p->apparatus ?? $category->apparatus ?? '—').' · '.$p->athlete->last_name.' '.$p->athlete->first_name; ?>
                                     <option value="{{ $p->id }}" @selected((string) $defPerfId === (string) $p->id)>{{ $lab }}</option>
                                 @endforeach
                             </select>
@@ -651,14 +664,14 @@
                             </thead>
                             <tbody id="queue-body" class="text-slate-100 divide-y divide-slate-800">
                                 @foreach($performances as $p)
-                                    @php($t = $p->track)
-                                    @php($inq = $p->inquiries->first())
-                                    @php($tone =
+                                    <?php $t = $p->track; ?>
+                                    <?php $inq = $p->inquiries->first(); ?>
+                                    <?php $tone =
                                         $p->status === 'on_deck' ? 'amber' :
                                         ($p->status === 'performing' ? 'blue' :
                                         ($p->status === 'done' ? 'green' : 'gray'))
-                                    )
-                                    <tr class="hover:bg-slate-800/40" data-performance-id="{{ $p->id }}">
+                                    ; ?>
+                                    <tr class="hover:bg-slate-800/40" data-performance-id="{{ $p->id }}" data-queue-locked="{{ $p->status === 'scheduled' ? '0' : '1' }}">
                                         <td class="py-3 pr-2 text-slate-500">
                                             <button type="button" class="drag-handle cursor-grab active:cursor-grabbing select-none px-1" title="Перетащить">⋮⋮</button>
                                         </td>
@@ -702,13 +715,13 @@
                     {{-- Мобильный список — карточки с кнопками ↑ / ↓ / удалить (drag тяжело на touch) --}}
                     <ul id="queue-body-mobile" class="sm:hidden mt-2 space-y-2">
                         @foreach($performances as $p)
-                            @php($t = $p->track)
-                            @php($tone =
+                            <?php $t = $p->track; ?>
+                            <?php $tone =
                                 $p->status === 'on_deck' ? 'amber' :
                                 ($p->status === 'performing' ? 'blue' :
                                 ($p->status === 'done' ? 'green' : 'gray'))
-                            )
-                            <li class="rounded-xl border border-slate-800 bg-slate-950/40 p-3" data-performance-id="{{ $p->id }}">
+                            ; ?>
+                            <li class="rounded-xl border border-slate-800 bg-slate-950/40 p-3" data-performance-id="{{ $p->id }}" data-queue-locked="{{ $p->status === 'scheduled' ? '0' : '1' }}">
                                 <div class="flex items-start gap-2">
                                     <button type="button" class="drag-handle shrink-0 cursor-grab select-none rounded-md border border-slate-700 px-2 py-1 text-slate-500 hover:bg-slate-800" title="Перетащить">⋮⋮</button>
                                     <div class="min-w-0 flex-1">
@@ -917,7 +930,7 @@
                 const res = await fetch(saveUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}) },
-                    body: JSON.stringify({ ids }),
+                    body: JSON.stringify({ ids, stream_session_id: @json($streamSession?->id) }),
                 });
                 if (!res.ok) {
                     restoreOrder(root, state.get(root) || []);
@@ -941,7 +954,10 @@
             new Sortable(root, {
                 animation: 150,
                 handle: '.drag-handle',
+                filter: '[data-queue-locked="1"]',
+                preventOnFilter: false,
                 ghostClass: 'bg-emerald-950/40',
+                onMove: (event) => event.related?.dataset.queueLocked !== '1',
                 onStart: () => { state.set(root, idsNow(root)); },
                 onEnd: () => persist(root),
             });
@@ -1028,7 +1044,7 @@
 </script>
 <script>
 (function () {
-    const pingUrl = @json(route('secretary.queue.ping', $category));
+    const pingUrl = @json(route('secretary.queue.ping', $category).($streamSession ? '?session='.$streamSession->id : ''));
     let lastRev = null;
     const intervalMs = 3000;
     setInterval(async function () {

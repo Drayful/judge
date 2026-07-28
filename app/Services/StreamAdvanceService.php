@@ -13,11 +13,12 @@ class StreamAdvanceService
      *
      * @return bool true, если был переход на новую гимнастку (есть следующая в очереди)
      */
-    public static function advanceToNextInCategory(Category $category): bool
+    public static function advanceToNextInCategory(Category $category, ?int $streamSessionId = null): bool
     {
-        return DB::transaction(function () use ($category) {
+        return DB::transaction(function () use ($category, $streamSessionId) {
             $performing = Performance::query()
                 ->where('category_id', $category->id)
+                ->when($streamSessionId, fn ($q) => $q->where('stream_session_id', $streamSessionId))
                 ->where('status', 'performing')
                 ->first();
 
@@ -29,6 +30,7 @@ class StreamAdvanceService
 
             $next = Performance::query()
                 ->where('category_id', $category->id)
+                ->when($streamSessionId, fn ($q) => $q->where('stream_session_id', $streamSessionId))
                 ->where('status', 'scheduled')
                 ->orderBy('order_index')
                 ->orderBy('id')
