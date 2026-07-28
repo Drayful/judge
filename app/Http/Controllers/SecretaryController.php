@@ -1279,6 +1279,11 @@ class SecretaryController extends Controller
 
     private function syncSessionPerformances(Category $category, StreamSession $session): void
     {
+        $sessionApparatus = array_map(
+            fn (string $apparatus) => PerformanceApparatus::sessionKey($apparatus),
+            $session->apparatus ?? [],
+        );
+
         Performance::query()
             ->where('category_id', $category->id)
             ->where('stream_session_id', $session->id)
@@ -1289,7 +1294,7 @@ class SecretaryController extends Controller
             ->where('category_id', $category->id)
             ->where('status', 'scheduled')
             ->get(['id', 'apparatus'])
-            ->filter(fn (Performance $performance) => in_array(PerformanceApparatus::baseLabel($performance->apparatus), $session->apparatus ?? [], true))
+            ->filter(fn (Performance $performance) => in_array(PerformanceApparatus::sessionKey($performance->apparatus), $sessionApparatus, true))
             ->each(fn (Performance $performance) => $performance->update(['stream_session_id' => $session->id]));
     }
 

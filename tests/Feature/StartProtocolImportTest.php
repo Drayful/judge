@@ -58,4 +58,11 @@ class StartProtocolImportTest extends TestCase
             PerformanceApparatus::apparatusLabelsFromGroupName('2018 г.р., C'),
         );
     }
+
+    public function test_session_key_normalizes_body_only_label(): void
+    {
+        $this->assertSame('БП', PerformanceApparatus::sessionKey('Б.П.'));
+        $this->assertSame('БП', PerformanceApparatus::sessionKey('БП'));
+        $this->assertSame('Скакалка', PerformanceApparatus::sessionKey('Скакалка'));
+    }
 }

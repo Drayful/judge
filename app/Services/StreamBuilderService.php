@@ -259,7 +259,7 @@ class StreamBuilderService
         $sessionIdByApparatus = [];
         foreach ($category->sessions()->get() as $session) {
             foreach ($session->apparatus ?? [] as $sessionApparatus) {
-                $sessionIdByApparatus[(string) $sessionApparatus] = $session->id;
+                $sessionIdByApparatus[PerformanceApparatus::sessionKey($sessionApparatus)] = $session->id;
             }
         }
         foreach ($expanded as $it) {
@@ -285,7 +285,7 @@ class StreamBuilderService
 
             Performance::query()->create([
                 'category_id' => $category->id,
-                'stream_session_id' => $sessionIdByApparatus[$base] ?? null,
+                'stream_session_id' => $sessionIdByApparatus[PerformanceApparatus::sessionKey($base)] ?? null,
                 'athlete_id' => $athleteId,
                 'start_number' => $entry->start_number,
                 'order_index' => ++$orderIndex,

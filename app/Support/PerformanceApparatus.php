@@ -28,6 +28,15 @@ class PerformanceApparatus
     }
 
     /**
+     * Ключ для сопоставления предмета в настройках сессии и в выступлении.
+     * Например, «Б.П.» и «БП» — один и тот же вид.
+     */
+    public static function sessionKey(?string $raw): string
+    {
+        return self::normalize(self::baseLabel($raw)) ?? '';
+    }
+
+    /**
      * БП (без предмета): все DA-судьи работают как DB, D = trimmed mean по 4 оценкам.
      * Только по apparatus конкретного выступления — в одном потоке могут быть и БП, и предмет.
      */
