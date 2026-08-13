@@ -15,9 +15,11 @@ use App\Models\Tournament;
 use App\Services\FinalProtocolExporter;
 use App\Services\FinalProtocolService;
 use App\Services\MusicTrackUploadService;
+use App\Services\StartProtocolExporter;
 use App\Services\StartProtocolImportService;
 use App\Services\StreamAdvanceService;
 use App\Services\StreamBuilderService;
+use App\Services\StreamScheduleService;
 use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
 use Carbon\Carbon;
@@ -30,6 +32,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -71,9 +74,7 @@ class SecretaryController extends Controller
 
     public function tournament(Tournament $tournament, FinalProtocolService $protocols): View
     {
-        $tournament->load(['categories' => function ($q) {
-            $q->orderByDesc('id');
-        }]);
+        $tournament->load(['categories' => fn ($q) => $q->orderedByPerformanceTime()]);
 
         $athletes = Athlete::query()
             ->select('athletes.*')
@@ -86,6 +87,8 @@ class SecretaryController extends Controller
             ->limit(500)
             ->get();
 
+        $athletes->load(['performances.category' => fn ($q) => $q->where('tournament_id', $tournament->id)]);
+
         return view('secretary.tournament', [
             'tournament' => $tournament,
             'athletes' => $athletes,
@@ -93,7 +96,7 @@ class SecretaryController extends Controller
         ]);
     }
 
-    public function updateTournamentAthlete(Request $request, Tournament $tournament, Athlete $athlete): RedirectResponse
+    public function updateTournamentAthlete(Request $request, Tournament $tournament, Athlete $athlete, StreamBuilderService $builder): RedirectResponse
     {
         $belongsToTournament = Performance::query()
             ->join('categories', 'categories.id', '=', 'performances.category_id')
@@ -109,19 +112,58 @@ class SecretaryController extends Controller
             'last_name' => ['required', 'string', 'max:100'],
             'first_name' => ['required', 'string', 'max:100'],
             'iin' => ['nullable', 'string', 'regex:/^\d{12}$/', Rule::unique('athletes', 'iin')->ignore($athlete->id)],
+            'stream_category_id' => ['nullable', 'integer'],
         ], [
             'iin.regex' => 'ИИН должен состоять из 12 цифр.',
             'iin.unique' => 'Этот ИИН уже указан у другой атлетки.',
         ]);
 
-        $athlete->update([
-            'last_name' => trim($data['last_name']),
-            'first_name' => trim($data['first_name']),
-            'iin' => $data['iin'] ?: null,
-        ]);
+        $entry = null;
+        $target = null;
+        if (! empty($data['stream_category_id'])) {
+            $target = Category::query()
+                ->where('tournament_id', $tournament->id)
+                ->whereKey((int) $data['stream_category_id'])
+                ->first();
+
+            if ($target === null || $target->group_id === null || $target->stream_no === null) {
+                return back()->withErrors(['stream_category_id' => 'Выберите поток, сформированный для группы.']);
+            }
+
+            $entry = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('athlete_id', $athlete->id)
+                ->where('group_id', $target->group_id)
+                ->first();
+
+            if ($entry === null) {
+                return back()->withErrors(['stream_category_id' => 'Перенос возможен только в поток той же группы.']);
+            }
+
+            $started = Performance::query()
+                ->whereIn('category_id', Category::query()->where('group_id', $target->group_id)->select('id'))
+                ->where('status', '!=', 'scheduled')
+                ->exists();
+            if ($started) {
+                return back()->withErrors(['stream_category_id' => 'Нельзя менять поток после начала выступлений группы.']);
+            }
+
+        }
+
+        DB::transaction(function () use ($athlete, $data, $entry, $target, $builder) {
+            $athlete->update([
+                'last_name' => trim($data['last_name']),
+                'first_name' => trim($data['first_name']),
+                'iin' => $data['iin'] ?: null,
+            ]);
+
+            if ($entry !== null && $target !== null) {
+                $builder->moveEntryToStream($entry, (int) $target->stream_no);
+            }
+        });
 
         return redirect()->route('secretary.tournament', $tournament)
-            ->with('status', 'Данные атлетки обновлены.');
+            ->with('status', 'Данные атлетки и поток обновлены.');
     }
 
     /**
@@ -168,6 +210,31 @@ class SecretaryController extends Controller
         return response()->streamDownload(function () use ($spreadsheet) {
             $writer = new XlsxWriter($spreadsheet);
             $writer->save('php://output');
+        }, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
+
+    public function downloadStartSheet(Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
+    {
+        return $this->downloadSpreadsheet($exporter->buildStartSheet($tournament), 'start_sheet_'.$tournament->id.'.xlsx');
+    }
+
+    public function downloadStartProtocol(Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
+    {
+        return $this->downloadSpreadsheet($exporter->buildStartProtocol($tournament), 'start_protocol_'.$tournament->id.'.xlsx');
+    }
+
+    public function downloadProgramme(Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
+    {
+        return $this->downloadSpreadsheet($exporter->buildProgramme($tournament), 'programme_'.$tournament->id.'.xlsx');
+    }
+
+    private function downloadSpreadsheet(Spreadsheet $spreadsheet, string $fileName): StreamedResponse
+    {
+        return response()->streamDownload(function () use ($spreadsheet) {
+            (new XlsxWriter($spreadsheet))->save('php://output');
         }, $fileName, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'Cache-Control' => 'no-store, no-cache, must-revalidate',
@@ -230,6 +297,7 @@ class SecretaryController extends Controller
             'birth_year' => (int) $data['birth_year'],
             'division' => $division,
             'is_published' => (bool) ($data['is_published'] ?? false),
+            'auto_advance' => true,
         ]);
 
         return redirect()
@@ -331,7 +399,7 @@ class SecretaryController extends Controller
     {
         $tournament->load([
             'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
-            'groups.categories' => fn ($q) => $q->orderBy('stream_no'),
+            'groups.categories' => fn ($q) => $q->orderedByPerformanceTime(),
             'groups.categories.sessions',
             'groups.entries' => fn ($q) => $q->orderBy('stream_no')->orderBy('start_number')->orderBy('order_index'),
             'groups.entries.athlete.members',
@@ -359,6 +427,7 @@ class SecretaryController extends Controller
                         : '—';
 
                     return [
+                        'entry_id' => $e->id,
                         'name' => $name,
                         'club' => $e->club ?? $athlete?->club,
                         'iin' => $athlete?->iin,
@@ -372,6 +441,8 @@ class SecretaryController extends Controller
                 })->sortBy('name')->values();
 
                 return [
+                    'key' => $first->program.'|'.($first->birth_year ?? '0').'|'.($first->division ?? ''),
+                    'target_entry_id' => $first->id,
                     'program' => $first->program,
                     'birth_year' => $first->birth_year,
                     'division' => $first->division,
@@ -390,10 +461,51 @@ class SecretaryController extends Controller
             ->groupBy('group_id')
             ->pluck('c', 'group_id');
 
+        // Команды групповой программы, импортированные из одного Excel-листа,
+        // можно жеребить между системными группами как неделимые записи.
+        $excelGroupShuffleSets = $tournament->groups
+            ->flatMap(function (Group $group) {
+                return $group->entries
+                    ->filter(fn (Entry $entry) => $entry->program === 'group' && $entry->importSheet() !== null)
+                    ->map(function (Entry $entry) use ($group) {
+                        return [
+                            'sheet' => $entry->importSheet(),
+                            'group' => $group,
+                            'entry' => $entry,
+                        ];
+                    });
+            })
+            ->groupBy('sheet')
+            ->map(function (Collection $rows, string $sheet) {
+                $groups = $rows
+                    ->groupBy(fn (array $row) => $row['group']->id)
+                    ->map(function (Collection $groupRows) {
+                        /** @var Group $group */
+                        $group = $groupRows->first()['group'];
+
+                        return [
+                            'id' => $group->id,
+                            'name' => $group->name,
+                            'count' => $groupRows->count(),
+                        ];
+                    })
+                    ->values();
+
+                return [
+                    'sheet' => $sheet,
+                    'count' => $rows->count(),
+                    'groups' => $groups,
+                    'can_shuffle' => $groups->count() >= 2 && $rows->count() >= 2,
+                ];
+            })
+            ->sortBy('sheet')
+            ->values();
+
         return view('secretary.groups', [
             'tournament' => $tournament,
             'pool' => $pool,
             'groupEntryCounts' => $groupEntryCounts,
+            'excelGroupShuffleSets' => $excelGroupShuffleSets,
             'apparatusOptions' => PerformanceApparatus::RG_APPARATUS,
         ]);
     }
@@ -456,7 +568,7 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
-            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+            'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ], [
             'apparatus.required' => 'Выберите хотя бы один предмет для индивидуальных.',
         ]);
@@ -466,7 +578,7 @@ class SecretaryController extends Controller
         $groupApparatus = ! empty($data['group_apparatus']) ? array_values($data['group_apparatus']) : $indivApparatus;
         $streamSize = (int) $data['stream_size'];
         $numberMode = $data['number_mode'] ?? 'per_stream';
-        $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
+        $minutesPerAthlete = isset($data['minutes_per_athlete']) ? (int) $data['minutes_per_athlete'] : null;
 
         // Пулы: непривязанные entries по (программа, год, категория) в порядке дня —
         // индивидуальные раньше групповых (групповые отдельной секцией), младшие раньше.
@@ -487,7 +599,7 @@ class SecretaryController extends Controller
         $groupsCreated = 0;
         $streamsCreated = 0;
 
-        DB::transaction(function () use ($pools, $tournament, $builder, $indivApparatus, $groupApparatus, $streamSize, $numberMode, $blockMinutes, $data, &$groupsCreated, &$streamsCreated) {
+        DB::transaction(function () use ($pools, $tournament, $builder, $indivApparatus, $groupApparatus, $streamSize, $numberMode, $minutesPerAthlete, $data, &$groupsCreated, &$streamsCreated) {
             $groups = collect();
             foreach ($pools as $pool) {
                 $birthYear = $pool->birth_year !== null ? (int) $pool->birth_year : null;
@@ -500,7 +612,7 @@ class SecretaryController extends Controller
             }
 
             $groupsCreated = $groups->count();
-            $streamsCreated = $this->cascadeStreams($groups, $streamSize, $data['start_time'] ?? null, $blockMinutes, $numberMode, $builder);
+            $streamsCreated = $this->cascadeStreams($groups, $streamSize, $data['start_time'] ?? null, $minutesPerAthlete, $numberMode, $builder, 'tournament:'.$tournament->id.':assembled');
         });
 
         return redirect()->route('secretary.tournament.groups', $tournament)
@@ -517,7 +629,7 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
-            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+            'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
 
         $groups = $tournament->groups()
@@ -531,17 +643,18 @@ class SecretaryController extends Controller
             return back()->withErrors(['streams' => 'Сначала создайте группы.']);
         }
 
-        $blockMinutes = isset($data['block_minutes']) ? (int) $data['block_minutes'] : null;
+        $minutesPerAthlete = isset($data['minutes_per_athlete']) ? (int) $data['minutes_per_athlete'] : null;
         $streamsCreated = 0;
 
-        DB::transaction(function () use ($groups, $data, $blockMinutes, $builder, &$streamsCreated) {
+        DB::transaction(function () use ($groups, $data, $minutesPerAthlete, $builder, $tournament, &$streamsCreated) {
             $streamsCreated = $this->cascadeStreams(
                 $groups,
                 (int) $data['stream_size'],
                 $data['start_time'] ?? null,
-                $blockMinutes,
+                $minutesPerAthlete,
                 $data['number_mode'] ?? null, // null → у каждой группы свой режим
                 $builder,
+                'tournament:'.$tournament->id.':all',
             );
         });
 
@@ -556,14 +669,15 @@ class SecretaryController extends Controller
      * @param  Collection<int, Group>  $groups
      * @return int число сформированных потоков
      */
-    private function cascadeStreams($groups, int $streamSize, ?string $startTime, ?int $blockMinutes, ?string $numberModeOverride, StreamBuilderService $builder): int
+    private function cascadeStreams($groups, int $streamSize, ?string $startTime, ?int $minutesPerAthlete, ?string $numberModeOverride, StreamBuilderService $builder, string $scheduleChain): int
     {
         $streamSize = max(1, $streamSize);
-        $cursor = ($startTime !== null && $blockMinutes !== null)
+        $cursor = ($startTime !== null && $minutesPerAthlete !== null)
             ? Carbon::createFromFormat('H:i', $startTime)->startOfMinute()
             : null;
 
         $streamsCreated = 0;
+        $sequence = 0;
         foreach ($groups as $group) {
             $count = Entry::query()->where('group_id', $group->id)->count();
             $streamCount = (int) ceil($count / $streamSize);
@@ -571,9 +685,16 @@ class SecretaryController extends Controller
             $times = [];
             if ($cursor !== null) {
                 for ($i = 0; $i < $streamCount; $i++) {
+                    $athletesInStream = min($streamSize, max(0, $count - ($i * $streamSize)));
                     $start = $cursor->format('H:i');
-                    $cursor = $cursor->copy()->addMinutes($blockMinutes);
-                    $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
+                    $cursor = $cursor->copy()->addMinutes($athletesInStream * $minutesPerAthlete);
+                    $times[] = [
+                        'start' => $start,
+                        'end' => $cursor->format('H:i'),
+                        'minutes_per_athlete' => $minutesPerAthlete,
+                        'schedule_chain' => $scheduleChain,
+                        'schedule_sequence' => ++$sequence,
+                    ];
                 }
             }
 
@@ -897,14 +1018,14 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
-            'block_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+            'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
 
         $times = $this->buildStreamTimes(
             $group,
             (int) $data['stream_size'],
             $data['start_time'] ?? null,
-            isset($data['block_minutes']) ? (int) $data['block_minutes'] : null,
+            isset($data['minutes_per_athlete']) ? (int) $data['minutes_per_athlete'] : null,
         );
 
         $builder->generateStreams(
@@ -954,27 +1075,35 @@ class SecretaryController extends Controller
     }
 
     /**
-     * Метки времени по потокам из «время начала + длина блока».
+     * Метки времени по потокам из времени начала и длительности на участницу.
      *
-     * @return list<array{start:?string,end:?string}>
+     * @return list<array{start:?string,end:?string,minutes_per_athlete:int,schedule_chain:string,schedule_sequence:int}>
      */
-    private function buildStreamTimes(Group $group, int $streamSize, ?string $startTime, ?int $blockMinutes): array
+    private function buildStreamTimes(Group $group, int $streamSize, ?string $startTime, ?int $minutesPerAthlete): array
     {
-        if ($startTime === null || $blockMinutes === null || $streamSize < 1) {
+        if ($startTime === null || $minutesPerAthlete === null || $streamSize < 1) {
             return [];
         }
 
-        $count = (int) ceil(max(0, $group->entries()->count()) / $streamSize);
-        if ($count < 1) {
+        $athleteCount = max(0, $group->entries()->count());
+        $streamCount = (int) ceil($athleteCount / $streamSize);
+        if ($streamCount < 1) {
             return [];
         }
 
         $cursor = Carbon::createFromFormat('H:i', $startTime)->startOfMinute();
         $times = [];
-        for ($i = 0; $i < $count; $i++) {
+        for ($i = 0; $i < $streamCount; $i++) {
+            $athletesInStream = min($streamSize, max(0, $athleteCount - ($i * $streamSize)));
             $start = $cursor->format('H:i');
-            $cursor = $cursor->copy()->addMinutes($blockMinutes);
-            $times[] = ['start' => $start, 'end' => $cursor->format('H:i')];
+            $cursor = $cursor->copy()->addMinutes($athletesInStream * $minutesPerAthlete);
+            $times[] = [
+                'start' => $start,
+                'end' => $cursor->format('H:i'),
+                'minutes_per_athlete' => $minutesPerAthlete,
+                'schedule_chain' => 'group:'.$group->id,
+                'schedule_sequence' => $i + 1,
+            ];
         }
 
         return $times;
@@ -1022,10 +1151,129 @@ class SecretaryController extends Controller
             return back()->withErrors(['entry' => 'Участница ещё не привязана к группе с потоками.']);
         }
 
+        $hasStartedPerformances = Performance::query()
+            ->whereIn('category_id', $entry->group->categories()->select('id'))
+            ->where('status', '!=', 'scheduled')
+            ->exists();
+        if ($hasStartedPerformances) {
+            return back()->withErrors(['entry' => 'Нельзя изменить поток после начала выступлений группы.']);
+        }
+
         $builder->moveEntryToStream($entry, (int) $data['stream_no']);
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', 'Участница перенесена, номера пересчитаны.');
+    }
+
+    /**
+     * Перенос участницы между однотипными группами из списка. Очереди в обеих
+     * группах пересобираются только до первого начатого выступления.
+     */
+    public function moveEntryToGroup(Request $request, Tournament $tournament, Entry $entry, StreamBuilderService $builder): RedirectResponse
+    {
+        abort_unless((int) $entry->tournament_id === (int) $tournament->id, 404);
+
+        $data = $request->validate(['target_group_id' => ['required', 'integer']]);
+        $source = $entry->group;
+        $target = Group::query()->where('tournament_id', $tournament->id)->find((int) $data['target_group_id']);
+        if ($source === null || $target === null || $source->id === $target->id) {
+            return back()->withErrors(['group_move' => 'Выберите другую существующую группу.']);
+        }
+
+        $sameKind = $source->program === $target->program
+            && $source->birth_year === $target->birth_year
+            && ($source->division ?? null) === ($target->division ?? null);
+
+        $entrySheet = $entry->importSheet();
+        $sameExcelSheet = $entry->program === 'group'
+            && $target->program === 'group'
+            && $entrySheet !== null
+            && $target->entries()
+                ->where('program', 'group')
+                ->get(['meta'])
+                ->contains(fn (Entry $targetEntry) => $targetEntry->importSheet() === $entrySheet);
+
+        if (! $sameKind && ! $sameExcelSheet) {
+            return back()->withErrors([
+                'group_move' => 'Между разными годами можно переносить только групповые команды одного Excel-листа.',
+            ]);
+        }
+
+        $locked = Category::query()
+            ->whereIn('group_id', [$source->id, $target->id])
+            ->whereHas('performances', fn ($q) => $q->where('status', '!=', 'scheduled'))
+            ->exists();
+        if ($locked) {
+            return back()->withErrors(['group_move' => 'Нельзя менять состав после начала выступлений одной из групп.']);
+        }
+
+        DB::transaction(function () use ($entry, $source, $target, $builder) {
+            $targetStream = (int) ($target->categories()->min('stream_no') ?? 1);
+            $entry->update([
+                'group_id' => $target->id,
+                'stream_no' => max(1, $targetStream),
+                'order_index' => (int) ($target->entries()->max('order_index') ?? 0) + 1,
+            ]);
+            $builder->renumber($source);
+            $builder->renumber($target);
+        });
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', ($entry->program === 'group' ? 'Команда' : 'Участница').' перенесена в другую группу; списки и очереди пересчитаны.');
+    }
+
+    /**
+     * Поштучно перенести непривязанную участницу/команду в другой существующий
+     * пул той же программы. Пул определяется годом рождения и категорией.
+     */
+    public function moveEntryToPool(Request $request, Tournament $tournament, Entry $entry): RedirectResponse
+    {
+        abort_unless((int) $entry->tournament_id === (int) $tournament->id, 404);
+
+        $data = $request->validate([
+            'target_entry_id' => ['required', 'integer'],
+        ]);
+
+        if ($entry->group_id !== null) {
+            return back()->withErrors(['pool_move' => 'Перенос между пулами доступен только для непривязанных участниц.']);
+        }
+
+        $targetEntry = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->whereNull('group_id')
+            ->whereKey((int) $data['target_entry_id'])
+            ->first();
+
+        if ($targetEntry === null || $targetEntry->id === $entry->id) {
+            return back()->withErrors(['pool_move' => 'Выбранный целевой пул больше не существует.']);
+        }
+
+        if ($targetEntry->program !== $entry->program) {
+            return back()->withErrors(['pool_move' => 'Перенос возможен только между пулами одной программы.']);
+        }
+
+        $samePool = $targetEntry->birth_year === $entry->birth_year
+            && ($targetEntry->division ?? null) === ($entry->division ?? null);
+        if ($samePool) {
+            return back()->withErrors(['pool_move' => 'Участница уже находится в выбранном пуле.']);
+        }
+
+        $meta = is_array($entry->meta) ? $entry->meta : [];
+        $targetLabel = is_array($targetEntry->meta) ? ($targetEntry->meta['label'] ?? null) : null;
+        if (is_string($targetLabel) && trim($targetLabel) !== '') {
+            $meta['label'] = trim($targetLabel);
+        } else {
+            unset($meta['label']);
+        }
+
+        $entry->update([
+            'birth_year' => $targetEntry->birth_year,
+            'division' => $targetEntry->division,
+            'meta' => $meta !== [] ? $meta : null,
+        ]);
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', ($entry->program === 'group' ? 'Команда' : 'Участница').' перенесена в другой пул.');
     }
 
     /**
@@ -1089,6 +1337,27 @@ class SecretaryController extends Controller
 
         return redirect()->route('secretary.tournament.groups', $tournament)
             ->with('status', 'Жеребьёвка выполнена: порядок в потоках перемешан.');
+    }
+
+    /**
+     * Перемешать импортированные групповые команды между системными группами,
+     * которые были сформированы из одного Excel-листа. Состав каждой команды
+     * остаётся неизменным, размеры групп и потоков сохраняются.
+     */
+    public function shuffleImportedTeamsBetweenGroups(Request $request, Tournament $tournament, StreamBuilderService $builder): RedirectResponse
+    {
+        $data = $request->validate([
+            'sheet' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $moved = $builder->shuffleImportedTeamsBetweenGroups($tournament, trim($data['sheet']));
+        } catch (DomainException $exception) {
+            return back()->withErrors(['excel_group_shuffle' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('secretary.tournament.groups', $tournament)
+            ->with('status', "Жеребьёвка команд из Excel выполнена: между группами перемещено {$moved}.");
     }
 
     private function groupName(?int $birthYear, ?string $division, ?string $label): string
@@ -1175,7 +1444,7 @@ class SecretaryController extends Controller
     {
         $categories = Category::query()
             ->where('tournament_id', $tournament->id)
-            ->orderBy('id')
+            ->orderedByPerformanceTime()
             ->get();
 
         if ($categories->isEmpty()) {
@@ -1352,7 +1621,7 @@ class SecretaryController extends Controller
             ->when($session, fn ($q) => $q->where('stream_session_id', $session->id))
             ->orderBy('order_index')
             ->orderBy('id')
-            ->get(['id', 'status', 'order_index', 'updated_at', 'finalized_at', 'd_score', 'a_score', 'e_score', 'penalty', 'total']);
+            ->get(['id', 'status', 'order_index', 'updated_at', 'finalized_at', 'timer_started_at', 'timer_ended_at', 'actual_duration_seconds', 'time_penalty', 'd_score', 'a_score', 'e_score', 'penalty', 'total']);
 
         $ordered = SecretaryLiveUi::orderedPerformances($performances);
         $current = SecretaryLiveUi::currentPerformance($ordered);
@@ -1362,6 +1631,10 @@ class SecretaryController extends Controller
             $p->status,
             (string) ($p->updated_at?->getTimestamp() ?? 0),
             (string) ($p->finalized_at?->getTimestamp() ?? 0),
+            (string) ($p->timer_started_at?->getTimestamp() ?? 0),
+            (string) ($p->timer_ended_at?->getTimestamp() ?? 0),
+            (string) ($p->actual_duration_seconds ?? ''),
+            (string) ($p->time_penalty ?? ''),
             (string) ($p->d_score ?? ''),
             (string) ($p->a_score ?? ''),
             (string) ($p->e_score ?? ''),
@@ -1377,7 +1650,7 @@ class SecretaryController extends Controller
                 ->whereIn('performance_id', $pids)
                 ->orderBy('performance_id')
                 ->orderBy('id')
-                ->get(['id', 'performance_id', 'judge_id', 'panel', 'subpanel', 'penalty_type', 'score', 'submitted_at', 'updated_at'])
+                ->get(['id', 'performance_id', 'judge_id', 'panel', 'subpanel', 'penalty_type', 'score', 'average_score', 'submitted_at', 'average_submitted_at', 'updated_at'])
                 ->map(fn (JudgeScore $s) => implode(':', [
                     (string) $s->performance_id,
                     (string) $s->id,
@@ -1386,7 +1659,9 @@ class SecretaryController extends Controller
                     (string) ($s->subpanel ?? ''),
                     (string) ($s->penalty_type ?? ''),
                     (string) $s->score,
+                    (string) ($s->average_score ?? ''),
                     (string) ($s->submitted_at?->getTimestamp() ?? 0),
+                    (string) ($s->average_submitted_at?->getTimestamp() ?? 0),
                     (string) ($s->updated_at?->getTimestamp() ?? 0),
                 ]))
                 ->implode(';');
@@ -1426,7 +1701,7 @@ class SecretaryController extends Controller
             ->with([
                 'category.tournament',
                 'athlete.members',
-                'judgeScores',
+                'judgeScores.judge',
                 'track',
                 'trackBackup',
                 'inquiries' => function ($q) {
@@ -1462,7 +1737,7 @@ class SecretaryController extends Controller
         $tournamentCategories = $tournament
             ? Category::query()
                 ->where('tournament_id', $tournament->id)
-                ->orderBy('id')
+                ->orderedByPerformanceTime()
                 ->get()
             : collect();
 
@@ -1545,13 +1820,22 @@ class SecretaryController extends Controller
             return back()->withErrors(['confirm' => 'Не все обязательные оценки выставлены — подтверждать пока нечего.']);
         }
 
+        if (! SecretaryLiveUi::requiredManualAveragesSubmitted($performance, $category)) {
+            return back()->withErrors(['confirm' => 'DB1 и DA1 ещё не отправили отдельные ручные средние.']);
+        }
+
+        if ($performance->timer_started_at !== null && $performance->timer_ended_at === null) {
+            return back()->withErrors(['confirm' => 'Хронометрист ещё не остановил таймер этого выступления.']);
+        }
+
         $moved = false;
         DB::transaction(function () use ($performance, $category, &$moved) {
             $performance->recalculateTotals();
             $performance->finalized_at = now();
+            $performance->approved_at = now();
             $performance->save();
 
-            if ($category?->auto_advance) {
+            if ($category !== null && $performance->status === 'performing') {
                 $moved = StreamAdvanceService::advanceToNextInCategory($category, $performance->stream_session_id);
             }
         });
@@ -1591,9 +1875,19 @@ class SecretaryController extends Controller
             }
 
             $row->submitted_at = null;
+            $row->average_score = null;
+            $row->average_submitted_at = null;
             $row->save();
             $returned = 1;
             $label = $data['slot'];
+
+            if (str_starts_with($data['slot'], 'DB') || str_starts_with($data['slot'], 'DA')) {
+                $leaderSlot = str_starts_with($data['slot'], 'DB') ? 'DB1' : 'DA1';
+                $leader = $rows[$leaderSlot] ?? null;
+                if ($leader !== null && $leader->id !== $row->id) {
+                    $leader->update(['average_score' => null, 'average_submitted_at' => null]);
+                }
+            }
         } else {
             $key = $data['panel'];
             $query = JudgeScore::query()
@@ -1613,13 +1907,30 @@ class SecretaryController extends Controller
                 $label = strtoupper($key);
             }
 
-            $returned = $query->update(['submitted_at' => null]);
+            $returned = $query->update([
+                'submitted_at' => null,
+                'average_score' => null,
+                'average_submitted_at' => null,
+            ]);
+
+            if (in_array($key, ['db', 'da', 'all'], true)) {
+                $performance->loadMissing(['judgeScores.judge', 'category']);
+                $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+                $leaders = $key === 'all' ? ['DB1', 'DA1'] : [strtoupper($key).'1'];
+                foreach ($leaders as $leaderSlot) {
+                    $rows[$leaderSlot]?->update(['average_score' => null, 'average_submitted_at' => null]);
+                }
+            }
         }
 
         $performance->refresh();
         $performance->load(['judgeScores', 'category']);
         $performance->recalculateTotals();
         $performance->finalized_at = null;
+        $performance->approved_at = null;
+        $performance->published_at = null;
+        $performance->scoreboard_accepted_at = null;
+        $performance->scoreboard_accepted_by = null;
         $performance->save();
 
         return back()->with('status', 'На доработку возвращено: '.$label.' ('.$returned.' шт.). Судьи увидят планшет ввода снова.');
@@ -1646,9 +1957,21 @@ class SecretaryController extends Controller
         $row->score = (float) $data['score'];
         $row->save();
 
+        if (str_starts_with($data['slot'], 'DB') || str_starts_with($data['slot'], 'DA')) {
+            $leaderSlot = str_starts_with($data['slot'], 'DB') ? 'DB1' : 'DA1';
+            $leader = $rows[$leaderSlot] ?? null;
+            if ($leader !== null) {
+                $leader->update(['average_score' => null, 'average_submitted_at' => null]);
+            }
+        }
+
         $performance->refresh();
         $performance->load(['judgeScores', 'category']);
         $performance->recalculateTotals();
+        $performance->approved_at = null;
+        $performance->published_at = null;
+        $performance->scoreboard_accepted_at = null;
+        $performance->scoreboard_accepted_by = null;
         $performance->save();
 
         return back()->with('status', 'Оценка '.$data['slot'].' исправлена на '.number_format((float) $data['score'], 3, '.', '').'.');
@@ -1688,6 +2011,10 @@ class SecretaryController extends Controller
             $performance->load('category');
             $performance->recalculateTotals();
             $performance->finalized_at = now();
+            $performance->approved_at = null;
+            $performance->published_at = null;
+            $performance->scoreboard_accepted_at = null;
+            $performance->scoreboard_accepted_by = null;
             $performance->save();
         });
 
@@ -1705,6 +2032,10 @@ class SecretaryController extends Controller
             $performance->scores_overridden_by = null;
             $performance->scores_overridden_at = null;
             $performance->finalized_at = null;
+            $performance->approved_at = null;
+            $performance->published_at = null;
+            $performance->scoreboard_accepted_at = null;
+            $performance->scoreboard_accepted_by = null;
             $performance->load(['judgeScores', 'category']);
             $performance->recalculateTotals();
             $performance->save();
@@ -1717,7 +2048,7 @@ class SecretaryController extends Controller
      * Снять выступление со старта: статус «withdrawn», стартовый номер сохраняется,
      * очередь его пропускает, в протокол не идёт. Если было текущим — вызовется следующая.
      */
-    public function withdrawPerformance(Performance $performance): RedirectResponse
+    public function withdrawPerformance(Performance $performance, StreamScheduleService $schedule): RedirectResponse
     {
         if ($performance->isWithdrawn()) {
             return back()->with('status', 'Выступление уже снято.');
@@ -1726,6 +2057,7 @@ class SecretaryController extends Controller
         $performance->status = 'withdrawn';
         $performance->withdrawn_at = now();
         $performance->save();
+        $schedule->recalculate($performance->category);
 
         $name = $performance->loadMissing('athlete')->athlete?->last_name ?? 'участница';
 
@@ -1735,7 +2067,7 @@ class SecretaryController extends Controller
     /**
      * Вернуть снятое выступление в очередь (scheduled).
      */
-    public function restorePerformance(Performance $performance): RedirectResponse
+    public function restorePerformance(Performance $performance, StreamScheduleService $schedule): RedirectResponse
     {
         if (! $performance->isWithdrawn()) {
             return back()->with('status', 'Выступление и так в очереди.');
@@ -1744,11 +2076,12 @@ class SecretaryController extends Controller
         $performance->status = 'scheduled';
         $performance->withdrawn_at = null;
         $performance->save();
+        $schedule->recalculate($performance->category);
 
         return back()->with('status', 'Возвращена в очередь.');
     }
 
-    public function addToQueue(Request $request, Category $category): RedirectResponse
+    public function addToQueue(Request $request, Category $category, StreamScheduleService $schedule): RedirectResponse
     {
         $data = $request->validate([
             'athlete_id' => ['required', 'integer', 'exists:athletes,id'],
@@ -1779,11 +2112,12 @@ class SecretaryController extends Controller
             'order_index' => $orderIndex,
             'status' => 'scheduled',
         ]);
+        $schedule->recalculate($category);
 
         return back()->with('status', 'Добавлено в очередь.');
     }
 
-    public function reorderQueue(Request $request, Category $category)
+    public function reorderQueue(Request $request, Category $category, StreamScheduleService $schedule)
     {
         $data = $request->validate([
             'ids' => ['required', 'array', 'min:1'],
@@ -1835,6 +2169,7 @@ class SecretaryController extends Controller
                 $this->synchronizeSessionOrder($category, $session);
             }
         });
+        $schedule->recalculate($category);
 
         if ($request->expectsJson()) {
             return response()->json(['ok' => true]);
@@ -1843,9 +2178,10 @@ class SecretaryController extends Controller
         return back()->with('status', 'Очередь обновлена.');
     }
 
-    public function removeFromQueue(Performance $performance): RedirectResponse
+    public function removeFromQueue(Performance $performance, StreamScheduleService $schedule): RedirectResponse
     {
-        $categoryId = $performance->category_id;
+        $category = $performance->category;
+        $categoryId = $category->id;
         $removedOrder = (int) $performance->order_index;
         $performance->delete();
 
@@ -1853,11 +2189,12 @@ class SecretaryController extends Controller
             ->where('category_id', $categoryId)
             ->where('order_index', '>', $removedOrder)
             ->decrement('order_index');
+        $schedule->recalculate($category);
 
         return back()->with('status', 'Удалено из очереди.');
     }
 
-    public function moveQueue(Performance $performance, Request $request): RedirectResponse
+    public function moveQueue(Performance $performance, Request $request, StreamScheduleService $schedule): RedirectResponse
     {
         $data = $request->validate([
             'dir' => ['required', 'string', 'in:up,down'],
@@ -1899,6 +2236,7 @@ class SecretaryController extends Controller
             $session = $this->findStreamSession($performance->category, $performance->stream_session_id, true);
             $this->synchronizeSessionOrder($performance->category, $session);
         }
+        $schedule->recalculate($performance->category);
 
         return back()->with('status', 'Порядок обновлён во всех ещё не начатых сессиях этого потока.');
     }
@@ -1963,16 +2301,10 @@ class SecretaryController extends Controller
 
     public function setAutoAdvance(Request $request, Category $category): RedirectResponse
     {
-        $request->validate([
-            'enabled' => ['required', 'in:0,1'],
-        ]);
-
-        $category->auto_advance = (int) $request->input('enabled') === 1;
+        $category->auto_advance = true;
         $category->save();
 
-        return back()->with('status', $category->auto_advance
-            ? 'Автопереход включён: после всех основных оценок поток перейдёт к следующей гимнастке.'
-            : 'Автопереход выключен.');
+        return back()->with('status', 'Автопереход всегда включён: после всех основных оценок поток перейдёт к следующей гимнастке.');
     }
 
     /**
@@ -2020,6 +2352,11 @@ class SecretaryController extends Controller
     {
         $performance->status = 'performing';
         $performance->started_at = now();
+        $performance->timer_started_at = null;
+        $performance->timer_ended_at = null;
+        $performance->ended_at = null;
+        $performance->actual_duration_seconds = null;
+        $performance->time_penalty = 0;
         $performance->save();
 
         return back();
@@ -2027,8 +2364,14 @@ class SecretaryController extends Controller
 
     public function finish(Performance $performance): RedirectResponse
     {
+        if ($performance->timer_started_at !== null && $performance->timer_ended_at === null) {
+            return back()->withErrors(['timer' => 'Хронометрист ещё не остановил официальный таймер этого выступления.']);
+        }
+
         $performance->status = 'done';
-        $performance->ended_at = now();
+        $performance->loadMissing('category');
+        $performance->recordFinishedAt();
+        $performance->recalculateTotals();
         $performance->save();
 
         return back();

@@ -139,7 +139,10 @@ class FinalProtocolExporter
             }
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($c).$r, round((float) $row['total'], 3));
             $c++;
-            $sheet->setCellValue(Coordinate::stringFromColumnIndex($c).$r, $row['place']);
+            $sheet->setCellValue(
+                Coordinate::stringFromColumnIndex($c).$r,
+                ($row['status'] ?? null) === 'not_performed' ? 'Не выступила' : $row['place'],
+            );
 
             $r++;
             $num++;

@@ -11,9 +11,9 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="font-sans antialiased bg-slate-950 text-slate-100 min-h-screen">
-    <div class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+    <div id="app-async-page" data-async-page class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
         @yield('content')
+        @stack('body-scripts')
     </div>
-    @stack('body-scripts')
 </body>
 </html>

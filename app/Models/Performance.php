@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -25,27 +26,38 @@ class Performance extends Model
         'apparatus',
         'start_number',
         'order_index',
+        'scheduled_at_label',
         'status',
         'called_at',
         'started_at',
+        'timer_started_at',
+        'timer_ended_at',
         'ended_at',
         'd_score',
+        'db_average',
+        'da_average',
         'a_score',
         'e_score',
         'penalty',
+        'time_penalty',
         'total',
+        'actual_duration_seconds',
         'scores_overridden',
         'scores_overridden_by',
         'scores_overridden_at',
         'finalized_at',
         'approved_at',
         'published_at',
+        'scoreboard_accepted_at',
+        'scoreboard_accepted_by',
         'withdrawn_at',
     ];
 
     protected $casts = [
         'called_at' => 'datetime',
         'started_at' => 'datetime',
+        'timer_started_at' => 'datetime',
+        'timer_ended_at' => 'datetime',
         'ended_at' => 'datetime',
         'finalized_at' => 'datetime',
         'decided_at' => 'datetime',
@@ -53,6 +65,9 @@ class Performance extends Model
         'published_at' => 'datetime',
         'scores_overridden_at' => 'datetime',
         'withdrawn_at' => 'datetime',
+        'scoreboard_accepted_at' => 'datetime',
+        'actual_duration_seconds' => 'integer',
+        'time_penalty' => 'float',
         'is_counted' => 'bool',
         'scores_overridden' => 'bool',
     ];
@@ -60,6 +75,59 @@ class Performance extends Model
     public function isWithdrawn(): bool
     {
         return $this->status === 'withdrawn' || $this->withdrawn_at !== null;
+    }
+
+    public function isNotPerformed(): bool
+    {
+        return $this->total !== null && abs((float) $this->total) < 0.0005;
+    }
+
+    /** @return array{min:int,max:int} */
+    public function durationBounds(): array
+    {
+        return $this->category?->program === 'group'
+            ? ['min' => 135, 'max' => 150]
+            : ['min' => 75, 'max' => 90];
+    }
+
+    /** Завершение очереди не измеряет упражнение: его время ведёт судья-хронометрист. */
+    public function recordFinishedAt(?Carbon $finishedAt = null): void
+    {
+        $finishedAt ??= now();
+        $this->ended_at = $finishedAt;
+    }
+
+    /** Хронометрист запускает независимый официальный таймер текущего выхода. */
+    public function startOfficialTimer(?Carbon $startedAt = null): void
+    {
+        $this->timer_started_at = $startedAt ?? now();
+        $this->timer_ended_at = null;
+        $this->actual_duration_seconds = null;
+        $this->time_penalty = 0;
+    }
+
+    /**
+     * Хронометрист останавливает таймер. Только его разница времени становится
+     * фактической длительностью и даёт −0,05 за секунду вне норматива.
+     */
+    public function stopOfficialTimer(?Carbon $finishedAt = null): bool
+    {
+        if ($this->timer_started_at === null) {
+            return false;
+        }
+
+        $finishedAt ??= now();
+        $seconds = max(0, $this->timer_started_at->diffInSeconds($finishedAt));
+        $bounds = $this->durationBounds();
+        $outside = $seconds < $bounds['min']
+            ? $bounds['min'] - $seconds
+            : max(0, $seconds - $bounds['max']);
+
+        $this->timer_ended_at = $finishedAt;
+        $this->actual_duration_seconds = $seconds;
+        $this->time_penalty = round($outside * 0.05, 3);
+
+        return true;
     }
 
     public function originalPerformance(): BelongsTo
@@ -127,10 +195,10 @@ class Performance extends Model
             $d = $this->d_score;
             $a = $this->a_score;
             $e = $this->e_score;
-            $pen = $this->penalty;
+            $pen = (float) ($this->penalty ?? 0) + max(0.0, (float) ($this->time_penalty ?? 0));
 
             if ($d !== null && $a !== null && $e !== null) {
-                $this->total = round((float) $d + (float) $a + (float) $e - (float) ($pen ?? 0.0), $round);
+                $this->total = round((float) $d + (float) $a + (float) $e - $pen, $round);
             } else {
                 $this->total = null;
             }
@@ -162,8 +230,26 @@ class Performance extends Model
 
             $db = $dDb->count() ? (float) $dDb->avg() : null;
             $da = $dDa->count() ? (float) $dDa->avg() : null;
-            $d = ($db !== null && $da !== null) ? ($db + $da) : null;
+
+            // DB1 и DA1 после своей основной оценки отдельно вводят согласованную
+            // ручную среднюю. Она является официальным значением подпанели;
+            // автоматическая средняя сохраняется ниже отдельно для контроля.
+            $rows = SecretaryLiveUi::scoreRowsBySlot($this, $this->category);
+            $dbLeader = $rows['DB1'] ?? null;
+            $daLeader = $rows['DA1'] ?? null;
+            $dbManual = $dbLeader?->average_submitted_at !== null && $dbLeader?->average_score !== null
+                ? (float) $dbLeader->average_score
+                : null;
+            $daManual = $daLeader?->average_submitted_at !== null && $daLeader?->average_score !== null
+                ? (float) $daLeader->average_score
+                : null;
+            $dbForTotal = $dbManual ?? $db;
+            $daForTotal = $daManual ?? $da;
+            $d = ($dbForTotal !== null && $daForTotal !== null) ? ($dbForTotal + $daForTotal) : null;
         }
+
+        $this->db_average = isset($db) && $db !== null ? round($db, $round) : null;
+        $this->da_average = isset($da) && $da !== null ? round($da, $round) : null;
 
         $aVals = $scores->where('panel', 'a')->pluck('score')->filter($notNull)->sort()->values();
         $eVals = $scores->where('panel', 'e')->pluck('score')->filter($notNull)->sort()->values();
@@ -188,7 +274,9 @@ class Performance extends Model
         // чтобы отсутствие записей сохранило penalty=null (а не 0.0), и в табло
         // не печаталось «−0.000» по неустановленной бригаде.
         $penaltyScores = $scores->where('panel', 'penalty')->pluck('score')->filter($notNull);
-        $pen = $penaltyScores->count() ? (float) $penaltyScores->sum() : null;
+        $manualPenalties = $penaltyScores->count() ? (float) $penaltyScores->sum() : 0.0;
+        $timePenalty = max(0.0, (float) ($this->time_penalty ?? 0.0));
+        $pen = ($penaltyScores->count() || $timePenalty > 0.0) ? $manualPenalties + $timePenalty : null;
 
         $this->d_score = $d !== null ? round($d, $round) : null;
         $this->a_score = $a !== null ? round($a, $round) : null;

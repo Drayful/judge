@@ -53,13 +53,13 @@
             :class="ageGroup === 'junior' ? 'bg-[#4a3d8a] border-indigo-500 ring-2 ring-indigo-400/60 text-white' : 'bg-[#101a36] border-slate-700 text-slate-400 hover:text-slate-200'"
             class="rounded-xl border py-1.5 px-2 transition active:scale-[0.98]">
             <div class="text-xs font-bold uppercase tracking-wider">Юниоры</div>
-            <div class="text-[10px] opacity-80">Макс 6 DB/DE · Макс 1 Риск</div>
+            <div class="text-[10px] opacity-80">Макс 6 DB/DE · Риски всегда в зачёте</div>
         </button>
         <button type="button" @click="setAgeGroup('senior')"
             :class="ageGroup === 'senior' ? 'bg-[#4a3d8a] border-indigo-500 ring-2 ring-indigo-400/60 text-white' : 'bg-[#101a36] border-slate-700 text-slate-400 hover:text-slate-200'"
             class="rounded-xl border py-1.5 px-2 transition active:scale-[0.98]">
             <div class="text-xs font-bold uppercase tracking-wider">Сеньоры</div>
-            <div class="text-[10px] opacity-80">Макс 9 DB/DE · Макс 1 Риск</div>
+            <div class="text-[10px] opacity-80">Макс 9 DB/DE · Риски всегда в зачёте</div>
         </button>
     </div>
 
@@ -68,7 +68,7 @@
         <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="finalScore().toFixed(2)"></div>
 
         <div class="mt-1 w-full">
-            <div class="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Мин. по 1 элементу</div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Обязательные элементы и DE</div>
             <div class="flex flex-wrap justify-center gap-1 text-[10px]">
                 <template x-for="s in dbMinElementsStatus().items" :key="s.k">
                     <span class="rounded px-1.5 py-0.5 border font-medium"
@@ -92,8 +92,8 @@
                   :class="groupDbComputed().deOver ? 'border-rose-600 bg-rose-950/40 text-rose-200' : 'border-slate-700 text-slate-300'"
                   x-text="'DE: ' + groupDbComputed().deUsed + '/' + groupDbLim().deMax"></span>
             <span class="rounded bg-slate-800 border px-1.5 py-0.5"
-                  :class="groupDbComputed().risksOver ? 'border-rose-600 bg-rose-950/40 text-rose-200' : 'border-slate-700 text-slate-300'"
-                  x-text="'Рисков: ' + groupDbComputed().risks + '/' + groupDbLim().risks"></span>
+                  class="border-emerald-700/50 bg-emerald-950/25 text-emerald-200"
+                  x-text="'Рисков (всегда в зачёте): ' + groupDbComputed().risks"></span>
         </div>
         <div x-show="ageGroup === 'senior' && (groupDbComputed().dbUsed < groupDbLim().dbMin || groupDbComputed().deUsed < groupDbLim().deMin)"
              class="mt-1 text-[10px] text-amber-300/90">

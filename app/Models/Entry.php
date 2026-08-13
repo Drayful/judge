@@ -43,4 +43,11 @@ class Entry extends Model
     {
         return $this->belongsTo(Group::class);
     }
+
+    public function importSheet(): ?string
+    {
+        $sheet = is_array($this->meta) ? trim((string) ($this->meta['sheet'] ?? '')) : '';
+
+        return $sheet !== '' ? $sheet : null;
+    }
 }

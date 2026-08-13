@@ -15,7 +15,7 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="font-sans antialiased overflow-x-hidden bg-slate-950 text-slate-100">
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
+        <div id="app-async-page" data-async-page class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950">
             <!-- Global Top Bar -->
             @isset($header)
                 <header class="sticky top-0 z-50 bg-slate-950/90 backdrop-blur border-b border-slate-800">

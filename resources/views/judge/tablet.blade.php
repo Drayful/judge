@@ -13,6 +13,10 @@
 
     $saved = $myScore?->score !== null ? (float) $myScore->score : null;
     $alreadySubmitted = $myScore !== null && $myScore->submitted_at !== null;
+    $requiresManualAverage = $alreadySubmitted && in_array($slot, \App\Support\SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true);
+    $manualAverageSubmitted = $requiresManualAverage
+        && $myScore?->average_submitted_at !== null
+        && $myScore?->average_score !== null;
     $submittedDisplay = $alreadySubmitted && $myScore->score !== null
         ? number_format((float) $myScore->score, 3, '.', '')
         : null;
@@ -85,11 +89,87 @@
                         <p class="mt-2 text-sm text-amber-100/80">Секретарь должен вызвать гимнастку (<code class="text-amber-300">scheduled / on_deck / performing</code>).</p>
                     </div>
                 </div>
+            @elseif($requiresManualAverage && ! $manualAverageSubmitted)
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div
+                        x-data="{
+                            average: '',
+                            busy: false,
+                            error: null,
+                            async submitAverage() {
+                                if (this.busy || this.average === '') return;
+                                this.busy = true;
+                                this.error = null;
+                                const csrfToken = document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+                                const body = new FormData();
+                                body.append('_token', csrfToken);
+                                body.append('tournament_id', @js((string) $tournament->id));
+                                body.append('slot', @js($slot));
+                                body.append('average_score', this.average);
+                                try {
+                                    const response = await fetch(@js(route('judge.submit-average')), {
+                                        method: 'POST',
+                                        credentials: 'same-origin',
+                                        headers: {
+                                            'X-Requested-With': 'XMLHttpRequest',
+                                            'X-CSRF-TOKEN': csrfToken,
+                                            'Accept': 'application/json',
+                                        },
+                                        body,
+                                    });
+                                    const data = await response.json().catch(() => ({}));
+                                    if (! response.ok || data.ok === false) {
+                                        throw new Error(data.error || data.message || ('Ошибка ' + response.status));
+                                    }
+                                    if (window.JudgeAsync) {
+                                        await window.JudgeAsync.refresh(data.redirect_url || @js(route('judge.tournament.tablet', $tournament)), { force: true, silent: true });
+                                    } else {
+                                        window.location.href = data.redirect_url || @js(route('judge.tournament.tablet', $tournament));
+                                    }
+                                } catch (error) {
+                                    this.error = error?.message || 'Не удалось сохранить среднюю оценку.';
+                                    this.busy = false;
+                                }
+                            },
+                        }"
+                        class="w-full max-w-2xl rounded-2xl border border-cyan-700/60 bg-slate-950/80 p-8 text-center shadow-2xl"
+                    >
+                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Второй этап · {{ $slot }}</div>
+                        <h2 class="mt-3 text-3xl font-bold text-white">Введите ручную среднюю {{ $slot === 'DB1' ? 'DB' : 'DA' }}</h2>
+                        <p class="mt-2 text-sm text-slate-400">Основная оценка {{ $submittedDisplay }} уже сохранена. Введите согласованную среднюю подпанели отдельным значением.</p>
+
+                        <form class="mt-7" @submit.prevent="submitAverage()">
+                            <input
+                                type="number"
+                                x-model="average"
+                                step="0.001"
+                                min="0"
+                                max="99.999"
+                                required
+                                inputmode="decimal"
+                                autofocus
+                                class="block w-full rounded-2xl border border-cyan-700 bg-slate-900 px-6 py-5 text-center font-mono text-6xl font-extrabold tabular-nums text-cyan-100 focus:border-cyan-400 focus:ring-cyan-400"
+                                placeholder="0.000"
+                            >
+                            <button type="submit" :disabled="busy || average === ''"
+                                class="mt-5 w-full rounded-2xl bg-emerald-700 px-6 py-5 text-2xl font-bold uppercase tracking-wide text-white hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50">
+                                <span x-show="! busy">Отправить среднюю</span>
+                                <span x-show="busy">Сохранение…</span>
+                            </button>
+                        </form>
+
+                        <div x-cloak x-show="error" class="mt-4 rounded-lg border border-rose-700 bg-rose-950/60 px-4 py-3 text-sm text-rose-100" x-text="error"></div>
+                    </div>
+                </div>
             @elseif($alreadySubmitted)
                 <div class="flex-1 min-h-0 grid place-items-center">
                     <div class="rounded-2xl border border-emerald-800/60 bg-emerald-950/30 p-10 text-center">
                         <div class="text-xs uppercase tracking-widest text-emerald-300/80">Оценка {{ $slot }} отправлена</div>
                         <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ $submittedDisplay }}</div>
+                        @if($manualAverageSubmitted)
+                            <div class="mt-4 text-sm uppercase tracking-wider text-cyan-300">Ручная средняя</div>
+                            <div class="mt-1 font-mono text-4xl font-bold tabular-nums text-cyan-100">{{ number_format((float) $myScore->average_score, 3, '.', '') }}</div>
+                        @endif
                         <p class="mt-4 text-sm text-emerald-100/80">Дождитесь следующей гимнастки.</p>
                     </div>
                 </div>
@@ -136,6 +216,11 @@
                 submitUrl: opts.submitUrl,
                 liveActionUrl: opts.liveActionUrl,
                 tabletUrl: opts.tabletUrl,
+                timerUrl: opts.timerUrl,
+                timerStartedAt: opts.timerStartedAt,
+                timerEndedAt: opts.timerEndedAt,
+                timerDurationSeconds: opts.timerDurationSeconds,
+                timePenalty: opts.timePenalty || 0,
                 tournamentId: opts.tournamentId,
 
                 // Стейт
@@ -144,6 +229,9 @@
                 actions: [],                 // [{v, cat, label}] или [{v, symbol, label, notDone}]
                 busy: false,
                 error: null,
+                timerBusy: false,
+                timerTick: 0,
+                _timerInterval: null,
                 numpadOpen: false,
                 numpadValue: '',
                 // D-бригада: выбранный символ элемента (сначала символ, потом значение/«не выполнен»)
@@ -163,8 +251,8 @@
                         senior: { elements: 8, risks: 4 },
                     },
                     groupDb: {
-                        junior: { elements: 6, dbMax: 3, deMax: 3, dbMin: 0, deMin: 0, risks: 1 },
-                        senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4, risks: 1 },
+                        junior: { elements: 6, dbMax: 3, deMax: 3, dbMin: 0, deMin: 3 },
+                        senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4 },
                     },
                     da: {
                         junior: { elements: 12, acro: 3 },
@@ -177,18 +265,17 @@
                 },
 
                 // Лимиты по категориям (A1: dance, dynamic — макс. 2)
-                cat: { dance: 0, dynamic: 0 },
-                catMax: { dance: 2, dynamic: 2 },
-                // Блок A: «танц. шаги» и «дин. изменения» — авто-сбавка 0.6 за каждый блок
-                // (итого −1.2). Нажатие на 0.3 даёт «кредит» и уменьшает сбавку блока;
-                // максимум (2×0.3=0.6) полностью убирает сбавку блока. Применяется только к панели A.
+                cat: { dance: 0, dynamic: 0, contact: 0 },
+                catMax: { dance: 2, dynamic: opts.groupProgram ? 4 : 2, contact: opts.groupProgram ? 1 : 0 },
+                // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
+                // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
                 hasCombo: opts.panel === 'a',
-                comboAuto: 0.6,
                 comboStep: 0.3,
-                comboCats: ['dance', 'dynamic'],
+                comboCats: opts.groupProgram ? ['dance', 'dynamic', 'contact'] : ['dance', 'dynamic'],
                 catLabel: {
                     dance: 'Танц. шаги',
                     dynamic: 'Дин./эфф.',
+                    contact: 'Контакт',
                     rhythm: 'Ритм',
                     union: 'Соединение',
                     interrupt: 'Прерывание',
@@ -203,6 +290,7 @@
                 },
 
                 init() {
+                    this.startTimerTicker();
                     if (opts.initialAgeGroup) {
                         this.ageGroup = opts.initialAgeGroup;
                     }
@@ -224,6 +312,70 @@
                         if (value) this.publishLiveAction('Включён режим: акробатика');
                     });
                     this.$watch('ageGroup', (value) => this.publishLiveAction('Выбрана возрастная группа: ' + value));
+                },
+
+                officialTimerRunning() {
+                    return !! this.timerStartedAt && ! this.timerEndedAt;
+                },
+
+                officialTimerValue() {
+                    this.timerTick;
+                    let seconds = this.timerDurationSeconds;
+                    if (this.officialTimerRunning()) {
+                        const started = Date.parse(this.timerStartedAt);
+                        seconds = Number.isFinite(started) ? Math.max(0, (Date.now() - started) / 1000) : null;
+                    }
+
+                    if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
+                        return '—';
+                    }
+
+                    const value = Math.max(0, Math.floor(Number(seconds)));
+                    return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
+                },
+
+                startTimerTicker() {
+                    if (! this.officialTimerRunning() || this._timerInterval) return;
+                    this._timerInterval = setInterval(() => { this.timerTick += 1; }, 250);
+                },
+
+                stopTimerTicker() {
+                    if (this._timerInterval) clearInterval(this._timerInterval);
+                    this._timerInterval = null;
+                },
+
+                async recordOfficialTimer(action) {
+                    if (! this.timerUrl || this.timerBusy) return;
+
+                    this.timerBusy = true;
+                    this.error = null;
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                    try {
+                        const response = await fetch(this.timerUrl, {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'X-CSRF-TOKEN': csrfToken,
+                            },
+                            body: JSON.stringify({ action }),
+                        });
+                        const result = await response.json();
+                        if (! response.ok || ! result.ok) throw new Error(result.error || 'Не удалось зафиксировать время.');
+
+                        this.timerStartedAt = result.timer_started_at;
+                        this.timerEndedAt = result.timer_ended_at;
+                        this.timerDurationSeconds = result.duration_seconds;
+                        this.timePenalty = Number(result.time_penalty || 0);
+                        if (this.officialTimerRunning()) this.startTimerTicker();
+                        else this.stopTimerTicker();
+                    } catch (error) {
+                        this.error = error?.message || 'Не удалось зафиксировать время.';
+                    } finally {
+                        this.timerBusy = false;
+                    }
                 },
 
                 publishLiveAction(action) {
@@ -329,6 +481,19 @@
                     this.draft = this.round3(v);
                     this.actions = v === 0 ? [] : [{ v: v, cat: null, label: '', inTotal: true }];
                     this.resetCats();
+                },
+
+                setLinePenalty(type, value = 0.3) {
+                    const next = this.round3(this.draft + value);
+                    if (next > 99.999) return;
+                    this.draft = next;
+                    this.actions.unshift({
+                        v: value,
+                        cat: type,
+                        label: type === 'line_ball' ? 'Мяч за линию' : 'Гимнастка за линию',
+                        inTotal: true,
+                    });
+                    if (this.actions.length > 40) this.actions.pop();
                 },
 
                 // ====== DB-бригада: символ → значение / «не выполнен» ======
@@ -502,16 +667,16 @@
                     for (let i = this.actions.length - 1; i >= 0; i--) {
                         const a = this.actions[i];
                         if (a.notDone) continue;
-                        if (used >= lim.elements) continue;
-
                         if (a.symbol === 'R') {
-                            if (risks >= lim.risks) continue;
+                            // В групповых упражнениях риск всегда идёт в зачёт и
+                            // не занимает слот DB/DE.
                             risks += 1;
-                            used += 1;
                             counted.add(i);
                             total += a.v;
                             continue;
                         }
+
+                        if (used >= lim.elements) continue;
 
                         const ex = a.symbol === 'DE' ? 'de' : (a.exchange || (a.symbol && a.symbol !== 'R' ? 'db' : null));
                         if (ex !== 'db' && ex !== 'de') continue;
@@ -535,7 +700,7 @@
                         totalOver: used > lim.elements,
                         dbOver: dbUsed > lim.dbMax,
                         deOver: deUsed > lim.deMax,
-                        risksOver: risks > lim.risks,
+                        risksOver: false,
                     };
                 },
 
@@ -649,6 +814,17 @@
                         }
                     }
                     const items = required.map(s => ({ ...s, ok: presentKeys.has(s.k) }));
+                    if (this.groupProgram && this.symbolFlow) {
+                        const c = this.groupDbComputed();
+                        const requiredDe = this.groupDbLim().deMin;
+                        for (let i = 1; i <= requiredDe; i++) {
+                            items.push({
+                                k: 'de-' + i,
+                                label: 'DE ' + i,
+                                ok: c.deUsed >= i,
+                            });
+                        }
+                    }
                     const missing = items.filter(s => ! s.ok);
                     const penalty = this.round3(missing.length * 0.3);
 
@@ -742,14 +918,15 @@
 
                 /** Авто-сбавка одного блока с учётом «кредитов» (нажатий). */
                 blockPenalty(cat) {
-                    return this.round3(Math.max(0, this.comboAuto - this.comboStep * (this.cat[cat] || 0)));
+                    const base = this.round3(this.comboStep * (this.catMax[cat] || 0));
+                    return this.round3(Math.max(0, base - this.comboStep * (this.cat[cat] || 0)));
                 },
                 /** Суммарная авто-сбавка блоков (танц. шаги + дин. изменения). */
                 comboPenalty() {
                     if (! this.hasCombo) return 0;
                     let sum = 0;
                     for (const c of this.comboCats) {
-                        sum += Math.max(0, this.comboAuto - this.comboStep * (this.cat[c] || 0));
+                        sum += this.blockPenalty(c);
                     }
                     return this.round3(sum);
                 },
@@ -838,8 +1015,12 @@
                             this.busy = false;
                             return;
                         }
-                        // Перезагружаем — попадём в состояние "оценка отправлена"
-                        window.location.href = data.redirect_url || this.tabletUrl;
+                        // Обновляем планшет на месте — попадём в состояние «оценка отправлена».
+                        if (window.JudgeAsync) {
+                            await window.JudgeAsync.refresh(data.redirect_url || this.tabletUrl, { force: true, silent: true });
+                        } else {
+                            window.location.href = data.redirect_url || this.tabletUrl;
+                        }
                     } catch (err) {
                         this.error = 'Сеть: ' + (err.message || err);
                         this.busy = false;
@@ -891,11 +1072,17 @@
         }
 
         (function () {
+            const pageRoot = document.querySelector('[data-async-page]');
             const pingUrl = @json(route('judge.tournament.tablet.ping', $tournament));
             let lastPid = @json($current?->id);
             let lastCid = @json($category->id);
             let lastSubmitted = @json($alreadySubmitted);
-            setInterval(async function () {
+            let lastAverageSubmitted = @json($manualAverageSubmitted);
+            const pingInterval = setInterval(async function () {
+                if (pageRoot && ! pageRoot.isConnected) {
+                    clearInterval(pingInterval);
+                    return;
+                }
                 try {
                     const r = await fetch(pingUrl, {
                         headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -906,11 +1093,17 @@
                     const j = await r.json();
                     if (!j.resolved) return;
                     const submitted = !! j.score_submitted;
-                    if (j.performance_id !== lastPid || j.category_id !== lastCid || submitted !== lastSubmitted) {
+                    const averageSubmitted = !! j.average_submitted;
+                    if (j.performance_id !== lastPid || j.category_id !== lastCid || submitted !== lastSubmitted || averageSubmitted !== lastAverageSubmitted) {
                         lastPid = j.performance_id;
                         lastCid = j.category_id;
                         lastSubmitted = submitted;
-                        window.location.reload();
+                        lastAverageSubmitted = averageSubmitted;
+                        if (window.JudgeAsync) {
+                            await window.JudgeAsync.refresh(window.location.href, { silent: true });
+                        } else {
+                            window.location.reload();
+                        }
                     }
                 } catch (e) {}
             }, 3500);

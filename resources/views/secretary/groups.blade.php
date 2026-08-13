@@ -90,8 +90,8 @@
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
-                                <x-input-label value="Блок, мин" />
-                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                <x-input-label value="Минут на один выход" />
+                                <x-text-input name="minutes_per_athlete" type="number" min="1" max="60" value="2"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
@@ -207,8 +207,13 @@
                         Пул пуст. Импортируйте список участвующих на странице турнира.
                     </div>
                 @else
+                    @error('pool_move') <p class="mb-3 text-xs text-rose-300">{{ $message }}</p> @enderror
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         @foreach($pool as $p)
+                            <?php
+                                $poolTargets = $pool->filter(fn ($targetPool) => $targetPool['program'] === $p['program']
+                                    && $targetPool['key'] !== $p['key']);
+                            ?>
                             <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40">
                                 <div class="flex items-center justify-between gap-3 mb-3">
                                     <div class="font-medium text-slate-100">
@@ -228,11 +233,13 @@
                                     </summary>
                                     <ol class="mt-2 max-h-64 overflow-y-auto space-y-1 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300 list-decimal list-inside">
                                         @foreach($p['participants'] as $pt)
-                                            <li class="truncate">
-                                                <span class="{{ ($pt['is_team'] ?? false) ? 'text-amber-200 font-medium' : '' }}">{{ $pt['name'] }}</span>
-                                                @if($pt['year'])<span class="text-slate-500">{{ $pt['year'] }}</span>@endif
-                                                @if($pt['club'])<span class="text-slate-500">· {{ $pt['club'] }}</span>@endif
-                                                @if($pt['iin'])<span class="text-slate-600 font-mono">· {{ $pt['iin'] }}</span>@endif
+                                            <li class="rounded-md px-1 py-1 hover:bg-slate-900/60">
+                                                <div class="inline">
+                                                    <span class="{{ ($pt['is_team'] ?? false) ? 'text-amber-200 font-medium' : '' }}">{{ $pt['name'] }}</span>
+                                                    @if($pt['year'])<span class="text-slate-500">{{ $pt['year'] }}</span>@endif
+                                                    @if($pt['club'])<span class="text-slate-500">· {{ $pt['club'] }}</span>@endif
+                                                    @if($pt['iin'])<span class="text-slate-600 font-mono">· {{ $pt['iin'] }}</span>@endif
+                                                </div>
                                                 @if(($pt['is_team'] ?? false))
                                                     <span class="text-slate-500">· состав {{ count($pt['members']) }}</span>
                                                     <details class="mt-1 ml-4">
@@ -251,6 +258,22 @@
                                                             <button type="submit" class="rounded border border-sky-700/60 bg-sky-900/30 px-2 py-0.5 text-[10px] text-sky-100 hover:bg-sky-800/40">Сохранить состав</button>
                                                         </form>
                                                     </details>
+                                                @endif
+                                                @if($poolTargets->isNotEmpty())
+                                                    <form method="POST" action="{{ route('secretary.entries.move-pool', [$tournament, $pt['entry_id']]) }}"
+                                                          class="mt-1 ml-4 flex flex-wrap items-center gap-1">
+                                                        @csrf
+                                                        <select name="target_entry_id" class="max-w-48 rounded-md border-slate-700 bg-slate-950 py-0.5 text-[11px] text-slate-200" title="Выберите целевой пул">
+                                                            @foreach($poolTargets as $targetPool)
+                                                                <option value="{{ $targetPool['target_entry_id'] }}">
+                                                                    {{ $targetPool['label'] ?? ($targetPool['birth_year'] ? $targetPool['birth_year'].' г.р.' : 'Без года') }}{{ $targetPool['division'] ? ', кат. '.$targetPool['division'] : '' }}
+                                                                </option>
+                                                            @endforeach
+                                                        </select>
+                                                        <button type="submit" class="rounded border border-sky-800 px-2 py-0.5 text-[10px] text-sky-200 hover:bg-sky-950/40" title="Перенести одну участницу в выбранный пул">
+                                                            Перенести
+                                                        </button>
+                                                    </form>
                                                 @endif
                                             </li>
                                         @endforeach
@@ -325,6 +348,49 @@
                     <x-badge tone="gray">{{ $tournament->groups->count() }} групп</x-badge>
                 </div>
 
+                @if($excelGroupShuffleSets->isNotEmpty())
+                    <div class="mb-4 rounded-xl border border-violet-700/50 bg-violet-950/20 p-4">
+                        <div class="text-sm font-semibold text-violet-100">🎲 Перемешать групповые команды из Excel между «Группами»</div>
+                        <p class="mt-1 text-xs text-slate-400">
+                            Команды объединяются по исходному листу Excel. Состав гимнасток внутри команды не меняется;
+                            количество команд в каждой группе и размеры потоков сохраняются.
+                        </p>
+
+                        <div class="mt-3 space-y-2">
+                            @foreach($excelGroupShuffleSets as $set)
+                                <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                    <div class="min-w-0">
+                                        <div class="truncate text-xs font-medium text-slate-200" title="{{ $set['sheet'] }}">
+                                            Лист: {{ $set['sheet'] }}
+                                        </div>
+                                        <div class="mt-1 flex flex-wrap gap-1.5">
+                                            @foreach($set['groups'] as $excelGroup)
+                                                <span class="rounded border border-violet-900/70 bg-violet-950/40 px-2 py-0.5 text-[11px] text-violet-200">
+                                                    {{ $excelGroup['name'] }} — {{ $excelGroup['count'] }} ком.
+                                                </span>
+                                            @endforeach
+                                        </div>
+                                    </div>
+
+                                    @if($set['can_shuffle'])
+                                        <form method="POST" action="{{ route('secretary.tournament.groups.shuffle-imported-teams', $tournament) }}"
+                                              onsubmit='return confirm(@js("Перемешать команды листа «{$set['sheet']}» между группами?"));'>
+                                            @csrf
+                                            <input type="hidden" name="sheet" value="{{ $set['sheet'] }}">
+                                            <button type="submit" class="rounded-md border border-violet-600/70 bg-violet-800/40 px-3 py-2 text-xs font-semibold text-violet-50 hover:bg-violet-700/50">
+                                                Перемешать между группами
+                                            </button>
+                                        </form>
+                                    @else
+                                        <span class="text-[11px] text-slate-500">Нужны минимум две группы из этого листа</span>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                        @error('excel_group_shuffle') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                    </div>
+                @endif
+
                 {{-- Массовое формирование потоков по всем группам --}}
                 @if($tournament->groups->isNotEmpty())
                     <div class="mb-4 rounded-xl border border-sky-800/50 bg-sky-950/20 p-4">
@@ -348,8 +414,8 @@
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
-                                <x-input-label value="Блок, мин" />
-                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                <x-input-label value="Минут на один выход" />
+                                <x-text-input name="minutes_per_athlete" type="number" min="1" max="60" value="2"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
@@ -410,8 +476,8 @@
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
-                                <x-input-label value="Блок, мин" />
-                                <x-text-input name="block_minutes" type="number" min="1" max="600" value="25"
+                                <x-input-label value="Минут на один выход" />
+                                <x-text-input name="minutes_per_athlete" type="number" min="1" max="60" value="2"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
                             <div>
@@ -449,12 +515,15 @@
                         {{-- Список потоков группы --}}
                         @if($group->categories->isNotEmpty())
                             <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                @foreach($group->categories->sortBy('stream_no') as $cat)
+                                @foreach($group->categories as $cat)
                                     <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
                                         <div class="text-sm text-slate-200">
                                             Поток {{ $cat->stream_no }}
                                             @if($cat->starts_at_label)
                                                 <span class="text-slate-400">· {{ $cat->starts_at_label }}@if($cat->ends_at_label)–{{ $cat->ends_at_label }}@endif</span>
+                                            @endif
+                                            @if($cat->minutes_per_athlete)
+                                                <span class="text-slate-500">· {{ $cat->minutes_per_athlete }} мин/выход</span>
                                             @endif
                                         </div>
                                         <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium"
@@ -541,7 +610,7 @@
                             </div>
 
                             {{-- Состав по потокам + ручной перенос --}}
-                            @php($streamNos = $group->categories->pluck('stream_no')->filter()->unique()->sort()->values())
+                            @php($streamNos = $group->categories->pluck('stream_no')->filter()->unique()->values())
                             <details class="mt-3 rounded-lg border border-slate-800 bg-slate-900/30 p-3">
                                 <summary class="cursor-pointer text-xs font-medium text-sky-300 hover:text-sky-200">Состав по потокам / перенос</summary>
                                 <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -574,6 +643,36 @@
                                                             </select>
                                                             <button type="submit" class="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800" title="Перенести">→</button>
                                                         </form>
+                                                        <?php
+                                                            $entrySheet = $entry->importSheet();
+                                                            $compatibleGroups = $tournament->groups->filter(function ($candidate) use ($group, $entry, $entrySheet) {
+                                                                if ($candidate->id === $group->id) {
+                                                                    return false;
+                                                                }
+
+                                                                $sameKind = $candidate->program === $group->program
+                                                                    && $candidate->birth_year === $group->birth_year
+                                                                    && ($candidate->division ?? null) === ($group->division ?? null);
+                                                                $sameExcelSheet = $entry->program === 'group'
+                                                                    && $candidate->program === 'group'
+                                                                    && $entrySheet !== null
+                                                                    && $candidate->entries->contains(fn ($targetEntry) => $targetEntry->program === 'group'
+                                                                        && $targetEntry->importSheet() === $entrySheet);
+
+                                                                return $sameKind || $sameExcelSheet;
+                                                            });
+                                                        ?>
+                                                        @if($compatibleGroups->isNotEmpty())
+                                                            <form method="POST" action="{{ route('secretary.entries.move-group', [$tournament, $entry]) }}" class="flex items-center gap-1 shrink-0">
+                                                                @csrf
+                                                                <select name="target_group_id" class="max-w-36 rounded-md border-slate-700 bg-slate-950 text-slate-200 text-[11px] py-0.5" title="Перенести в другую группу или год">
+                                                                    @foreach($compatibleGroups as $targetGroup)
+                                                                        <option value="{{ $targetGroup->id }}">{{ $targetGroup->name }}</option>
+                                                                    @endforeach
+                                                                </select>
+                                                                <button type="submit" class="rounded border border-sky-800 px-1.5 py-0.5 text-[10px] text-sky-200 hover:bg-sky-950/40" title="Перенести одну команду в выбранную группу/год">⇄</button>
+                                                            </form>
+                                                        @endif
                                                     </li>
                                                 @endforeach
                                             </ul>

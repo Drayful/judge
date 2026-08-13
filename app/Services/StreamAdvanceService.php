@@ -24,7 +24,9 @@ class StreamAdvanceService
 
             if ($performing) {
                 $performing->status = 'done';
-                $performing->ended_at = now();
+                $performing->loadMissing('category');
+                $performing->recordFinishedAt();
+                $performing->recalculateTotals();
                 $performing->save();
             }
 

@@ -57,4 +57,14 @@ class MusicTrack extends Model
             ],
         );
     }
+
+    /** Временная ссылка для встроенного проигрывателя без forced-download. */
+    public function temporaryPlayUrl(int $minutes = 30): string
+    {
+        return Storage::disk($this->disk)->temporaryUrl(
+            $this->path,
+            now()->addMinutes($minutes),
+            ['ResponseContentType' => $this->content_type ?: 'audio/mpeg'],
+        );
+    }
 }

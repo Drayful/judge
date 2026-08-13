@@ -160,18 +160,33 @@ class FinalProtocolService
             ];
         }
 
-        usort($rows, fn ($a, $b) => $b['total'] <=> $a['total']);
+        usort($rows, function (array $a, array $b): int {
+            $aNotPerformed = abs((float) $a['total']) < 0.0005;
+            $bNotPerformed = abs((float) $b['total']) < 0.0005;
+            if ($aNotPerformed !== $bNotPerformed) {
+                return $aNotPerformed ? 1 : -1;
+            }
+
+            return $b['total'] <=> $a['total'];
+        });
 
         // Плотный ранг (dense rank) с округлением для сравнения.
         $place = 0;
         $prevRounded = null;
         foreach ($rows as &$row) {
+            if (abs((float) $row['total']) < 0.0005) {
+                $row['place'] = null;
+                $row['status'] = 'not_performed';
+
+                continue;
+            }
             $rounded = round($row['total'], self::PLACE_PRECISION);
             if ($prevRounded === null || $rounded !== $prevRounded) {
                 $place++;
                 $prevRounded = $rounded;
             }
             $row['place'] = $place;
+            $row['status'] = 'ranked';
         }
         unset($row);
 
@@ -233,17 +248,32 @@ class FinalProtocolService
             }
 
             $rows = array_values($rows);
-            usort($rows, fn ($a, $b) => $b['score'] <=> $a['score']);
+            usort($rows, function (array $a, array $b): int {
+                $aNotPerformed = abs((float) $a['score']) < 0.0005;
+                $bNotPerformed = abs((float) $b['score']) < 0.0005;
+                if ($aNotPerformed !== $bNotPerformed) {
+                    return $aNotPerformed ? 1 : -1;
+                }
+
+                return $b['score'] <=> $a['score'];
+            });
 
             $place = 0;
             $prevRounded = null;
             foreach ($rows as &$row) {
+                if (abs((float) $row['score']) < 0.0005) {
+                    $row['place'] = null;
+                    $row['status'] = 'not_performed';
+
+                    continue;
+                }
                 $rounded = round($row['score'], self::PLACE_PRECISION);
                 if ($prevRounded === null || $rounded !== $prevRounded) {
                     $place++;
                     $prevRounded = $rounded;
                 }
                 $row['place'] = $place;
+                $row['status'] = 'ranked';
             }
             unset($row);
 

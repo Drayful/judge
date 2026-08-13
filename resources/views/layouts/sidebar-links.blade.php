@@ -4,6 +4,7 @@
     $canSecretary = $user ? ($user->isSecretary() || $user->isAdmin()) : false;
     $canChiefJudge = $user ? $user->isChiefJudge() : false;
     $canJudge = $user ? ($user->isAnyJudge() || $user->isAdmin()) : false;
+    $canScoreboardJudge = $user ? ($user->isScoreboardJudge() || $user->isAdmin()) : false;
 @endphp
 
 <nav class="px-3 py-4 space-y-1">
@@ -42,8 +43,13 @@
         </a>
     @endif
 
+    @if($canScoreboardJudge)
+        <a href="{{ route('scoreboard-judge.index') }}" class="{{ request()->routeIs('scoreboard-judge.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
+            Судья на табло
+        </a>
+    @endif
+
     <a href="{{ route('scoreboard.index') }}" class="{{ request()->routeIs('scoreboard.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
         Табло
     </a>
 </nav>
-

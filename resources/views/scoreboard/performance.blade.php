@@ -49,6 +49,11 @@
                                 <span id="placeOf" class="text-2xl sm:text-3xl text-slate-500 font-medium">/ {{ $perf['place_of'] ?? '—' }}</span>
                             </div>
                         </div>
+                        <div id="poolLabel" class="text-xs text-slate-500">
+                            @if($perf && ($perf['pool_label'] ?? null))
+                                Пул Excel: {{ $perf['pool_label'] }}
+                            @endif
+                        </div>
 
                         <div class="text-sm text-slate-500" id="startNumberWrap">
                             @if($perf && $perf['start_number'])
@@ -72,7 +77,7 @@
                     </div>
 
                     <div class="sb-scores">
-                        @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Штр', 'total' => 'Итог'] as $key => $label)
+                        @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Штр', 'apparatus_score' => 'За вид', 'total' => 'Итог'] as $key => $label)
                             @php
                                 $cardClass = 'sb-score-card' . ($key === 'total' ? ' sb-score-card--total' : '');
                                 $valueClass = 'sb-score-value'
@@ -121,7 +126,7 @@
         const liveContent = document.getElementById('liveContent');
         const liveStatus = document.getElementById('liveStatus');
         const tvBtn = document.getElementById('tvModeBtn');
-        const prev = { d: null, a: null, e: null, penalty: null, total: null, place: null };
+        const prev = { d: null, a: null, e: null, penalty: null, apparatus_score: null, total: null, place: null };
 
         function fmt3(v) {
             if (v === null || v === undefined) return '—';
@@ -187,6 +192,7 @@
                 prev.place = null;
             }
             document.getElementById('placeOf').textContent = '/ ' + (perf.place_of ?? '—');
+            document.getElementById('poolLabel').textContent = perf.pool_label ? 'Пул Excel: ' + perf.pool_label : '';
 
             document.getElementById('athleteName').textContent = perf.athlete || '—';
             document.getElementById('athleteClub').textContent = perf.club || '—';
@@ -203,7 +209,7 @@
                 ? '№ <span class="text-slate-300 font-semibold tabular-nums">' + esc(perf.start_number) + '</span>'
                 : '';
 
-            ['d', 'a', 'e', 'penalty', 'total'].forEach(key => {
+            ['d', 'a', 'e', 'penalty', 'apparatus_score', 'total'].forEach(key => {
                 const id = 'score' + key.charAt(0).toUpperCase() + key.slice(1);
                 const val = fmt3(perf[key]);
                 const el = document.getElementById(id);

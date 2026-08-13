@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Category;
+use App\Models\JudgeScore;
 use App\Models\Performance;
 use Illuminate\Support\Collection;
 
@@ -28,6 +29,9 @@ class SecretaryLiveUi
 
     /** Слоты D-бригады для расчёта итога. */
     public const D_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2'];
+
+    /** DB1 и DA1 после основной оценки отдельно вводят согласованную среднюю. */
+    public const MANUAL_AVERAGE_SLOTS = ['DB1', 'DA1'];
 
     /**
      * Панели для проверки разброса: при БП DB+DA объединяются в одну четвёрку.
@@ -140,6 +144,9 @@ class SecretaryLiveUi
         $slotMap = [];
         $placedScoreIds = [];
         foreach ($scores as $s) {
+            if ($s->panel === 'penalty' && in_array($s->penalty_type, ['line_gymnast', 'line_ball'], true)) {
+                continue;
+            }
             $slot = $s->judge?->slot;
             if ($slot && $s->submitted_at !== null) {
                 $slotMap[$slot] = true;
@@ -155,7 +162,7 @@ class SecretaryLiveUi
         $eSorted = $unplaced($scores->where('panel', 'e')->sortBy('id')->values());
         $dbSorted = $unplaced($scores->where('panel', 'd')->where('subpanel', 'db')->sortBy('id')->values());
         $daSorted = $unplaced($scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values());
-        $lineSorted = $unplaced($scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values());
+        $lineSorted = $unplaced($scores->where('panel', 'penalty')->whereIn('penalty_type', ['line', 'line_gymnast', 'line_ball'])->sortBy('id')->values());
 
         $byPosition = function ($coll, int $i): bool {
             $row = $coll->get($i);
@@ -169,6 +176,7 @@ class SecretaryLiveUi
 
             if (isset($slotMap[$label])) {
                 $out[] = ['label' => $label, 'ok' => true, 'inactive' => $isInactive];
+
                 continue;
             }
             $ok = match ($label) {
@@ -228,6 +236,32 @@ class SecretaryLiveUi
         }
 
         return $hasAtLeastOneActive;
+    }
+
+    /**
+     * Оба руководителя D-подпанелей закончили второй ручной ввод средней.
+     */
+    public static function requiredManualAveragesSubmitted(?Performance $perf, ?Category $category = null): bool
+    {
+        if (! $perf) {
+            return false;
+        }
+
+        $category = $category ?? $perf->category;
+        $inactive = self::inactiveSlots($category);
+        $rows = self::scoreRowsBySlot($perf, $category);
+        foreach (self::MANUAL_AVERAGE_SLOTS as $slot) {
+            if (in_array($slot, $inactive, true)) {
+                continue;
+            }
+
+            $row = $rows[$slot] ?? null;
+            if ($row === null || $row->submitted_at === null || $row->average_submitted_at === null || $row->average_score === null) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -352,6 +386,7 @@ class SecretaryLiveUi
         foreach ($matrix['columns'] as $col) {
             if ($matrix['inactive'][$col] ?? false) {
                 $out[$col] = null;
+
                 continue;
             }
             $v = $matrix['values'][$col];
@@ -367,6 +402,10 @@ class SecretaryLiveUi
     public static function readyToFinalize(?Performance $perf, ?Category $category = null): bool
     {
         return self::requiredScoresSubmitted($perf, $category)
+            && self::requiredManualAveragesSubmitted($perf, $category)
+            // Если хронометрист уже запустил официальный отсчёт, автопереход
+            // ждёт именно его «Стоп», чтобы не потерять фактическое время.
+            && ($perf?->timer_started_at === null || $perf->timer_ended_at !== null)
             && ! self::hasPanelSpreadViolation($perf, $category);
     }
 
@@ -402,6 +441,9 @@ class SecretaryLiveUi
 
         // 1) Сначала по слоту судьи (user.slot). Неактивные слоты не перезаписываются.
         foreach ($scores as $s) {
+            if ($s->panel === 'penalty' && in_array($s->penalty_type, ['line_gymnast', 'line_ball'], true)) {
+                continue;
+            }
             $slot = $s->judge?->slot;
             if ($slot && array_key_exists($slot, $values) && ! $inactive[$slot] && $s->score !== null) {
                 $values[$slot] = $fmt($s->score);
@@ -440,7 +482,7 @@ class SecretaryLiveUi
         $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
 
         $lineList = $scores->where('panel', 'penalty')
-            ->where('penalty_type', 'line')
+            ->whereIn('penalty_type', ['line', 'line_gymnast', 'line_ball'])
             ->sortBy('id')
             ->values()
             ->filter(fn ($s) => ! in_array($s->id, $placedScoreIds, true))
@@ -486,7 +528,7 @@ class SecretaryLiveUi
      * Записи judge_scores, сопоставленные со слотами (как fixedScoreMatrix, но с моделями).
      * Нужно для истории выставления оценки и редактирования секретарём.
      *
-     * @return array<string, ?\App\Models\JudgeScore>
+     * @return array<string, ?JudgeScore>
      */
     public static function scoreRowsBySlot(?Performance $perf, ?Category $category = null): array
     {
@@ -503,6 +545,9 @@ class SecretaryLiveUi
 
         // 1) По слоту судьи.
         foreach ($scores as $s) {
+            if ($s->panel === 'penalty' && in_array($s->penalty_type, ['line_gymnast', 'line_ball'], true)) {
+                continue;
+            }
             $slot = $s->judge?->slot;
             if ($slot && array_key_exists($slot, $rows) && ! in_array($slot, $inactive, true) && $rows[$slot] === null) {
                 $rows[$slot] = $s;
@@ -535,7 +580,7 @@ class SecretaryLiveUi
         $fillByOrder('DA', $scores->where('panel', 'd')->where('subpanel', 'da')->sortBy('id')->values(), 2);
         $fillByOrder('A', $scores->where('panel', 'a')->sortBy('id')->values(), 4);
         $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
-        $fillByOrder('LINE', $scores->where('panel', 'penalty')->where('penalty_type', 'line')->sortBy('id')->values(), 2);
+        $fillByOrder('LINE', $scores->where('panel', 'penalty')->whereIn('penalty_type', ['line', 'line_gymnast', 'line_ball'])->sortBy('id')->values(), 2);
 
         if ($rows['TIME'] === null) {
             $rows['TIME'] = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');

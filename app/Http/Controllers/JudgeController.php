@@ -151,7 +151,81 @@ class JudgeController extends Controller
             'performance_status' => $current?->status,
             'stream_status' => SecretaryLiveUi::streamStatus($current),
             'score_submitted' => $myScore !== null && $myScore->submitted_at !== null,
+            'average_submitted' => $myScore !== null
+                && $myScore->average_submitted_at !== null
+                && $myScore->average_score !== null,
         ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+
+    /**
+     * Официальное время фиксирует только судья-хронометрист со своего планшета.
+     * Время очереди секретаря и воспроизведение музыки на этот расчёт не влияют.
+     */
+    public function recordOfficialTimer(Tournament $tournament, Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $panel = $user->judgePanel();
+
+        if (! $user->isAdmin() && (($panel['panel'] ?? null) !== 'penalty' || ($panel['penalty_type'] ?? null) !== 'time')) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'action' => ['required', Rule::in(['start', 'stop'])],
+        ]);
+
+        $category = $this->resolveJudgeCategoryForTournament($tournament);
+        if ($category === null) {
+            return response()->json(['ok' => false, 'error' => 'Секретарь ещё не выбрал поток в Live.'], 422);
+        }
+
+        $performances = Performance::query()
+            ->with('category')
+            ->where('category_id', $category->id)
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get();
+        $current = SecretaryLiveUi::currentPerformance(SecretaryLiveUi::orderedPerformances($performances));
+
+        if ($current === null || $current->status !== 'performing') {
+            return response()->json(['ok' => false, 'error' => 'Сейчас нет выступления, для которого можно зафиксировать время.'], 422);
+        }
+
+        if ($data['action'] === 'start') {
+            if ($current->timer_ended_at !== null) {
+                return response()->json(['ok' => false, 'error' => 'Время этого выступления уже зафиксировано.'], 422);
+            }
+
+            if ($current->timer_started_at === null) {
+                $current->startOfficialTimer();
+                $current->save();
+                event(new ScoreUpdated($current->id, $current->category_id));
+            }
+        } else {
+            if ($current->timer_ended_at === null && ! $current->stopOfficialTimer()) {
+                return response()->json(['ok' => false, 'error' => 'Сначала нажмите «Старт».'], 422);
+            }
+
+            $current->recalculateTotals();
+            $current->save();
+
+            if (SecretaryLiveUi::readyToFinalize($current, $current->category)) {
+                $current->finalized_at = now();
+                $current->save();
+                StreamAdvanceService::advanceToNextInCategory($current->category, $current->stream_session_id);
+            }
+
+            event(new ScoreUpdated($current->id, $current->category_id));
+        }
+
+        return response()->json([
+            'ok' => true,
+            'action' => $data['action'],
+            'timer_started_at' => $current->timer_started_at?->toIso8601String(),
+            'timer_ended_at' => $current->timer_ended_at?->toIso8601String(),
+            'duration_seconds' => $current->actual_duration_seconds,
+            'time_penalty' => (float) ($current->time_penalty ?? 0),
+        ]);
     }
 
     public function submitScore(Performance $performance, Request $request): RedirectResponse
@@ -209,6 +283,88 @@ class JudgeController extends Controller
             'message' => $message,
             'slot' => $user->slot,
             'score' => (float) $data['score'],
+            'redirect_url' => route('judge.tournament.tablet', $tournament),
+        ]);
+    }
+
+    /**
+     * Второй этап для DB1/DA1: ручной ввод согласованной средней подпанели.
+     */
+    public function submitAverageAjax(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'tournament_id' => ['required', 'integer'],
+            'average_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'slot' => ['nullable', Rule::in(SecretaryLiveUi::MANUAL_AVERAGE_SLOTS)],
+        ]);
+
+        $tournament = Tournament::query()->findOrFail($data['tournament_id']);
+        $category = $this->resolveJudgeCategoryForTournament($tournament);
+        if ($category === null) {
+            return response()->json(['ok' => false, 'error' => 'Поток не выбран секретарём.'], 422);
+        }
+
+        $current = SecretaryLiveUi::currentPerformance(
+            SecretaryLiveUi::orderedPerformances(
+                Performance::query()
+                    ->where('category_id', $category->id)
+                    ->orderBy('order_index')
+                    ->orderBy('id')
+                    ->get()
+            )
+        );
+        if ($current === null) {
+            return response()->json(['ok' => false, 'error' => 'Нет активного выступления.'], 422);
+        }
+
+        $user = $request->user();
+        $panel = $user->judgePanel();
+        $slot = strtoupper((string) ($user->isAdmin() ? ($data['slot'] ?? '') : ($user->slot ?? '')));
+        if (! in_array($slot, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true)) {
+            abort(403, 'Ручную среднюю могут выставлять только DB1 и DA1.');
+        }
+        if (! $user->isAdmin() && (($panel['panel'] ?? null) !== 'd')) {
+            abort(403);
+        }
+
+        if ($user->isAdmin()) {
+            $panel = [
+                'panel' => 'd',
+                'subpanel' => $slot === 'DB1' ? 'db' : 'da',
+                'penalty_type' => null,
+                'slot' => $slot,
+            ];
+        } else {
+            $panel = $this->effectiveJudgePanel($current, $panel);
+        }
+
+        $score = $this->findMyScore($current, $user, $panel);
+        if ($score === null || $score->submitted_at === null) {
+            return response()->json(['ok' => false, 'error' => 'Сначала отправьте основную оценку.'], 422);
+        }
+
+        $score->average_score = round((float) $data['average_score'], 3);
+        $score->average_submitted_at = now();
+        $score->save();
+
+        $current->refresh();
+        $current->load(['judgeScores.judge', 'category']);
+        $current->recalculateTotals();
+        $current->save();
+        event(new ScoreUpdated($current->id, $current->category_id));
+
+        $moved = $this->finalizeAndAdvanceIfReady($current);
+        $message = 'Ручная средняя '.$slot.' сохранена.';
+        if ($moved !== null) {
+            $message .= $moved
+                ? ' Автопереход: вызвана следующая гимнастка.'
+                : ' Автопереход: очередь завершена.';
+        }
+
+        return response()->json([
+            'ok' => true,
+            'message' => $message,
+            'average_score' => (float) $score->average_score,
             'redirect_url' => route('judge.tournament.tablet', $tournament),
         ]);
     }
@@ -287,8 +443,9 @@ class JudgeController extends Controller
             $penaltyType = $data['penalty_type'] ?: null;
             $score = (float) $data['score'];
         } else {
-            $request->validate([
+            $data = $request->validate([
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+                'penalty_type' => ['nullable', 'string', 'max:32'],
             ]);
             $panel = $this->effectiveJudgePanel($performance, $panel);
             $panelKey = $panel['panel'];
@@ -309,6 +466,19 @@ class JudgeController extends Controller
         $ageGroup = $request->input('age_group');
         $ageGroup = in_array($ageGroup, ['junior', 'senior'], true) ? $ageGroup : null;
 
+        if ($panelKey === 'penalty' && $penaltyType === 'line') {
+            // Старые версии планшета сохраняли два типа отдельными строками.
+            // После отправки общей суммы оставляем их в истории, но исключаем из расчёта.
+            JudgeScore::query()
+                ->where('performance_id', $performance->id)
+                ->where('judge_id', $user->id)
+                ->where('panel', 'penalty')
+                ->whereIn('penalty_type', ['line_gymnast', 'line_ball'])
+                ->update([
+                    'submitted_at' => null,
+                ]);
+        }
+
         JudgeScore::query()->updateOrCreate(
             [
                 'performance_id' => $performance->id,
@@ -319,18 +489,36 @@ class JudgeController extends Controller
             ],
             [
                 'score' => $score,
+                'average_score' => null,
                 'entries' => $entries,
                 'age_group' => $ageGroup,
                 'submitted_at' => now(),
+                'average_submitted_at' => null,
             ],
         );
 
-        event(new ScoreUpdated($performance->id, $performance->category_id));
+        if ($panelKey === 'd' && in_array($subpanel, ['db', 'da'], true)) {
+            $performance->unsetRelation('judgeScores');
+            $performance->loadMissing(['judgeScores.judge', 'category']);
+            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+            $leader = $rows[strtoupper($subpanel).'1'] ?? null;
+            if ($leader !== null) {
+                $leader->update(['average_score' => null, 'average_submitted_at' => null]);
+            }
+        }
 
         $performance->refresh();
         $performance->load(['judgeScores', 'category']);
+        // DB1/DA1 и последующие оценки сразу пересчитывают и сохраняют средние.
+        // На табло этот промежуточный результат не попадёт: он ждёт двух подтверждений.
+        $performance->recalculateTotals();
+        $performance->save();
 
-        $status = 'Оценка сохранена.';
+        event(new ScoreUpdated($performance->id, $performance->category_id));
+
+        $status = $panelKey === 'penalty' && $penaltyType === 'line'
+            ? 'Сумма линейной сбавки сохранена.'
+            : 'Оценка сохранена.';
         $category = $performance->category;
 
         if ($category && SecretaryLiveUi::requiredScoresSubmitted($performance, $category)) {
@@ -341,30 +529,8 @@ class JudgeController extends Controller
             }
         }
 
-        if (
-            $category?->auto_advance
-            && $performance->status === 'performing'
-            && SecretaryLiveUi::readyToFinalize($performance, $category)
-        ) {
-            $moved = false;
-            DB::transaction(function () use ($performance, &$moved) {
-                $performance->refresh();
-                $performance->load(['judgeScores', 'category']);
-
-                if (! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
-                    return;
-                }
-
-                $performance->recalculateTotals();
-                $performance->finalized_at = now();
-                $performance->save();
-
-                $cat = $performance->category;
-                if ($cat) {
-                    $moved = StreamAdvanceService::advanceToNextInCategory($cat);
-                }
-            });
-
+        $moved = $this->finalizeAndAdvanceIfReady($performance);
+        if ($moved !== null) {
             $status .= $moved
                 ? ' Автопереход: вызвана следующая гимнастка.'
                 : ' Автопереход: очередь завершена (следующих нет).';
@@ -373,9 +539,58 @@ class JudgeController extends Controller
         return $status;
     }
 
+    /**
+     * null — выступление ещё не готово; bool — готово и попытка перехода выполнена.
+     */
+    private function finalizeAndAdvanceIfReady(Performance $performance): ?bool
+    {
+        $performance->loadMissing(['judgeScores.judge', 'category']);
+        if ($performance->status !== 'performing'
+            || ! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
+            return null;
+        }
+
+        $moved = false;
+        $finalized = false;
+        DB::transaction(function () use ($performance, &$moved, &$finalized) {
+            $performance->refresh();
+            $performance->load(['judgeScores.judge', 'category']);
+
+            if (! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
+                return;
+            }
+
+            $performance->recalculateTotals();
+            $performance->finalized_at = now();
+            $performance->save();
+            $finalized = true;
+
+            if ($performance->category) {
+                $moved = StreamAdvanceService::advanceToNextInCategory(
+                    $performance->category,
+                    $performance->stream_session_id,
+                );
+            }
+        });
+
+        return $finalized ? $moved : null;
+    }
+
     public function finalize(Performance $performance): RedirectResponse
     {
-        $performance->load(['judgeScores', 'category']);
+        $performance->load(['judgeScores.judge', 'category']);
+
+        if (! SecretaryLiveUi::requiredScoresSubmitted($performance, $performance->category)) {
+            return back()->withErrors([
+                'finalize' => 'Не все обязательные судейские оценки выставлены.',
+            ]);
+        }
+
+        if (! SecretaryLiveUi::requiredManualAveragesSubmitted($performance, $performance->category)) {
+            return back()->withErrors([
+                'finalize' => 'DB1 и DA1 ещё не отправили отдельные ручные средние.',
+            ]);
+        }
 
         if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $performance->category)) {
             $report = SecretaryLiveUi::panelSpreadReport($performance, $performance->category);

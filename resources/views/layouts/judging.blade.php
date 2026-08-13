@@ -15,9 +15,9 @@
     </style>
 </head>
 <body class="font-sans antialiased bg-[#0b1224] text-slate-100 h-screen overflow-hidden">
-    <div class="h-screen overflow-hidden">
+    <div id="app-async-page" data-async-page class="h-screen overflow-hidden">
         @yield('content')
+        @stack('body-scripts')
     </div>
-    @stack('body-scripts')
 </body>
 </html>

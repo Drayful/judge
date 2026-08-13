@@ -6,7 +6,9 @@ use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Group;
 use App\Models\Performance;
+use App\Models\Tournament;
 use App\Support\PerformanceApparatus;
+use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -19,10 +21,14 @@ use Illuminate\Support\Facades\DB;
  */
 class StreamBuilderService
 {
+    public function __construct(
+        private readonly StreamScheduleService $schedule,
+    ) {}
+
     /**
      * Авто-разбивка пула группы на потоки по размеру + генерация очередей.
      *
-     * @param  list<array{start:?string,end:?string}>  $times  метки времени по индексу потока (0-based)
+     * @param  list<array{start:?string,end:?string,minutes_per_athlete?:int,schedule_chain?:string,schedule_sequence?:int}>  $times  метки времени по индексу потока (0-based)
      */
     public function generateStreams(Group $group, int $streamSize, array $times = [], string $numberMode = 'per_stream'): void
     {
@@ -61,6 +67,16 @@ class StreamBuilderService
             }
 
             $this->purgeStaleStreams($group, $kept);
+
+            if ($kept !== []) {
+                $firstCategory = Category::query()
+                    ->where('group_id', $group->id)
+                    ->where('stream_no', min($kept))
+                    ->first();
+                if ($firstCategory !== null) {
+                    $this->schedule->recalculate($firstCategory);
+                }
+            }
         });
     }
 
@@ -144,6 +160,95 @@ class StreamBuilderService
     }
 
     /**
+     * Жеребьёвка команд групповой программы между системными группами одного
+     * Excel-листа. Команда остаётся неделимой Entry; сохраняются количество
+     * команд в каждой группе и занятые ими места в потоках.
+     */
+    public function shuffleImportedTeamsBetweenGroups(Tournament $tournament, string $sheet): int
+    {
+        return DB::transaction(function () use ($tournament, $sheet) {
+            $entries = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('program', 'group')
+                ->whereNotNull('group_id')
+                ->orderBy('group_id')
+                ->orderBy('stream_no')
+                ->orderBy('order_index')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->filter(function (Entry $entry) use ($sheet) {
+                    $entrySheet = $entry->importSheet();
+
+                    return $entrySheet !== null && hash_equals($sheet, $entrySheet);
+                })
+                ->values();
+
+            if ($entries->count() < 2) {
+                throw new DomainException('На выбранном Excel-листе недостаточно команд для жеребьёвки.');
+            }
+
+            $groupIds = $entries->pluck('group_id')->map(fn ($id) => (int) $id)->unique()->values();
+            if ($groupIds->count() < 2) {
+                throw new DomainException('Команды этого Excel-листа находятся только в одной группе. Нужны минимум две группы.');
+            }
+
+            $groups = Group::query()
+                ->where('tournament_id', $tournament->id)
+                ->whereIn('id', $groupIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($groups->count() !== $groupIds->count()) {
+                throw new DomainException('Одна из групп Excel-листа больше не существует. Обновите страницу и повторите действие.');
+            }
+
+            $locked = Category::query()
+                ->whereIn('group_id', $groupIds)
+                ->whereHas('performances', fn ($query) => $query->where('status', '!=', 'scheduled'))
+                ->exists();
+            if ($locked) {
+                throw new DomainException('Нельзя менять состав: в одной из групп уже начались выступления.');
+            }
+
+            $slots = $entries->map(fn (Entry $entry) => [
+                'group_id' => (int) $entry->group_id,
+                'stream_no' => $entry->stream_no,
+                'start_number' => $entry->start_number,
+                'order_index' => $entry->order_index,
+            ])->values();
+
+            $shuffled = $entries->shuffle()->values();
+            $hasCrossGroupMove = $shuffled->contains(
+                fn (Entry $entry, int $index) => (int) $entry->group_id !== $slots[$index]['group_id']
+            );
+
+            // Случайная последовательность теоретически может полностью сохранить
+            // распределение. В таком случае циклический сдвиг гарантирует обмен.
+            if (! $hasCrossGroupMove) {
+                $shuffled = $shuffled->slice(1)->push($shuffled->first())->values();
+            }
+
+            $moved = 0;
+            foreach ($shuffled as $index => $entry) {
+                $slot = $slots[$index];
+                if ((int) $entry->group_id !== $slot['group_id']) {
+                    $moved++;
+                }
+
+                $entry->update($slot);
+            }
+
+            foreach ($groups as $group) {
+                $this->renumber($group);
+            }
+
+            return $moved;
+        });
+    }
+
+    /**
      * Пересчёт стартовых номеров по текущему распределению (stream_no) и пересборка очередей.
      */
     public function renumber(Group $group): void
@@ -175,11 +280,21 @@ class StreamBuilderService
             }
 
             $this->purgeStaleStreams($group, $kept);
+
+            if ($kept !== []) {
+                $firstCategory = Category::query()
+                    ->where('group_id', $group->id)
+                    ->where('stream_no', min($kept))
+                    ->first();
+                if ($firstCategory !== null) {
+                    $this->schedule->recalculate($firstCategory);
+                }
+            }
         });
     }
 
     /**
-     * @param  array{start:?string,end:?string}  $times
+     * @param  array{start:?string,end:?string,minutes_per_athlete?:int,schedule_chain?:string,schedule_sequence?:int}  $times
      */
     private function upsertStreamCategory(Group $group, int $streamNo, array $times): Category
     {
@@ -197,6 +312,15 @@ class StreamBuilderService
 
         $category->starts_at_label = $start;
         $category->ends_at_label = $end;
+        if (array_key_exists('minutes_per_athlete', $times)) {
+            $category->minutes_per_athlete = $times['minutes_per_athlete'];
+        }
+        if (array_key_exists('schedule_chain', $times)) {
+            $category->schedule_chain = $times['schedule_chain'];
+        }
+        if (array_key_exists('schedule_sequence', $times)) {
+            $category->schedule_sequence = $times['schedule_sequence'];
+        }
 
         $timeSuffix = '';
         if ($start !== null && $start !== '') {
@@ -210,6 +334,7 @@ class StreamBuilderService
         $category->birth_year = $group->birth_year;
         $category->division = $group->division;
         $category->apparatus = $this->apparatusSummary($group);
+        $category->auto_advance = true;
 
         if ($isNew) {
             $category->is_published = false;

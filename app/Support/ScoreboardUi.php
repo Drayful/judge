@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Category;
+use App\Models\Entry;
 use App\Models\Performance;
 use App\Models\Tournament;
 use Illuminate\Support\Collection;
@@ -112,30 +113,137 @@ class ScoreboardUi
     }
 
     /**
+     * Пул рейтинга: прежде всего все записи одного Excel-листа. Если запись была
+     * добавлена вручную, используем состав системной группы, из которой собраны потоки.
+     *
+     * @return array{athlete_ids:?list<int>,label:?string}
+     */
+    private static function rankingPool(Category $category, Performance $performance): array
+    {
+        $category->loadMissing('tournament');
+        $tournament = $category->tournament;
+        if ($tournament === null) {
+            return ['athlete_ids' => null, 'label' => null];
+        }
+
+        $entry = null;
+        if ($category->group_id !== null) {
+            $entry = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('athlete_id', $performance->athlete_id)
+                ->where('group_id', $category->group_id)
+                ->first();
+        }
+
+        $entry ??= Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('athlete_id', $performance->athlete_id)
+            ->get()
+            ->first(fn (Entry $candidate) => $candidate->importSheet() !== null);
+
+        $sheet = $entry?->importSheet();
+        if ($sheet !== null) {
+            $athleteIds = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->get(['athlete_id', 'meta'])
+                ->filter(fn (Entry $candidate) => $candidate->importSheet() === $sheet)
+                ->pluck('athlete_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+
+            return ['athlete_ids' => $athleteIds, 'label' => $sheet];
+        }
+
+        if ($category->group_id !== null) {
+            $athleteIds = Entry::query()
+                ->where('tournament_id', $tournament->id)
+                ->where('group_id', $category->group_id)
+                ->pluck('athlete_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+
+            if ($athleteIds !== []) {
+                return ['athlete_ids' => $athleteIds, 'label' => $category->group?->name];
+            }
+        }
+
+        return ['athlete_ids' => null, 'label' => null];
+    }
+
+    /**
+     * Текущий рейтинг складывает все уже принятые виды каждой гимнастки из пула.
+     *
+     * @return array{place:?int,place_of:int,overall_total:?float,pool_label:?string}
+     */
+    private static function rankingSnapshot(Category $category, Performance $performance): array
+    {
+        $category->loadMissing('tournament');
+        $pool = self::rankingPool($category, $performance);
+        $poolAthleteIds = $pool['athlete_ids'];
+        $categoryIds = $poolAthleteIds !== null
+            ? $category->tournament?->categories()->pluck('id')->map(fn ($id) => (int) $id)->all() ?? [$category->id]
+            : self::groupCategoryIds($category);
+
+        $published = Performance::query()
+            ->whereIn('category_id', $categoryIds)
+            ->when($poolAthleteIds !== null, fn ($query) => $query->whereIn('athlete_id', $poolAthleteIds))
+            ->where('is_counted', true)
+            ->whereNotNull('total')
+            ->whereNotNull('published_at')
+            ->whereNull('withdrawn_at')
+            ->get(['id', 'athlete_id', 'total']);
+
+        $totals = [];
+        foreach ($published as $publishedPerformance) {
+            if ((int) $publishedPerformance->id === (int) $performance->id) {
+                continue;
+            }
+
+            $athleteId = (int) $publishedPerformance->athlete_id;
+            $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $publishedPerformance->total;
+        }
+
+        if ($performance->published_at !== null && $performance->total !== null && ! $performance->isWithdrawn()) {
+            $athleteId = (int) $performance->athlete_id;
+            $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $performance->total;
+        }
+
+        $currentTotal = $totals[(int) $performance->athlete_id] ?? null;
+        $place = null;
+        if ($currentTotal !== null && $currentTotal > 0.0004) {
+            $higher = collect($totals)
+                ->except([(int) $performance->athlete_id])
+                ->filter(fn (float $total) => $total > $currentTotal + 0.0004)
+                ->count();
+            $place = $higher + 1;
+        }
+
+        $placeOf = $poolAthleteIds !== null
+            ? count($poolAthleteIds)
+            : collect($totals)
+                ->except([(int) $performance->athlete_id])
+                ->filter(fn (float $total) => $total > 0.0004)
+                ->count() + 1;
+
+        return [
+            'place' => $place,
+            'place_of' => $placeOf,
+            'overall_total' => $currentTotal !== null ? round($currentTotal, 3) : null,
+            'pool_label' => $pool['label'],
+        ];
+    }
+
+    /**
      * Предварительное место гимнастки по группе (год + буква): считаем лучших
      * соперниц (по опубликованному итогу) с итогом выше текущего.
      */
     public static function provisionalPlace(Category $category, Performance $perf): ?int
     {
-        $currentTotal = $perf->total;
-        if ($currentTotal === null) {
-            return null;
-        }
-
-        $higher = Performance::query()
-            ->whereIn('category_id', self::groupCategoryIds($category))
-            ->where('is_counted', true)
-            ->whereNotNull('total')
-            ->whereNotNull('published_at')
-            ->whereNull('withdrawn_at')
-            ->where('athlete_id', '!=', $perf->athlete_id)
-            ->get(['athlete_id', 'total'])
-            ->groupBy('athlete_id')
-            ->map(fn ($g) => (float) $g->max('total'))
-            ->filter(fn (float $t) => $t > (float) $currentTotal + 0.0004)
-            ->count();
-
-        return $higher + 1;
+        return self::rankingSnapshot($category, $perf)['place'];
     }
 
     /**
@@ -143,17 +251,7 @@ class ScoreboardUi
      */
     public static function provisionalPlaceOf(Category $category, Performance $perf): int
     {
-        $distinct = Performance::query()
-            ->whereIn('category_id', self::groupCategoryIds($category))
-            ->where('is_counted', true)
-            ->whereNotNull('total')
-            ->whereNotNull('published_at')
-            ->whereNull('withdrawn_at')
-            ->where('athlete_id', '!=', $perf->athlete_id)
-            ->distinct('athlete_id')
-            ->count('athlete_id');
-
-        return $distinct + 1;
+        return self::rankingSnapshot($category, $perf)['place_of'];
     }
 
     /**
@@ -187,6 +285,7 @@ class ScoreboardUi
         }
 
         $phase = self::performancePhase($perf);
+        $isVisibleOnBoard = $perf->published_at !== null;
         $inq = $perf->inquiries->sortByDesc('id')->first();
         $judgeSlots = SecretaryLiveUi::judgeSlots($perf, $category);
         $mainSlots = collect($judgeSlots)->filter(
@@ -194,12 +293,15 @@ class ScoreboardUi
         );
         $submittedMain = $mainSlots->where('ok', true)->count();
         $requiredMain = $mainSlots->count();
-        $place = self::provisionalPlace($category, $perf);
-        $placeOf = self::provisionalPlaceOf($category, $perf);
+        $ranking = $isVisibleOnBoard ? self::rankingSnapshot($category, $perf) : null;
+        $place = $ranking['place'] ?? null;
+        $placeOf = $ranking['place_of'] ?? null;
+        $overallTotal = $ranking['overall_total'] ?? null;
+        $notPerformed = $isVisibleOnBoard && $overallTotal !== null && abs($overallTotal) < 0.0005;
 
         $rev = md5(implode('|', [
             $perf->id, $perf->status, $phase,
-            $perf->d_score, $perf->a_score, $perf->e_score, $perf->penalty, $perf->total,
+            $perf->d_score, $perf->a_score, $perf->e_score, $perf->penalty, $perf->total, $overallTotal,
             $place, $placeOf, $submittedMain, $requiredMain,
             $perf->finalized_at?->getTimestamp(), $perf->published_at?->getTimestamp(),
             $inq?->status,
@@ -219,13 +321,18 @@ class ScoreboardUi
                     ? $perf->athlete->members->map(fn ($m) => trim(($m->last_name ?? '').' '.($m->first_name ?? '')))->values()->all()
                     : [],
                 'status' => $perf->status,
-                'd' => $perf->d_score,
-                'a' => $perf->a_score,
-                'e' => $perf->e_score,
-                'penalty' => $perf->penalty,
-                'total' => $perf->total,
+                'd' => $isVisibleOnBoard ? $perf->d_score : null,
+                'a' => $isVisibleOnBoard ? $perf->a_score : null,
+                'e' => $isVisibleOnBoard ? $perf->e_score : null,
+                'penalty' => $isVisibleOnBoard ? $perf->penalty : null,
+                'apparatus_score' => $isVisibleOnBoard && $perf->total !== null ? (float) $perf->total : null,
+                'total' => $isVisibleOnBoard ? $overallTotal : null,
                 'place' => $place,
                 'place_of' => $placeOf,
+                'pool_label' => $ranking['pool_label'] ?? null,
+                'score_visible' => $isVisibleOnBoard,
+                'not_performed' => $notPerformed,
+                'actual_duration_seconds' => $perf->actual_duration_seconds,
                 'finalized_at' => $perf->finalized_at?->toIso8601String(),
                 'published_at' => $perf->published_at?->toIso8601String(),
                 'inquiry_status' => $inq?->status,
@@ -249,7 +356,7 @@ class ScoreboardUi
         return Tournament::query()
             ->where('is_published', true)
             ->whereHas('categories', fn ($q) => $q->where('is_published', true))
-            ->with(['categories' => fn ($q) => $q->where('is_published', true)->orderBy('id')])
+            ->with(['categories' => fn ($q) => $q->where('is_published', true)->orderedByPerformanceTime()])
             ->orderByDesc('id')
             ->get();
     }

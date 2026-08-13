@@ -49,6 +49,11 @@ class User extends Authenticatable
         return $this->role === 'chief_judge';
     }
 
+    public function isScoreboardJudge(): bool
+    {
+        return $this->role === 'scoreboard_judge';
+    }
+
     /**
      * Замена музыки после дедлайна категории (секретариат / админ).
      */

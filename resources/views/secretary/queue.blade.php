@@ -17,6 +17,11 @@
     if ($d !== null && $a !== null && $e !== null) {
         $sumDisplay = (float) $d + (float) $a + (float) $e - (float) ($pen ?? 0);
     }
+    $durationBounds = $currentPerformance?->durationBounds();
+    $durationNorm = $durationBounds ? sprintf('%d:%02d–%d:%02d', intdiv($durationBounds['min'], 60), $durationBounds['min'] % 60, intdiv($durationBounds['max'], 60), $durationBounds['max'] % 60) : null;
+    $canApproveFinal = in_array(auth()->user()?->role, ['secretary', 'organising_committee', 'chief_judge', 'admin', 'super_admin'], true);
+    $manualAveragesReady = $currentPerformance
+        && \App\Support\SecretaryLiveUi::requiredManualAveragesSubmitted($currentPerformance, $category);
 @endphp
 
 <x-app-layout>
@@ -120,6 +125,30 @@
 
                 @if($currentPerformance)
                     <?php $isGroupProgram = $category->program === 'group' || $currentPerformance->athlete?->is_team; ?>
+                    <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div class="rounded-xl border border-sky-800/60 bg-sky-950/20 p-3" data-performance-timer
+                             data-running="{{ $currentPerformance->timer_started_at && ! $currentPerformance->timer_ended_at ? '1' : '0' }}"
+                             data-started-at="{{ $currentPerformance->timer_started_at?->toIso8601String() }}"
+                             data-duration="{{ $currentPerformance->actual_duration_seconds }}">
+                            <div class="text-[10px] uppercase tracking-wider text-sky-200/70">Фактическое время выступления · хронометрист</div>
+                            <div class="mt-1 font-mono text-2xl font-bold tabular-nums text-sky-100" data-performance-timer-value>—</div>
+                            <div class="mt-1 text-xs text-slate-400">Норматив: {{ $durationNorm ?? '—' }} · вне норматива: −0,05 за секунду</div>
+                            @if((float) ($currentPerformance->time_penalty ?? 0) > 0)
+                                <div class="mt-1 text-xs text-rose-300">Сбавка времени: −{{ number_format((float) $currentPerformance->time_penalty, 2, ',', ' ') }}</div>
+                            @endif
+                        </div>
+                        @if($currentPerformance->track)
+                            <div class="rounded-xl border border-violet-800/60 bg-violet-950/20 p-3">
+                                <div class="text-[10px] uppercase tracking-wider text-violet-200/70">Музыка выхода</div>
+                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                    <audio id="live-performance-audio" preload="none" src="{{ route('tracks.play', $currentPerformance->track) }}"></audio>
+                                    <button type="button" id="live-performance-audio-toggle" class="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-600">▶ Запустить музыку</button>
+                                    <a href="{{ route('tracks.download', $currentPerformance->track) }}" class="text-xs text-violet-200 hover:underline">Скачать файл</a>
+                                </div>
+                                <p class="mt-1 text-xs text-slate-400">Музыка запускается отдельно и не влияет на таймер.</p>
+                            </div>
+                        @endif
+                    </div>
                     <div class="mt-4 rounded-xl border {{ $isGroupProgram ? 'border-amber-700/60 bg-amber-950/15' : 'border-slate-700/80 bg-slate-950/60' }} p-4">
                         <div class="flex items-center justify-between gap-2">
                             <div class="text-xs uppercase tracking-wider text-slate-500">{{ $isGroupProgram ? 'Текущая команда' : 'Текущая гимнастка' }}</div>
@@ -265,14 +294,10 @@
                     <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. При включённом автопереходе после слотов <span class="text-slate-400">DB1, DA1, A1–A4, E1–E4</span> поток сам перейдёт к следующей (LINE/RESP не обязательны). Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
-                    <form method="POST" action="{{ route('secretary.category.autoAdvance', $category) }}" class="inline">
-                        @csrf
-                        <input type="hidden" name="enabled" value="{{ $category->auto_advance ? 0 : 1 }}">
-                        <button type="submit" class="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500/50 {{ $category->auto_advance ? 'border-emerald-600/80 bg-emerald-950/50 text-emerald-100' : 'border-slate-600 bg-slate-900 text-slate-400 hover:border-slate-500' }}">
-                            <span class="h-2 w-2 rounded-full {{ $category->auto_advance ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-slate-500' }}"></span>
-                            Автопереход: {{ $category->auto_advance ? 'Вкл' : 'Выкл' }}
-                        </button>
-                    </form>
+                    <span class="inline-flex items-center gap-2 rounded-lg border border-emerald-600/80 bg-emerald-950/50 px-2.5 py-1.5 font-medium text-emerald-100">
+                        <span class="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></span>
+                        Автопереход: всегда включён
+                    </span>
                     <span class="rounded-lg border px-2.5 py-1 {{ ($panelSpread['has_violation'] ?? false) ? 'border-rose-700/60 bg-rose-950/40 text-rose-100' : 'border-emerald-800/60 bg-emerald-950/40 text-emerald-100' }}">
                         Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}:
                         {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
@@ -302,20 +327,35 @@
                             </li>
                         @endforeach
                     </ul>
-                    <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="mt-3"
-                          onsubmit="return confirm('Подтвердить итог несмотря на расхождение оценок?');">
-                        @csrf
-                        <button type="submit" class="rounded-lg bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow">
-                            Подтвердить итог (расхождение согласовано)
-                        </button>
-                    </form>
+                    @if(! $manualAveragesReady)
+                        <div class="mt-3 text-xs text-amber-200">Ожидаются отдельные ручные средние от DB1 и DA1.</div>
+                    @elseif($canApproveFinal)
+                        <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="mt-3"
+                              onsubmit="return confirm('Подтвердить итог несмотря на расхождение оценок?');">
+                            @csrf
+                            <button type="submit" class="rounded-lg bg-emerald-700 hover:bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow">
+                                ✓ Подтвердить итог
+                            </button>
+                        </form>
+                    @else
+                        <div class="mt-3 text-xs text-amber-200">Итог ожидает подтверждения секретарём или главным судьёй.</div>
+                    @endif
                 </div>
             @endif
 
+            @php
+                $manualAverageRows = $currentPerformance
+                    ? \App\Support\SecretaryLiveUi::scoreRowsBySlot($currentPerformance, $category)
+                    : [];
+                $db1ManualAverage = $manualAverageRows['DB1'] ?? null;
+                $da1ManualAverage = $manualAverageRows['DA1'] ?? null;
+            @endphp
             <div class="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div class="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-center">
                     <div class="text-xs text-slate-500 uppercase">D</div>
                     <div class="mt-1 text-2xl font-semibold text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($d !== null ? (float) $d : null) }}</div>
+                    <div class="mt-1 text-[10px] text-slate-500">Авто: DB {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->db_average !== null ? (float) $currentPerformance->db_average : null) }} · DA {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->da_average !== null ? (float) $currentPerformance->da_average : null) }}</div>
+                    <div class="mt-1 text-[10px] font-semibold text-cyan-300">Ручные: DB1 {{ \App\Support\SecretaryLiveUi::formatScore($db1ManualAverage?->average_submitted_at !== null ? (float) $db1ManualAverage->average_score : null) }} · DA1 {{ \App\Support\SecretaryLiveUi::formatScore($da1ManualAverage?->average_submitted_at !== null ? (float) $da1ManualAverage->average_score : null) }}</div>
                 </div>
                 <div class="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-center">
                     <div class="text-xs text-slate-500 uppercase">A</div>
@@ -416,6 +456,29 @@
                         Клик по оценке в таблице выше — история выставления.
                     </p>
 
+                    <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                        @foreach([
+                            ['slot' => 'DB1', 'label' => 'Ручная средняя DB', 'row' => $db1ManualAverage],
+                            ['slot' => 'DA1', 'label' => 'Ручная средняя DA', 'row' => $da1ManualAverage],
+                        ] as $averageItem)
+                            @php
+                                $averageRow = $averageItem['row'];
+                                $averageReady = $averageRow?->average_submitted_at !== null && $averageRow?->average_score !== null;
+                            @endphp
+                            <div class="rounded-lg border {{ $averageReady ? 'border-cyan-700/60 bg-cyan-950/25' : 'border-amber-800/50 bg-amber-950/20' }} px-3 py-2.5">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div class="text-[10px] font-semibold uppercase tracking-wider {{ $averageReady ? 'text-cyan-300' : 'text-amber-300' }}">{{ $averageItem['label'] }} · {{ $averageItem['slot'] }}</div>
+                                        <div class="mt-0.5 text-xs text-slate-500">Второй ручной ввод после основной оценки</div>
+                                    </div>
+                                    <div class="font-mono text-2xl font-bold tabular-nums {{ $averageReady ? 'text-cyan-100' : 'text-amber-200' }}">
+                                        {{ $averageReady ? number_format((float) $averageRow->average_score, 3, '.', '') : 'ожидание' }}
+                                    </div>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+
                     @if($editableSlots->isEmpty())
                         <p class="mt-3 text-sm text-slate-500">Пока нет выставленных оценок для редактирования.</p>
                     @else
@@ -444,7 +507,7 @@
                                         </button>
                                     </form>
                                     <form method="POST" action="{{ route('secretary.performance.returnScores', $currentPerformance) }}" class="mt-1.5"
-                                          onsubmit="return confirm('Вернуть оценку {{ $col }} судье на доработку?');">
+                                          @if(! $isPen) onsubmit="return confirm('Вернуть оценку {{ $col }} судье на доработку?');" @endif>
                                         @csrf
                                         <input type="hidden" name="slot" value="{{ $col }}">
                                         <button type="submit" class="w-full rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 hover:text-slate-100">
@@ -460,7 +523,7 @@
                         <span class="w-full text-[10px] uppercase tracking-wider text-slate-500 mb-1">Вернуть панель целиком</span>
                         @foreach(['db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Штрафы'] as $pKey => $pLabel)
                             <form method="POST" action="{{ route('secretary.performance.returnScores', $currentPerformance) }}" class="inline"
-                                  onsubmit="return confirm('Вернуть все оценки панели {{ $pLabel }} судьям?');">
+                                  @if($pKey !== 'penalty') onsubmit="return confirm('Вернуть все оценки панели {{ $pLabel }} судьям?');" @endif>
                                 @csrf
                                 <input type="hidden" name="panel" value="{{ $pKey }}">
                                 <button type="submit" class="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white">
@@ -476,14 +539,20 @@
                                 ↩ Все оценки
                             </button>
                         </form>
-                        @if($currentPerformance->finalized_at === null && \App\Support\SecretaryLiveUi::requiredScoresSubmitted($currentPerformance, $category))
-                            <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="inline ml-auto"
-                                  onsubmit="return confirm('Подтвердить и зафиксировать итог?');">
-                                @csrf
-                                <button type="submit" class="rounded-md border border-emerald-700/70 bg-emerald-900/40 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800/50">
-                                    ✓ Подтвердить итог
-                                </button>
-                            </form>
+                        @if($currentPerformance->approved_at === null && \App\Support\SecretaryLiveUi::requiredScoresSubmitted($currentPerformance, $category))
+                            @if(! $manualAveragesReady)
+                                <span class="ml-auto text-xs text-amber-200">Ожидаются ручные средние DB1 и DA1</span>
+                            @elseif($canApproveFinal)
+                                <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="inline ml-auto"
+                                      onsubmit="return confirm('Подтвердить и зафиксировать итог?');">
+                                    @csrf
+                                    <button type="submit" class="rounded-md border border-emerald-700/70 bg-emerald-900/40 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800/50">
+                                        ✓ Подтвердить итог
+                                    </button>
+                                </form>
+                            @else
+                                <span class="ml-auto text-xs text-amber-200">Ожидается подтверждение секретаря или главного судьи</span>
+                            @endif
                         @endif
                     </div>
 
@@ -618,8 +687,13 @@
                             </select>
                         </div>
                         <div>
-                            <x-input-label value="Снаряд (опц.)" />
-                            <x-text-input name="apparatus" class="mt-1 block w-full" placeholder="{{ $category->apparatus ?? 'Вид 1' }}" />
+                            <x-input-label value="Вид / предмет" />
+                            <select name="apparatus" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
+                                <option value="">{{ $category->apparatus ?? '— выберите —' }}</option>
+                                @foreach(\App\Support\PerformanceApparatus::RG_APPARATUS as $apparatus)
+                                    <option value="{{ $apparatus }}">{{ $apparatus }}</option>
+                                @endforeach
+                            </select>
                         </div>
                         <div>
                             <x-input-label value="Старт № (опц.)" />
@@ -692,6 +766,7 @@
                                     <th class="py-3 pr-4 font-medium w-28">Предмет</th>
                                     <th class="py-3 pr-4 font-medium w-48">Клуб</th>
                                     <th class="py-3 pr-4 font-medium w-28">Статус</th>
+                                    <th class="py-3 pr-4 font-medium w-28">План / факт</th>
                                     <th class="py-3 pr-4 font-medium w-36">Музыка</th>
                                     <th class="py-3 text-right font-medium w-56">Действия</th>
                                 </tr>
@@ -714,6 +789,14 @@
                                         <td class="py-3 pr-4"><x-badge :tone="$tone === 'gray' ? 'violet' : $tone">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</x-badge></td>
                                         <td class="py-3 pr-4 text-slate-400 truncate">{{ $p->athlete->club ?? '—' }}</td>
                                         <td class="py-3 pr-4"><x-badge :tone="$tone">{{ $p->status }}</x-badge></td>
+                                        <td class="py-3 pr-4 text-xs text-slate-300">
+                                            <div class="font-mono text-emerald-200">{{ $p->scheduled_at_label ?? '—' }}</div>
+                                            @if($p->actual_duration_seconds !== null)
+                                                <div class="mt-0.5 font-mono text-sky-200" title="Фактическое время выступления">
+                                                    факт {{ intdiv($p->actual_duration_seconds, 60) }}:{{ str_pad((string) ($p->actual_duration_seconds % 60), 2, '0', STR_PAD_LEFT) }}
+                                                </div>
+                                            @endif
+                                        </td>
                                         <td class="py-3 pr-4 text-xs">
                                             @if($t)
                                                 <a class="text-emerald-400 hover:underline" href="{{ route('tracks.download', $t) }}">Файл</a>
@@ -766,6 +849,12 @@
                                             <x-badge :tone="$tone === 'gray' ? 'violet' : $tone">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</x-badge>
                                             <x-badge :tone="$tone">{{ $p->status }}</x-badge>
                                             <span class="text-slate-500 truncate">{{ $p->athlete->club ?? '—' }}</span>
+                                            @if($p->scheduled_at_label)
+                                                <span class="font-mono text-emerald-200">план {{ $p->scheduled_at_label }}</span>
+                                            @endif
+                                            @if($p->actual_duration_seconds !== null)
+                                                <span class="font-mono text-sky-200">факт {{ intdiv($p->actual_duration_seconds, 60) }}:{{ str_pad((string) ($p->actual_duration_seconds % 60), 2, '0', STR_PAD_LEFT) }}</span>
+                                            @endif
                                         </div>
                                         <div class="mt-1 text-xs">
                                             @if($t)
@@ -829,6 +918,9 @@
 
     const slotActions = (slot, score) => {
         if (! updateUrl || ! returnUrl) return '';
+        const returnConfirm = /^(LINE|TIME|RESP)/.test(slot)
+            ? ''
+            : ` onsubmit="return confirm('Вернуть оценку ${esc(slot)} судье на доработку?');"`;
         return `
             <div class="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-800 pt-3">
                 <form method="POST" action="${esc(updateUrl)}" class="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -839,7 +931,7 @@
                            class="flex-1 rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-xs py-1.5 px-2 font-mono">
                     <button type="submit" class="rounded-md border border-amber-700/60 bg-amber-900/30 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-800/40">Сохранить</button>
                 </form>
-                <form method="POST" action="${esc(returnUrl)}" onsubmit="return confirm('Вернуть оценку ${esc(slot)} судье на доработку?');">
+                <form method="POST" action="${esc(returnUrl)}"${returnConfirm}>
                     <input type="hidden" name="_token" value="${esc(csrf)}">
                     <input type="hidden" name="slot" value="${esc(slot)}">
                     <button type="submit" class="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">↩ На доработку</button>
@@ -1078,10 +1170,64 @@
 </script>
 <script>
 (function () {
+    const pageRoot = document.querySelector('[data-async-page]');
+    const formatDuration = (seconds) => {
+        const value = Math.max(0, Math.floor(Number(seconds) || 0));
+        return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
+    };
+
+    const timer = document.querySelector('[data-performance-timer]');
+    if (timer) {
+        const value = timer.querySelector('[data-performance-timer-value]');
+        const startedAt = Date.parse(timer.dataset.startedAt || '');
+        const savedDuration = timer.dataset.duration === '' ? null : Number(timer.dataset.duration);
+        const render = () => {
+            const seconds = timer.dataset.running === '1' && Number.isFinite(startedAt)
+                ? Math.max(0, (Date.now() - startedAt) / 1000)
+                : savedDuration;
+            if (value) value.textContent = seconds === null || !Number.isFinite(seconds) ? '—' : formatDuration(seconds);
+        };
+        render();
+        if (timer.dataset.running === '1') {
+            const timerInterval = setInterval(() => {
+                if (pageRoot && ! pageRoot.isConnected) {
+                    clearInterval(timerInterval);
+                    return;
+                }
+                render();
+            }, 250);
+        }
+    }
+
+    const audio = document.getElementById('live-performance-audio');
+    const audioButton = document.getElementById('live-performance-audio-toggle');
+    if (audio && audioButton) {
+        audioButton.addEventListener('click', async () => {
+            if (audio.paused) {
+                try {
+                    await audio.play();
+                    audioButton.textContent = '❚❚ Остановить музыку';
+                } catch (e) {}
+            } else {
+                audio.pause();
+                audioButton.textContent = '▶ Запустить музыку';
+            }
+        });
+        audio.addEventListener('ended', () => { audioButton.textContent = '▶ Запустить музыку'; });
+    }
+})();
+</script>
+<script>
+(function () {
+    const pageRoot = document.querySelector('[data-async-page]');
     const pingUrl = @json(route('secretary.queue.ping', $category).($streamSession ? '?session='.$streamSession->id : ''));
     let lastRev = null;
     const intervalMs = 3000;
-    setInterval(async function () {
+    const pingInterval = setInterval(async function () {
+        if (pageRoot && ! pageRoot.isConnected) {
+            clearInterval(pingInterval);
+            return;
+        }
         try {
             const r = await fetch(pingUrl, {
                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1096,7 +1242,11 @@
                 return;
             }
             if (j.rev !== lastRev) {
-                window.location.reload();
+                if (window.JudgeAsync) {
+                    await window.JudgeAsync.refresh(window.location.href, { silent: true });
+                } else {
+                    window.location.reload();
+                }
             }
         } catch (e) {}
     }, intervalMs);

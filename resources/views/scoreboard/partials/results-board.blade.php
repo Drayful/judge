@@ -9,7 +9,7 @@
 
     <div id="boardRoot" class="{{ $rows->isEmpty() ? 'hidden' : '' }} flex-1 min-h-0 flex flex-col gap-4">
         <div id="podium" class="sb-podium">
-            @foreach($rows->take(3) as $idx => $p)
+            @foreach($rows->where('status', 'ranked')->take(3)->values() as $idx => $p)
                 @php
                     $place = $p->place;
                     $cardClass = match ($idx) {
@@ -50,15 +50,19 @@
                     };
                 @endphp
                 <div class="sb-row" data-row-key="{{ $p->id }}" data-row-total="{{ $p->total }}">
-                    <span class="sb-place {{ $placeCls }}">{{ $place }}</span>
+                    <span class="sb-place {{ $placeCls }}">{{ $p->status === 'not_performed' ? '—' : $place }}</span>
                     <span class="hidden sm:block text-sm tabular-nums text-slate-500 font-medium">{{ $p->start_number ?? '—' }}</span>
                     <div class="min-w-0">
                         <div class="text-sm sm:text-base font-semibold text-slate-100 truncate">
                             {{ $p->athlete->last_name }} {{ $p->athlete->first_name }}
                         </div>
                         <div class="text-xs text-slate-500 truncate hidden sm:block">{{ $p->athlete->club ?? '' }}</div>
+                        @if($p->status === 'not_performed')
+                            <div class="text-xs text-amber-300">Не выступила</div>
+                        @endif
                     </div>
                     <div class="hidden sm:flex gap-3 text-xs tabular-nums text-slate-400">
+                        <span>Вид {{ $p->apparatus ?? '—' }}: {{ $p->apparatus_score !== null ? number_format($p->apparatus_score, 3) : '—' }}</span>
                         @if(count($p->vidi ?? []) > 1)
                             <span>Виды: {{ collect($p->vidi)->map(fn ($v) => number_format($v, 3))->implode(' + ') }}</span>
                         @else
@@ -89,6 +93,8 @@
     const status = document.getElementById('liveStatus');
     const liveUpdatedAt = document.getElementById('liveUpdatedAt');
     const prevTotals = new Map();
+    let acceptedIds = new Set();
+    let hasLiveSnapshot = false;
     document.querySelectorAll('[data-row-key]').forEach(el => prevTotals.set(el.dataset.rowKey, el.dataset.rowTotal));
 
     const podiumOrder = [1, 0, 2];
@@ -111,6 +117,14 @@
         }
     }
 
+    function announce(row) {
+        if (!('speechSynthesis' in window) || row.status === 'not_performed') return;
+        window.speechSynthesis.cancel();
+        const place = row.place ? `место ${row.place}. ` : '';
+        const kind = row.apparatus ? `Вид ${row.apparatus}: ${fmt3(row.apparatus_score)}. ` : '';
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(`${place}${row.athlete}. ${kind}Итог ${fmt3(row.total)}.`));
+    }
+
     function render(rows) {
         if (!rows.length) {
             empty.classList.remove('hidden');
@@ -120,7 +134,7 @@
         empty.classList.add('hidden');
         boardRoot.classList.remove('hidden');
 
-        const top3 = rows.slice(0, 3);
+        const top3 = rows.filter(r => r.status !== 'not_performed').slice(0, 3);
         podium.innerHTML = top3.map((r, i) => {
             const place = Number(r.place);
             const medal = place === 1 ? 'sb-medal sb-medal--gold'
@@ -144,13 +158,15 @@
             if (prevTotals.has(key) && prevTotals.get(key) !== totalStr) changed.add(key);
             return `
                 <div class="sb-row" data-row-key="${esc(key)}" data-row-total="${esc(totalStr)}">
-                    <span class="sb-place ${placeCls(r.place)}">${esc(r.place)}</span>
+                    <span class="sb-place ${placeCls(r.place)}">${r.status === 'not_performed' ? '—' : esc(r.place)}</span>
                     <span class="hidden sm:block text-sm tabular-nums text-slate-500 font-medium">${r.start_number ?? '—'}</span>
                     <div class="min-w-0">
                         <div class="text-sm sm:text-base font-semibold text-slate-100 truncate">${esc(r.athlete)}</div>
                         <div class="text-xs text-slate-500 truncate hidden sm:block">${esc(r.club ?? '')}</div>
+                        ${r.status === 'not_performed' ? '<div class="text-xs text-amber-300">Не выступила</div>' : ''}
                     </div>
                     <div class="hidden sm:flex gap-3 text-xs tabular-nums text-slate-400">
+                        <span>Вид ${esc(r.apparatus ?? '—')}: ${fmt3(r.apparatus_score)}</span>
                         ${(r.vidi && r.vidi.length > 1)
                             ? '<span>Виды: ' + r.vidi.map(fmt3).join(' + ') + '</span>'
                             : '<span>D ' + fmt3(r.d) + '</span><span>A ' + fmt3(r.a) + '</span><span>E ' + fmt3(r.e) + '</span>'}
@@ -183,6 +199,12 @@
             status.textContent = 'Live · ' + data.rows.length + ' участниц';
             if (data.rev && data.rev === lastRev) return; // без изменений — не перерисовываем
             lastRev = data.rev;
+            const nextAccepted = new Set(data.rows.filter(r => r.accepted_at).map(r => String(r.id)));
+            if (hasLiveSnapshot) {
+                data.rows.filter(r => r.accepted_at && !acceptedIds.has(String(r.id))).forEach(announce);
+            }
+            acceptedIds = nextAccepted;
+            hasLiveSnapshot = true;
             render(data.rows);
         } catch (e) {
             status.textContent = 'Ошибка обновления';

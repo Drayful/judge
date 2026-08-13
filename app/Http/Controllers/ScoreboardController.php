@@ -111,7 +111,7 @@ class ScoreboardController extends Controller
         return Category::query()
             ->where('tournament_id', $tournament->id)
             ->where('is_published', true)
-            ->orderBy('id')
+            ->orderedByPerformanceTime()
             ->first();
     }
 
@@ -167,8 +167,12 @@ class ScoreboardController extends Controller
                     'a_score' => $latest->a_score,
                     'e_score' => $latest->e_score,
                     'penalty' => $latest->penalty,
+                    'apparatus' => $latest->apparatus,
+                    'apparatus_score' => $latest->total,
+                    'scoreboard_accepted_at' => $latest->scoreboard_accepted_at,
                     'vidi' => $vidi,
                     'total' => $rank['total'],
+                    'status' => $rank['status'] ?? 'ranked',
                 ];
             })
             ->filter()
@@ -198,8 +202,12 @@ class ScoreboardController extends Controller
                     'a' => $row->a_score,
                     'e' => $row->e_score,
                     'penalty' => $row->penalty,
+                    'apparatus' => $row->apparatus,
+                    'apparatus_score' => $row->apparatus_score,
                     'vidi' => $row->vidi,
                     'total' => $row->total,
+                    'status' => $row->status,
+                    'accepted_at' => $row->scoreboard_accepted_at?->toIso8601String(),
                 ];
             })
             ->values()

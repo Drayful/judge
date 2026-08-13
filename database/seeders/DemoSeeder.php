@@ -33,6 +33,11 @@ class DemoSeeder extends Seeder
             ['name' => 'Chief Judge', 'password' => Hash::make('password'), 'role' => 'chief_judge'],
         );
 
+        User::query()->updateOrCreate(
+            ['email' => 'scoreboard@local.test'],
+            ['name' => 'Scoreboard Judge', 'password' => Hash::make('password'), 'role' => 'scoreboard_judge'],
+        );
+
         // Универсальный «judge_a» — используется во многих местах как «общий судья».
         User::query()->updateOrCreate(
             ['email' => 'judge@local.test'],

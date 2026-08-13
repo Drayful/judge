@@ -405,6 +405,8 @@ class ScoringSystemTest extends TestCase
         foreach (['E1', 'E2', 'E3', 'E4'] as $i => $slot) {
             $this->addScore($perf, 'e', $eScores[$i], null, null, $slot);
         }
+
+        $this->submitRequiredManualAverages($perf);
     }
 
     public function test_panel_spread_ok_when_difference_within_one(): void
@@ -524,6 +526,29 @@ class ScoringSystemTest extends TestCase
     {
         foreach (['DB1', 'DB2', 'DA1', 'DA2'] as $i => $slot) {
             $this->addScore($perf, 'd', $scores[$i], 'db', null, $slot);
+        }
+
+        $this->submitRequiredManualAverages($perf);
+    }
+
+    private function submitRequiredManualAverages(Performance $perf): void
+    {
+        $perf->unsetRelation('judgeScores');
+        $rows = SecretaryLiveUi::scoreRowsBySlot($perf, $perf->category);
+
+        foreach ([['DB1', 'DB2'], ['DA1', 'DA2']] as [$leaderSlot, $secondSlot]) {
+            $leader = $rows[$leaderSlot] ?? null;
+            if ($leader === null) {
+                continue;
+            }
+
+            $values = collect([$leader, $rows[$secondSlot] ?? null])
+                ->filter()
+                ->pluck('score');
+            $leader->update([
+                'average_score' => $values->avg(),
+                'average_submitted_at' => now(),
+            ]);
         }
     }
 

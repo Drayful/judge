@@ -5,10 +5,13 @@ namespace Tests\Feature;
 use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\Entry;
+use App\Models\Group;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Models\User;
+use App\Services\StreamBuilderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Tests\TestCase;
 
 class GroupStreamBuilderTest extends TestCase
@@ -35,6 +38,65 @@ class GroupStreamBuilderTest extends TestCase
         }
     }
 
+    /**
+     * @return array{groups:array{Group,Group},entries:Collection<int, Entry>,sheet:string}
+     */
+    private function seedImportedTeamsInTwoGroups(Tournament $tournament): array
+    {
+        $sheet = 'Групповые 2016-2017, МС';
+        $groups = [
+            Group::create([
+                'tournament_id' => $tournament->id,
+                'program' => 'group',
+                'birth_year' => 2016,
+                'name' => 'Групповые — старшая',
+                'apparatus' => ['Мяч'],
+                'number_mode' => 'continuous',
+                'order_index' => 1,
+            ]),
+            Group::create([
+                'tournament_id' => $tournament->id,
+                'program' => 'group',
+                'birth_year' => 2010,
+                'name' => 'Групповые — младшая',
+                'apparatus' => ['Мяч'],
+                'number_mode' => 'continuous',
+                'order_index' => 2,
+            ]),
+        ];
+
+        $entries = collect();
+        foreach (range(1, 4) as $index) {
+            $group = $groups[$index <= 2 ? 0 : 1];
+            $athlete = Athlete::create([
+                'first_name' => '—',
+                'last_name' => 'Команда '.$index,
+                'is_team' => true,
+            ]);
+            $entries->push(Entry::create([
+                'tournament_id' => $tournament->id,
+                'athlete_id' => $athlete->id,
+                'group_id' => $group->id,
+                'program' => 'group',
+                'birth_year' => $group->birth_year,
+                'stream_no' => 1,
+                'start_number' => (($index - 1) % 2) + 1,
+                'order_index' => (($index - 1) % 2) + 1,
+                'meta' => [
+                    'sheet' => $sheet,
+                    'members' => ['Гимнастка '.$index.'.1', 'Гимнастка '.$index.'.2'],
+                ],
+            ]));
+        }
+
+        $builder = app(StreamBuilderService::class);
+        foreach ($groups as $group) {
+            $builder->renumber($group);
+        }
+
+        return compact('groups', 'entries', 'sheet');
+    }
+
     public function test_builder_page_renders(): void
     {
         $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
@@ -45,6 +107,47 @@ class GroupStreamBuilderTest extends TestCase
             ->assertOk()
             ->assertSee('Пул участниц')
             ->assertSee('2018 г.р.');
+    }
+
+    public function test_unassigned_athlete_can_be_moved_between_existing_pools_one_at_a_time(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 2, 2018, 'A');
+        $this->seedPool($tournament, 1, 2017, 'B');
+
+        $source = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('birth_year', 2018)
+            ->firstOrFail();
+        $target = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('birth_year', 2017)
+            ->firstOrFail();
+        $source->update(['meta' => ['label' => '2018 и младше', 'sheet' => '2018 A']]);
+        $target->update(['meta' => ['label' => '2017 год', 'sheet' => '2017 B']]);
+
+        $this->actingAs($this->secretary())
+            ->get(route('secretary.tournament.groups', $tournament))
+            ->assertOk()
+            ->assertSee('Выберите целевой пул')
+            ->assertSee('2017 год');
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.entries.move-pool', [$tournament, $source]), [
+                'target_entry_id' => $target->id,
+            ])
+            ->assertRedirect(route('secretary.tournament.groups', $tournament))
+            ->assertSessionHas('status');
+
+        $source->refresh();
+        $this->assertNull($source->group_id);
+        $this->assertSame('individual', $source->program);
+        $this->assertSame(2017, $source->birth_year);
+        $this->assertSame('B', $source->division);
+        $this->assertSame('2017 год', $source->meta['label']);
+        $this->assertSame('2018 A', $source->meta['sheet']);
+        $this->assertSame(1, Entry::query()->where('tournament_id', $tournament->id)->where('birth_year', 2018)->where('division', 'A')->count());
+        $this->assertSame(2, Entry::query()->where('tournament_id', $tournament->id)->where('birth_year', 2017)->where('division', 'B')->count());
     }
 
     public function test_create_group_and_generate_streams(): void
@@ -70,7 +173,7 @@ class GroupStreamBuilderTest extends TestCase
                 'stream_size' => 12,
                 'number_mode' => 'continuous',
                 'start_time' => '08:00',
-                'block_minutes' => 25,
+                'minutes_per_athlete' => 2,
             ])->assertRedirect(route('secretary.tournament.groups', $tournament));
 
         // 3 потока (12/12/2)
@@ -88,14 +191,91 @@ class GroupStreamBuilderTest extends TestCase
         // Время первого потока проставлено.
         $first = $categories->firstWhere('stream_no', 1);
         $this->assertSame('08:00', $first->starts_at_label);
-        $this->assertSame('08:25', $first->ends_at_label);
+        $this->assertSame('08:48', $first->ends_at_label);
         // Время попадает в название потока.
-        $this->assertStringContainsString('Поток 1 (08:00–08:25)', $first->name);
+        $this->assertStringContainsString('Поток 1 (08:00–08:48)', $first->name);
 
         // Круг-за-кругом: первое выступление 1-го потока — БП стартового №1.
         $firstPerf = Performance::where('category_id', $first->id)->orderBy('order_index')->first();
         $this->assertSame('БП', $firstPerf->apparatus);
         $this->assertSame(1, (int) $firstPerf->start_number);
+    }
+
+    public function test_queue_add_and_remove_recalculate_participant_times_and_following_streams(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 3);
+        $secretary = $this->secretary();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.store', $tournament), [
+            'program' => 'individual',
+            'birth_year' => 2018,
+            'division' => 'C',
+            'apparatus' => ['Б.П.'],
+            'number_mode' => 'continuous',
+        ]);
+        $group = $tournament->groups()->firstOrFail();
+
+        $this->actingAs($secretary)->post(route('secretary.tournament.groups.streams', [$tournament, $group]), [
+            'stream_size' => 2,
+            'start_time' => '08:00',
+            'minutes_per_athlete' => 2,
+        ]);
+
+        $first = Category::query()->where('group_id', $group->id)->where('stream_no', 1)->firstOrFail();
+        $second = Category::query()->where('group_id', $group->id)->where('stream_no', 2)->firstOrFail();
+        $this->assertSame('08:04', $first->ends_at_label);
+        $this->assertSame('08:04', $second->starts_at_label);
+
+        $extra = Athlete::create(['first_name' => 'Новая', 'last_name' => 'Участница']);
+        $this->actingAs($secretary)
+            ->post(route('secretary.queue.add', $first), [
+                'athlete_id' => $extra->id,
+                'apparatus' => 'Б.П.',
+            ])
+            ->assertRedirect();
+
+        $first->refresh();
+        $second->refresh();
+        $added = Performance::query()->where('category_id', $first->id)->where('athlete_id', $extra->id)->firstOrFail();
+        $this->assertSame('08:04', $added->scheduled_at_label);
+        $this->assertSame('08:06', $first->ends_at_label);
+        $this->assertSame('08:06', $second->starts_at_label);
+        $this->assertSame('08:08', $second->ends_at_label);
+
+        $secondApparatus = $this->actingAs($secretary)
+            ->post(route('secretary.queue.add', $first), [
+                'athlete_id' => $extra->id,
+                'apparatus' => 'Мяч',
+            ]);
+        $secondApparatus->assertRedirect();
+
+        $first->refresh();
+        $second->refresh();
+        $extraPerformances = Performance::query()
+            ->where('category_id', $first->id)
+            ->where('athlete_id', $extra->id)
+            ->orderBy('order_index')
+            ->get();
+        $this->assertCount(2, $extraPerformances);
+        $this->assertSame(['08:04', '08:06'], $extraPerformances->pluck('scheduled_at_label')->all());
+        $this->assertSame('08:08', $first->ends_at_label);
+        $this->assertSame('08:08', $second->starts_at_label);
+        $this->assertSame('08:10', $second->ends_at_label);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.queue.remove', $extraPerformances->last()))
+            ->assertRedirect();
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.queue.remove', $added))
+            ->assertRedirect();
+
+        $first->refresh();
+        $second->refresh();
+        $this->assertSame('08:04', $first->ends_at_label);
+        $this->assertSame('08:04', $second->starts_at_label);
+        $this->assertSame('08:06', $second->ends_at_label);
     }
 
     public function test_shuffle_keeps_stream_membership_and_number_set(): void
@@ -132,6 +312,111 @@ class GroupStreamBuilderTest extends TestCase
         foreach (Category::where('group_id', $group->id)->get() as $cat) {
             $this->assertSame(10, Performance::where('category_id', $cat->id)->count());
         }
+    }
+
+    public function test_imported_group_teams_can_be_shuffled_between_groups_from_the_same_excel_sheet(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        ['groups' => $groups, 'entries' => $entries, 'sheet' => $sheet] = $this->seedImportedTeamsInTwoGroups($tournament);
+        $before = $entries->pluck('group_id', 'id')->all();
+
+        $this->actingAs($this->secretary())
+            ->get(route('secretary.tournament.groups', $tournament))
+            ->assertOk()
+            ->assertSee('Перемешать групповые команды из Excel')
+            ->assertSee($sheet);
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.groups.shuffle-imported-teams', $tournament), ['sheet' => $sheet])
+            ->assertRedirect(route('secretary.tournament.groups', $tournament))
+            ->assertSessionHas('status');
+
+        $after = Entry::query()->whereKey($entries->pluck('id'))->pluck('group_id', 'id')->all();
+        $this->assertNotSame($before, $after);
+        $this->assertSame(2, Entry::query()->where('group_id', $groups[0]->id)->count());
+        $this->assertSame(2, Entry::query()->where('group_id', $groups[1]->id)->count());
+
+        foreach ($groups as $group) {
+            $category = Category::query()->where('group_id', $group->id)->firstOrFail();
+            $this->assertSame(2, Performance::query()->where('category_id', $category->id)->count());
+        }
+
+        $this->assertSame(
+            ['Гимнастка 1.1', 'Гимнастка 1.2'],
+            Entry::query()->findOrFail($entries->first()->id)->meta['members'],
+        );
+    }
+
+    public function test_one_imported_team_can_be_moved_to_a_group_of_another_year_from_the_same_excel_sheet(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        ['groups' => $groups, 'entries' => $entries] = $this->seedImportedTeamsInTwoGroups($tournament);
+        $entry = $entries->firstWhere('group_id', $groups[0]->id);
+
+        $this->assertNotNull($entry);
+        $this->assertNotSame($groups[0]->birth_year, $groups[1]->birth_year);
+
+        $this->actingAs($this->secretary())
+            ->get(route('secretary.tournament.groups', $tournament))
+            ->assertOk()
+            ->assertSee($groups[1]->name);
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.entries.move-group', [$tournament, $entry]), [
+                'target_group_id' => $groups[1]->id,
+            ])
+            ->assertRedirect(route('secretary.tournament.groups', $tournament))
+            ->assertSessionHas('status');
+
+        $entry->refresh();
+        $this->assertSame($groups[1]->id, $entry->group_id);
+        $this->assertSame(2016, $entry->birth_year);
+        $this->assertSame(1, Entry::query()->where('group_id', $groups[0]->id)->count());
+        $this->assertSame(3, Entry::query()->where('group_id', $groups[1]->id)->count());
+
+        $sourceCategory = Category::query()->where('group_id', $groups[0]->id)->firstOrFail();
+        $targetCategory = Category::query()->where('group_id', $groups[1]->id)->firstOrFail();
+        $this->assertSame(1, Performance::query()->where('category_id', $sourceCategory->id)->count());
+        $this->assertSame(3, Performance::query()->where('category_id', $targetCategory->id)->count());
+    }
+
+    public function test_imported_team_cannot_be_moved_to_another_year_from_a_different_excel_sheet(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        ['groups' => $groups, 'entries' => $entries] = $this->seedImportedTeamsInTwoGroups($tournament);
+        $entry = $entries->firstWhere('group_id', $groups[0]->id);
+
+        Entry::query()->where('group_id', $groups[1]->id)->get()->each(function (Entry $targetEntry) {
+            $meta = $targetEntry->meta;
+            $meta['sheet'] = 'Другой Excel-лист';
+            $targetEntry->update(['meta' => $meta]);
+        });
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.entries.move-group', [$tournament, $entry]), [
+                'target_group_id' => $groups[1]->id,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors('group_move');
+
+        $this->assertSame($groups[0]->id, $entry->fresh()->group_id);
+    }
+
+    public function test_imported_group_teams_cannot_be_shuffled_after_a_performance_started(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        ['entries' => $entries, 'sheet' => $sheet] = $this->seedImportedTeamsInTwoGroups($tournament);
+        $before = $entries->pluck('group_id', 'id')->all();
+
+        Performance::query()->firstOrFail()->update(['status' => 'performing']);
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.groups.shuffle-imported-teams', $tournament), ['sheet' => $sheet])
+            ->assertRedirect()
+            ->assertSessionHasErrors('excel_group_shuffle');
+
+        $after = Entry::query()->whereKey($entries->pluck('id'))->pluck('group_id', 'id')->all();
+        $this->assertSame($before, $after);
     }
 
     public function test_move_entry_between_streams(): void
@@ -181,7 +466,7 @@ class GroupStreamBuilderTest extends TestCase
         $group = $tournament->groups()->firstOrFail();
 
         $this->actingAs($secretary)->post(route('secretary.tournament.groups.streams', [$tournament, $group]), [
-            'stream_size' => 12, 'start_time' => '08:00', 'block_minutes' => 25,
+            'stream_size' => 12, 'start_time' => '08:00', 'minutes_per_athlete' => 2,
         ]);
 
         // Ручная вставка забытой участницы в группу.
@@ -224,7 +509,7 @@ class GroupStreamBuilderTest extends TestCase
         // Массово нарезать потоки во всех группах.
         $this->actingAs($secretary)
             ->post(route('secretary.tournament.streams.all', $tournament), [
-                'stream_size' => 4, 'start_time' => '09:00', 'block_minutes' => 30,
+                'stream_size' => 4, 'start_time' => '09:00', 'minutes_per_athlete' => 2,
             ])->assertRedirect(route('secretary.tournament.groups', $tournament));
 
         // 2018/A: 5/4 → 2 потока; 2017/B: 3 → 1 поток.
@@ -233,9 +518,9 @@ class GroupStreamBuilderTest extends TestCase
         $this->assertSame(2, Category::where('group_id', $groupA->id)->count());
         $this->assertSame(1, Category::where('group_id', $groupB->id)->count());
 
-        // Каскад: A стартует 09:00, B — после двух блоков A (09:00→09:30→10:00).
+        // Каскад: пять участниц A занимают 10 минут, затем стартует B.
         $this->assertSame('09:00', Category::where('group_id', $groupA->id)->where('stream_no', 1)->value('starts_at_label'));
-        $this->assertSame('10:00', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
+        $this->assertSame('09:10', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
     }
 
     public function test_assemble_tournament_one_click(): void
@@ -250,7 +535,7 @@ class GroupStreamBuilderTest extends TestCase
                 'apparatus' => ['Б.П.'],
                 'stream_size' => 4,
                 'start_time' => '08:00',
-                'block_minutes' => 25,
+                'minutes_per_athlete' => 2,
                 'number_mode' => 'continuous',
             ])->assertRedirect(route('secretary.tournament.groups', $tournament));
 
@@ -261,12 +546,11 @@ class GroupStreamBuilderTest extends TestCase
         // 2018/A: 5 уч. / размер 4 → 2 потока; 2017/B: 3 уч. → 1 поток. Итого 3 потока.
         $this->assertSame(3, Category::whereIn('group_id', $tournament->groups()->pluck('id'))->count());
 
-        // Каскад времени: первый поток дня — 08:00; следующая группа стартует после
-        // двух блоков первой (08:00→08:25→08:50).
+        // Каскад времени: следующая группа стартует после всех пяти участниц первой.
         $groupA = $tournament->groups()->where('birth_year', 2018)->firstOrFail();
         $groupB = $tournament->groups()->where('birth_year', 2017)->firstOrFail();
         $this->assertSame('08:00', Category::where('group_id', $groupA->id)->where('stream_no', 1)->value('starts_at_label'));
-        $this->assertSame('08:50', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
+        $this->assertSame('08:10', Category::where('group_id', $groupB->id)->where('stream_no', 1)->value('starts_at_label'));
 
         // Повторный запуск — новых пулов нет, ошибка (ничего не дублируется).
         $this->actingAs($this->secretary())
@@ -292,7 +576,7 @@ class GroupStreamBuilderTest extends TestCase
                 'apparatus' => ['Б.П.'],           // индивидуальные
                 'group_apparatus' => ['Обруч', 'Мяч'], // групповые — свои
                 'stream_size' => 12,
-                'start_time' => '08:00', 'block_minutes' => 25,
+                'start_time' => '08:00', 'minutes_per_athlete' => 2,
             ])->assertRedirect(route('secretary.tournament.groups', $tournament));
 
         $indiv = $tournament->groups()->where('program', 'individual')->firstOrFail();

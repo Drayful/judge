@@ -67,4 +67,11 @@ class AthleteMusicController extends Controller
 
         return redirect()->away($track->temporaryDownloadUrl());
     }
+
+    public function play(Request $request, MusicTrack $track)
+    {
+        $this->authorize('download', $track);
+
+        return redirect()->away($track->temporaryPlayUrl());
+    }
 }

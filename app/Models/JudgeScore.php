@@ -14,14 +14,17 @@ class JudgeScore extends Model
         'subpanel',
         'penalty_type',
         'score',
+        'average_score',
         'entries',
         'age_group',
         'notes',
         'submitted_at',
+        'average_submitted_at',
     ];
 
     protected $casts = [
         'submitted_at' => 'datetime',
+        'average_submitted_at' => 'datetime',
         'entries' => 'array',
     ];
 

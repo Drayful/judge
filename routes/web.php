@@ -6,6 +6,7 @@ use App\Http\Controllers\JudgeController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicAthleteUploadController;
 use App\Http\Controllers\ScoreboardController;
+use App\Http\Controllers\ScoreboardJudgeController;
 use App\Http\Controllers\SecretaryController;
 use App\Http\Controllers\SupervisorController;
 use Illuminate\Support\Facades\Route;
@@ -40,6 +41,8 @@ Route::middleware('auth')->group(function () {
         ->name('athlete.music.store');
     Route::get('/tracks/{track}/download', [AthleteMusicController::class, 'download'])
         ->name('tracks.download');
+    Route::get('/tracks/{track}/play', [AthleteMusicController::class, 'play'])
+        ->name('tracks.play');
 
     Route::get('/secretary/categories/{category}/queue', [SecretaryController::class, 'queue'])
         ->middleware('role:secretary,chief_judge,admin')
@@ -77,6 +80,15 @@ Route::middleware('auth')->group(function () {
     Route::get('/secretary/tournaments/{tournament}/protocol', [SecretaryController::class, 'downloadProtocol'])
         ->middleware('role:secretary,chief_judge,admin,organising_committee')
         ->name('secretary.tournament.protocol');
+    Route::get('/secretary/tournaments/{tournament}/start-sheet', [SecretaryController::class, 'downloadStartSheet'])
+        ->middleware('role:secretary,chief_judge,admin,organising_committee')
+        ->name('secretary.tournament.start-sheet');
+    Route::get('/secretary/tournaments/{tournament}/start-protocol', [SecretaryController::class, 'downloadStartProtocol'])
+        ->middleware('role:secretary,chief_judge,admin,organising_committee')
+        ->name('secretary.tournament.start-protocol');
+    Route::get('/secretary/tournaments/{tournament}/programme', [SecretaryController::class, 'downloadProgramme'])
+        ->middleware('role:secretary,chief_judge,admin,organising_committee')
+        ->name('secretary.tournament.programme');
     Route::post('/secretary/tournaments/{tournament}/import-start-protocol', [SecretaryController::class, 'importStartProtocol'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.importStartProtocol');
@@ -125,12 +137,21 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/shuffle', [SecretaryController::class, 'shuffleGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.shuffle');
+    Route::post('/secretary/tournaments/{tournament}/groups/shuffle-imported-teams', [SecretaryController::class, 'shuffleImportedTeamsBetweenGroups'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.groups.shuffle-imported-teams');
     Route::delete('/secretary/tournaments/{tournament}/groups/{group}', [SecretaryController::class, 'destroyGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.destroy');
     Route::post('/secretary/entries/{entry}/move', [SecretaryController::class, 'moveEntry'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.entries.move');
+    Route::post('/secretary/tournaments/{tournament}/entries/{entry}/move-group', [SecretaryController::class, 'moveEntryToGroup'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.entries.move-group');
+    Route::post('/secretary/tournaments/{tournament}/entries/{entry}/move-pool', [SecretaryController::class, 'moveEntryToPool'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.entries.move-pool');
     Route::post('/secretary/entries/{entry}/reorder', [SecretaryController::class, 'reorderEntry'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.entries.reorder');
@@ -201,6 +222,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/judge/tournaments/{tournament}/tablet/score', [JudgeController::class, 'tournamentTabletSubmit'])
         ->middleware('role:judge,admin')
         ->name('judge.tournament.tablet.score');
+    Route::post('/judge/tournaments/{tournament}/timer', [JudgeController::class, 'recordOfficialTimer'])
+        ->middleware('role:judge,admin')
+        ->name('judge.tournament.timer');
     Route::get('/judge/categories/{category}/tablet', [JudgeController::class, 'redirectCategoryTabletToTournament'])
         ->middleware('role:judge,admin')
         ->name('judge.tablet');
@@ -213,6 +237,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/judge/submit-score', [JudgeController::class, 'submitScoreAjax'])
         ->middleware('role:judge,admin')
         ->name('judge.submit-score');
+    Route::post('/judge/submit-average', [JudgeController::class, 'submitAverageAjax'])
+        ->middleware('role:judge,admin')
+        ->name('judge.submit-average');
     Route::post('/judge/performances/{performance}/live-actions', [JudgeController::class, 'recordLiveAction'])
         ->middleware('role:judge,admin')
         ->name('judge.performance.live-actions');
@@ -221,11 +248,18 @@ Route::middleware('auth')->group(function () {
         ->name('judge.finalize');
 
     Route::post('/supervisor/performances/{performance}/approve', [SupervisorController::class, 'approve'])
-        ->middleware('role:superior_jury,head_judge,chief_judge,admin,super_admin')
+        ->middleware('role:secretary,chief_judge,admin,super_admin')
         ->name('supervisor.approve');
     Route::post('/supervisor/performances/{performance}/publish', [SupervisorController::class, 'publish'])
-        ->middleware('role:superior_jury,head_judge,chief_judge,admin,super_admin')
+        ->middleware('role:scoreboard_judge,admin,super_admin')
         ->name('supervisor.publish');
+
+    Route::get('/scoreboard-judge', [ScoreboardJudgeController::class, 'index'])
+        ->middleware('role:scoreboard_judge,admin,super_admin')
+        ->name('scoreboard-judge.index');
+    Route::post('/scoreboard-judge/performances/{performance}/accept', [ScoreboardJudgeController::class, 'accept'])
+        ->middleware('role:scoreboard_judge,admin,super_admin')
+        ->name('scoreboard-judge.accept');
 
     Route::post('/performances/{performance}/inquiries', [InquiryController::class, 'store'])
         ->middleware('role:secretary,superior_jury,head_judge,chief_judge,admin,super_admin')

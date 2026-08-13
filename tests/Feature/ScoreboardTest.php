@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Athlete;
 use App\Models\Category;
+use App\Models\Entry;
 use App\Models\JudgeScore;
 use App\Models\Performance;
 use App\Models\Tournament;
@@ -221,6 +222,9 @@ class ScoreboardTest extends TestCase
             'submitted_at' => now(),
         ]);
 
+        // На табло результат и место видны только после принятия результата.
+        $live->update(['published_at' => now()]);
+
         $this->getJson(route('scoreboard.performance.live', $category))
             ->assertOk()
             ->assertJsonPath('performance.place', 2);
@@ -274,7 +278,7 @@ class ScoreboardTest extends TestCase
         ]);
         Performance::create([
             'category_id' => $category->id, 'athlete_id' => $c->id, 'order_index' => 3,
-            'status' => 'performing', 'is_counted' => true,
+            'status' => 'performing', 'is_counted' => true, 'published_at' => now(),
         ]);
 
         // place_of = опубликованные (без снятых) + 1 = 1 + 1 = 2
@@ -332,6 +336,7 @@ class ScoreboardTest extends TestCase
             'category_id' => $stream1->id, 'athlete_id' => $live->id, 'order_index' => 1,
             'status' => 'performing', 'is_counted' => true,
             'scores_overridden' => true, 'd_score' => 8, 'a_score' => 8.5, 'e_score' => 8.5, 'total' => 25.0,
+            'published_at' => now(),
         ]);
 
         // Место 2 (лидер из другого потока учтён), «из 2».
@@ -339,6 +344,99 @@ class ScoreboardTest extends TestCase
             ->assertOk()
             ->assertJsonPath('performance.place', 2)
             ->assertJsonPath('performance.place_of', 2);
+    }
+
+    public function test_live_place_uses_excel_sheet_pool_and_sums_all_accepted_apparatus(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $stream1 = Category::create([
+            'tournament_id' => $tournament->id,
+            'name' => 'Поток 1',
+            'birth_year' => 2015,
+            'division' => 'A',
+            'is_published' => true,
+        ]);
+        $stream2 = Category::create([
+            'tournament_id' => $tournament->id,
+            'name' => 'Поток 2',
+            'birth_year' => 2015,
+            'division' => 'A',
+            'is_published' => true,
+        ]);
+
+        $leader = Athlete::create(['first_name' => 'Л', 'last_name' => 'Лидер']);
+        $current = Athlete::create(['first_name' => 'Т', 'last_name' => 'Текущая']);
+        $waiting = Athlete::create(['first_name' => 'О', 'last_name' => 'Ожидает']);
+        $outsider = Athlete::create(['first_name' => 'Ч', 'last_name' => 'Чужая']);
+
+        foreach ([$leader, $current, $waiting] as $index => $athlete) {
+            Entry::create([
+                'tournament_id' => $tournament->id,
+                'athlete_id' => $athlete->id,
+                'program' => 'individual',
+                'order_index' => $index + 1,
+                'meta' => ['sheet' => 'Лист A'],
+            ]);
+        }
+        Entry::create([
+            'tournament_id' => $tournament->id,
+            'athlete_id' => $outsider->id,
+            'program' => 'individual',
+            'order_index' => 4,
+            'meta' => ['sheet' => 'Другой лист'],
+        ]);
+
+        foreach ([[$stream1, 20.0, 'Мяч'], [$stream2, 22.0, 'Обруч']] as [$stream, $score, $apparatus]) {
+            Performance::create([
+                'category_id' => $stream->id,
+                'athlete_id' => $leader->id,
+                'apparatus' => $apparatus,
+                'order_index' => 1,
+                'status' => 'published',
+                'total' => $score,
+                'published_at' => now(),
+                'is_counted' => true,
+            ]);
+        }
+        Performance::create([
+            'category_id' => $stream2->id,
+            'athlete_id' => $current->id,
+            'apparatus' => 'Обруч',
+            'order_index' => 2,
+            'status' => 'published',
+            'total' => 25.0,
+            'published_at' => now(),
+            'is_counted' => true,
+        ]);
+        Performance::create([
+            'category_id' => $stream2->id,
+            'athlete_id' => $outsider->id,
+            'apparatus' => 'Обруч',
+            'order_index' => 3,
+            'status' => 'published',
+            'total' => 100.0,
+            'published_at' => now(),
+            'is_counted' => true,
+        ]);
+        Performance::create([
+            'category_id' => $stream1->id,
+            'athlete_id' => $current->id,
+            'apparatus' => 'Мяч',
+            'order_index' => 4,
+            'status' => 'performing',
+            'total' => 15.0,
+            'scores_overridden' => true,
+            'published_at' => now(),
+            'is_counted' => true,
+        ]);
+
+        $this->getJson(route('scoreboard.performance.live', $stream1))
+            ->assertOk()
+            ->assertJsonPath('performance.pool_label', 'Лист A')
+            ->assertJsonPath('performance.apparatus_score', 15)
+            ->assertJsonPath('performance.total', 40)
+            ->assertJsonPath('performance.place', 2)
+            ->assertJsonPath('performance.place_of', 3);
     }
 
     public function test_table_ranks_by_protocol_group_not_stream(): void

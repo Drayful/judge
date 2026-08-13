@@ -21,8 +21,13 @@
 @push('body-scripts')
     <script>
         (function () {
+            const pageRoot = document.querySelector('[data-async-page]');
             const pingUrl = @json(route('judge.tournament.tablet.ping', $tournament));
-            setInterval(async function () {
+            const pingInterval = setInterval(async function () {
+                if (pageRoot && ! pageRoot.isConnected) {
+                    clearInterval(pingInterval);
+                    return;
+                }
                 try {
                     const r = await fetch(pingUrl, {
                         headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -32,7 +37,11 @@
                     if (!r.ok) return;
                     const j = await r.json();
                     if (j.resolved) {
-                        window.location.reload();
+                        if (window.JudgeAsync) {
+                            await window.JudgeAsync.refresh(window.location.href, { silent: true });
+                        } else {
+                            window.location.reload();
+                        }
                     }
                 } catch (e) {}
             }, 3000);

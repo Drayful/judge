@@ -7,12 +7,18 @@
     <div id="protocols" class="scroll-mt-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
-                <div class="font-semibold text-slate-100">Итоговые протоколы</div>
+                <div class="font-semibold text-slate-100">Протоколы и выгрузки</div>
                 <div class="text-sm text-slate-400 mt-1">
                     Скачать Excel по году рождения и категории (A, B, C…). Доступно секретарю после судейства.
                 </div>
             </div>
             <x-badge tone="violet">{{ $protocolGroups->count() }} групп</x-badge>
+        </div>
+
+        <div class="mb-5 flex flex-wrap gap-2">
+            <a href="{{ route('secretary.tournament.start-sheet', $tournament) }}" class="rounded-lg border border-sky-700/60 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-900/60">Стартовый лист Excel</a>
+            <a href="{{ route('secretary.tournament.start-protocol', $tournament) }}" class="rounded-lg border border-sky-700/60 bg-sky-950/40 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-900/60">Стартовый протокол Excel</a>
+            <a href="{{ route('secretary.tournament.programme', $tournament) }}" class="rounded-lg border border-violet-700/60 bg-violet-950/40 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-900/60">Программа соревнований Excel</a>
         </div>
 
         @if($protocolGroups->isEmpty())

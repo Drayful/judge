@@ -1,6 +1,8 @@
 <x-app-layout>
     <x-slot name="header">
-        @php($tr = request()->route('tournament'))
+        @php
+            $tr = request()->route('tournament');
+        @endphp
         <div class="flex items-center justify-between gap-4">
             <div>
                 <h2 class="font-semibold text-xl text-slate-100 leading-tight">
@@ -43,7 +45,9 @@
         </div>
     </x-slot>
 
-    @php($tr = request()->route('tournament'))
+    @php
+        $tr = request()->route('tournament');
+    @endphp
 
     <div class="py-10">
         <div class="w-full px-0 space-y-4">
@@ -104,8 +108,13 @@
                         </select>
                     </div>
                     <div>
-                        <x-input-label value="Снаряд/предмет" />
-                        <x-text-input name="apparatus" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" placeholder="hoop/ball/..." />
+                        <x-input-label value="Вид / предмет" />
+                        <select name="apparatus" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
+                            <option value="">— выберите вид —</option>
+                            @foreach(\App\Support\PerformanceApparatus::RG_APPARATUS as $apparatus)
+                                <option value="{{ $apparatus }}">{{ $apparatus }}</option>
+                            @endforeach
+                        </select>
                     </div>
                     <div>
                         <x-input-label value="Год рождения" />
@@ -234,6 +243,26 @@
                                             <x-input-label value="ИИН" />
                                             <x-text-input name="iin" value="{{ $a->iin }}" inputmode="numeric" pattern="\d{12}" maxlength="12" class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100 font-mono" />
                                         </div>
+                                        @php
+                                            $currentStream = $a->performances->first(fn ($performance) => $performance->category?->tournament_id === $tournament->id);
+                                            $availableStreams = $currentStream?->category?->group_id
+                                                ? $tournament->categories->where('group_id', $currentStream->category->group_id)
+                                                : collect();
+                                        @endphp
+                                        @if($availableStreams->isNotEmpty())
+                                            <div>
+                                                <x-input-label value="Поток" />
+                                                <select name="stream_category_id" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
+                                                    <option value="">Не менять поток</option>
+                                                    @foreach($availableStreams as $stream)
+                                                        <option value="{{ $stream->id }}" @selected($currentStream?->category_id === $stream->id)>
+                                                            Поток {{ $stream->stream_no }}@if($stream->starts_at_label) · {{ $stream->starts_at_label }}@endif
+                                                        </option>
+                                                    @endforeach
+                                                </select>
+                                                <p class="mt-1 text-xs text-slate-500">Поток изменится вместе с ФИО; после начала выступлений он заблокирован.</p>
+                                            </div>
+                                        @endif
                                         <x-primary-button class="w-full justify-center">Сохранить</x-primary-button>
                                     </form>
                                 </details>
