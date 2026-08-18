@@ -90,6 +90,63 @@ class ManualFinalScoreTest extends TestCase
         $this->assertEqualsWithDelta(24.0, (float) $perf->total, 0.0001);
     }
 
+    public function test_manual_total_does_not_deduct_time_penalty_twice(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $perf = $this->performance();
+        $perf->update(['time_penalty' => 0.1, 'penalty' => 0.3]);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.setFinalScore', $perf), [
+                'd_score' => 5.5,
+                'a_score' => 8.2,
+                'e_score' => 7.1,
+                'penalty' => 0.3,
+            ])->assertRedirect();
+
+        $this->assertEqualsWithDelta(20.5, (float) $perf->fresh()->total, 0.0001);
+    }
+
+    public function test_manual_final_score_can_be_approved_without_panel_submissions(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $perf = $this->performance();
+
+        $this->actingAs($secretary)->post(route('secretary.performance.setFinalScore', $perf), [
+            'd_score' => 5.5,
+            'a_score' => 8.2,
+            'e_score' => 7.1,
+            'penalty' => 0.3,
+        ])->assertRedirect();
+
+        $this->actingAs($secretary)
+            ->post(route('supervisor.approve', $perf))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertNotNull($perf->fresh()->approved_at);
+    }
+
+    public function test_manual_final_score_can_be_confirmed_from_live_queue(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $perf = $this->performance();
+
+        $this->actingAs($secretary)->post(route('secretary.performance.setFinalScore', $perf), [
+            'd_score' => 5.5,
+            'a_score' => 8.2,
+            'e_score' => 7.1,
+            'penalty' => 0.3,
+        ])->assertRedirect();
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.confirmScore', $perf))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertNotNull($perf->fresh()->approved_at);
+    }
+
     public function test_clear_override_recomputes_from_judges(): void
     {
         $secretary = User::factory()->create(['role' => 'secretary']);

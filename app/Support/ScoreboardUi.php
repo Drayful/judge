@@ -207,7 +207,10 @@ class ScoreboardUi
             $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $publishedPerformance->total;
         }
 
-        if ($performance->published_at !== null && $performance->total !== null && ! $performance->isWithdrawn()) {
+        if ($performance->published_at !== null
+            && $performance->total !== null
+            && $performance->is_counted
+            && ! $performance->isWithdrawn()) {
             $athleteId = (int) $performance->athlete_id;
             $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $performance->total;
         }

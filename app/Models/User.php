@@ -114,6 +114,6 @@ class User extends Authenticatable
             return false;
         }
 
-        return $this->judgePanel() !== null || in_array($this->role, ['head_judge', 'superior_jury'], true) || $this->isAdmin();
+        return $this->judgePanel() !== null || $this->isAdmin();
     }
 }

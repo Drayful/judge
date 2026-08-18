@@ -18,8 +18,13 @@ class StreamAdvanceService
         return DB::transaction(function () use ($category, $streamSessionId) {
             $performing = Performance::query()
                 ->where('category_id', $category->id)
-                ->when($streamSessionId, fn ($q) => $q->where('stream_session_id', $streamSessionId))
+                ->when(
+                    $streamSessionId !== null,
+                    fn ($q) => $q->where('stream_session_id', $streamSessionId),
+                    fn ($q) => $q->whereNull('stream_session_id'),
+                )
                 ->where('status', 'performing')
+                ->lockForUpdate()
                 ->first();
 
             if ($performing) {
@@ -32,10 +37,15 @@ class StreamAdvanceService
 
             $next = Performance::query()
                 ->where('category_id', $category->id)
-                ->when($streamSessionId, fn ($q) => $q->where('stream_session_id', $streamSessionId))
+                ->when(
+                    $streamSessionId !== null,
+                    fn ($q) => $q->where('stream_session_id', $streamSessionId),
+                    fn ($q) => $q->whereNull('stream_session_id'),
+                )
                 ->where('status', 'scheduled')
                 ->orderBy('order_index')
                 ->orderBy('id')
+                ->lockForUpdate()
                 ->first();
 
             if ($next) {

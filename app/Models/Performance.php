@@ -32,6 +32,7 @@ class Performance extends Model
         'started_at',
         'timer_started_at',
         'timer_ended_at',
+        'timer_revision_requested_at',
         'ended_at',
         'd_score',
         'db_average',
@@ -58,6 +59,7 @@ class Performance extends Model
         'started_at' => 'datetime',
         'timer_started_at' => 'datetime',
         'timer_ended_at' => 'datetime',
+        'timer_revision_requested_at' => 'datetime',
         'ended_at' => 'datetime',
         'finalized_at' => 'datetime',
         'decided_at' => 'datetime',
@@ -195,7 +197,10 @@ class Performance extends Model
             $d = $this->d_score;
             $a = $this->a_score;
             $e = $this->e_score;
-            $pen = (float) ($this->penalty ?? 0) + max(0.0, (float) ($this->time_penalty ?? 0));
+            // В ручном режиме поле penalty уже является окончательной общей сбавкой.
+            // Не прибавляем time_penalty повторно: форма показывает и отправляет
+            // текущее общее значение штрафа, куда время уже включено.
+            $pen = (float) ($this->penalty ?? 0);
 
             if ($d !== null && $a !== null && $e !== null) {
                 $this->total = round((float) $d + (float) $a + (float) $e - $pen, $round);
@@ -214,9 +219,22 @@ class Performance extends Model
         $aBase = (float) ($rules['a_base'] ?? 10.0);
         $eBase = (float) ($rules['e_base'] ?? 10.0);
 
-        $scores = $this->judgeScores()
+        // Считаем только оценки активных слотов. Это особенно важно, если слот
+        // отключили уже после того, как судья успел отправить значение.
+        $this->unsetRelation('judgeScores');
+        $this->load(['judgeScores.judge', 'category']);
+        $inactive = SecretaryLiveUi::inactiveSlots($this->category);
+        $rowsBySlot = SecretaryLiveUi::scoreRowsBySlot($this, $this->category);
+        $activeScoreIds = collect($rowsBySlot)
+            ->reject(fn ($row, string $slot) => in_array($slot, $inactive, true))
+            ->filter()
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        $scores = $this->judgeScores
             ->whereNotNull('submitted_at')
-            ->get();
+            ->filter(fn (JudgeScore $score) => in_array((int) $score->id, $activeScoreIds, true))
+            ->values();
 
         // ВАЖНО: ->filter() без аргумента вырезает все falsy-значения,
         // в т.ч. валидные 0.0. Используем явное «не null».
@@ -227,6 +245,9 @@ class Performance extends Model
         } else {
             $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter($notNull)->values();
             $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter($notNull)->values();
+
+            $activeDbSlots = collect(['DB1', 'DB2'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
+            $activeDaSlots = collect(['DA1', 'DA2'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
 
             $db = $dDb->count() ? (float) $dDb->avg() : null;
             $da = $dDa->count() ? (float) $dDa->avg() : null;
@@ -243,9 +264,13 @@ class Performance extends Model
             $daManual = $daLeader?->average_submitted_at !== null && $daLeader?->average_score !== null
                 ? (float) $daLeader->average_score
                 : null;
-            $dbForTotal = $dbManual ?? $db;
-            $daForTotal = $daManual ?? $da;
-            $d = ($dbForTotal !== null && $daForTotal !== null) ? ($dbForTotal + $daForTotal) : null;
+            if ($activeDbSlots->isEmpty() && $activeDaSlots->isEmpty()) {
+                $d = null;
+            } else {
+                $dbForTotal = $activeDbSlots->isEmpty() ? 0.0 : ($dbManual ?? $db);
+                $daForTotal = $activeDaSlots->isEmpty() ? 0.0 : ($daManual ?? $da);
+                $d = ($dbForTotal !== null && $daForTotal !== null) ? ($dbForTotal + $daForTotal) : null;
+            }
         }
 
         $this->db_average = isset($db) && $db !== null ? round($db, $round) : null;
@@ -254,29 +279,51 @@ class Performance extends Model
         $aVals = $scores->where('panel', 'a')->pluck('score')->filter($notNull)->sort()->values();
         $eVals = $scores->where('panel', 'e')->pluck('score')->filter($notNull)->sort()->values();
 
+        $activeASlots = collect(['A1', 'A2', 'A3', 'A4'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
+        $activeESlots = collect(['E1', 'E2', 'E3', 'E4'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
+
         $a = null;
-        if ($aVals->count() >= 4) {
+        if (! $activeASlots->isEmpty() && $aVals->count() >= 4) {
             $mid = $aVals->slice(1, $aVals->count() - 2);
             $a = (float) $mid->avg();
-        } elseif ($aVals->count() > 0) {
+        } elseif (! $activeASlots->isEmpty() && $aVals->count() > 0) {
             $a = (float) $aVals->avg();
         }
 
         $e = null;
-        if ($eVals->count() >= 4) {
+        if (! $activeESlots->isEmpty() && $eVals->count() >= 4) {
             $mid = $eVals->slice(1, $eVals->count() - 2);
             $e = (float) $mid->avg();
-        } elseif ($eVals->count() > 0) {
+        } elseif (! $activeESlots->isEmpty() && $eVals->count() > 0) {
             $e = (float) $eVals->avg();
         }
 
         // penalties: суммируем только реально пришедшие записи penalty-судей,
         // чтобы отсутствие записей сохранило penalty=null (а не 0.0), и в табло
         // не печаталось «−0.000» по неустановленной бригаде.
-        $penaltyScores = $scores->where('panel', 'penalty')->pluck('score')->filter($notNull);
-        $manualPenalties = $penaltyScores->count() ? (float) $penaltyScores->sum() : 0.0;
-        $timePenalty = max(0.0, (float) ($this->time_penalty ?? 0.0));
-        $pen = ($penaltyScores->count() || $timePenalty > 0.0) ? $manualPenalties + $timePenalty : null;
+        $penaltyRows = $scores->where('panel', 'penalty');
+        $nonTimePenaltyScores = $penaltyRows
+            ->where('penalty_type', '!=', 'time')
+            ->pluck('score')
+            ->filter($notNull);
+        $legacyTimeScores = $penaltyRows
+            ->where('penalty_type', 'time')
+            ->pluck('score')
+            ->filter($notNull);
+        $officialTimerRecorded = $this->timer_started_at !== null
+            || $this->timer_ended_at !== null
+            || $this->actual_duration_seconds !== null;
+        $manualPenalties = (float) $nonTimePenaltyScores->sum();
+        if (! $officialTimerRecorded) {
+            $manualPenalties += (float) $legacyTimeScores->sum();
+        }
+        $timePenalty = in_array('TIME', $inactive, true)
+            ? 0.0
+            : max(0.0, (float) ($this->time_penalty ?? 0.0));
+        $hasPenaltyInput = $nonTimePenaltyScores->isNotEmpty()
+            || (! $officialTimerRecorded && $legacyTimeScores->isNotEmpty())
+            || ($officialTimerRecorded && ! in_array('TIME', $inactive, true));
+        $pen = ($hasPenaltyInput || $timePenalty > 0.0) ? $manualPenalties + $timePenalty : null;
 
         $this->d_score = $d !== null ? round($d, $round) : null;
         $this->a_score = $a !== null ? round($a, $round) : null;

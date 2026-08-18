@@ -291,7 +291,7 @@
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
                     <h2 class="text-base font-semibold text-white">Оценки (текущая гимнастка)</h2>
-                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. При включённом автопереходе после слотов <span class="text-slate-400">DB1, DA1, A1–A4, E1–E4</span> поток сам перейдёт к следующей (LINE/RESP не обязательны). Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
+                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. Автопереход срабатывает после всех активных слотов, ручных средних DB1/DA1 и завершения официального таймера. Ненужные слоты LINE/TIME/RESP следует отключить в составе бригады. Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <span class="inline-flex items-center gap-2 rounded-lg border border-emerald-600/80 bg-emerald-950/50 px-2.5 py-1.5 font-medium text-emerald-100">
@@ -374,6 +374,28 @@
                     <div class="mt-1 text-2xl font-semibold text-teal-50 font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($sumDisplay !== null ? (float) $sumDisplay : null) }}</div>
                 </div>
             </div>
+
+            @if($lastCompletedPerformance)
+                @php
+                    $lastRows = \App\Support\SecretaryLiveUi::scoreRowsBySlot($lastCompletedPerformance, $category);
+                    $lastDb1 = $lastRows['DB1'] ?? null;
+                    $lastDa1 = $lastRows['DA1'] ?? null;
+                @endphp
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-900/50 bg-cyan-950/20 px-4 py-3 text-xs">
+                    <div>
+                        <span class="font-semibold text-cyan-100">Последний завершённый результат:</span>
+                        <span class="ml-1 text-slate-200">{{ $lastCompletedPerformance->athlete?->last_name }} {{ $lastCompletedPerformance->athlete?->first_name }}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 font-mono text-slate-300">
+                        <span>D {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->d_score !== null ? (float) $lastCompletedPerformance->d_score : null) }}</span>
+                        <span>A {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->a_score !== null ? (float) $lastCompletedPerformance->a_score : null) }}</span>
+                        <span>E {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->e_score !== null ? (float) $lastCompletedPerformance->e_score : null) }}</span>
+                        <span class="text-cyan-200">DB1 ср. {{ \App\Support\SecretaryLiveUi::formatScore($lastDb1?->average_submitted_at !== null ? (float) $lastDb1->average_score : null) }}</span>
+                        <span class="text-cyan-200">DA1 ср. {{ \App\Support\SecretaryLiveUi::formatScore($lastDa1?->average_submitted_at !== null ? (float) $lastDa1->average_score : null) }}</span>
+                        <span class="font-semibold text-white">Итого {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->total !== null ? (float) $lastCompletedPerformance->total : null) }}</span>
+                    </div>
+                </div>
+            @endif
 
             <div class="mt-5 overflow-x-auto rounded-xl border border-slate-800">
                 <table class="w-full min-w-[720px] text-center text-xs">
@@ -678,6 +700,9 @@
                     </div>
                     <form method="POST" action="{{ route('secretary.queue.add', $category) }}" class="grid grid-cols-1 md:grid-cols-6 gap-3">
                         @csrf
+                        @if($streamSession)
+                            <input type="hidden" name="stream_session_id" value="{{ $streamSession->id }}">
+                        @endif
                         <div class="md:col-span-2">
                             <x-input-label value="Атлет" />
                             <select name="athlete_id" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950/50 text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" required>
@@ -1221,9 +1246,9 @@
 (function () {
     const pageRoot = document.querySelector('[data-async-page]');
     const pingUrl = @json(route('secretary.queue.ping', $category).($streamSession ? '?session='.$streamSession->id : ''));
-    let lastRev = null;
+    let lastRev = @json($queueRev);
     const intervalMs = 3000;
-    const pingInterval = setInterval(async function () {
+    const checkForUpdates = async function () {
         if (pageRoot && ! pageRoot.isConnected) {
             clearInterval(pingInterval);
             return;
@@ -1249,6 +1274,8 @@
                 }
             }
         } catch (e) {}
-    }, intervalMs);
+    };
+    const pingInterval = setInterval(checkForUpdates, intervalMs);
+    checkForUpdates();
 })();
 </script>

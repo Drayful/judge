@@ -82,11 +82,18 @@
                 </div>
             @endif
 
-            @if(! $current || ! $athlete)
+            @if($slotInactive)
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div class="rounded-xl border border-slate-700 bg-slate-950/70 p-6 text-center max-w-md">
+                        <h2 class="text-lg font-semibold text-slate-100">Слот {{ $slot }} отключён</h2>
+                        <p class="mt-2 text-sm text-slate-400">Секретарь исключил этот слот из состава бригады. Оценка не требуется и не принимается сервером.</p>
+                    </div>
+                </div>
+            @elseif(! $current || ! $athlete)
                 <div class="flex-1 min-h-0 grid place-items-center">
                     <div class="rounded-xl border border-amber-800/50 bg-amber-950/30 p-6 text-center max-w-md">
                         <h2 class="text-lg font-semibold text-amber-100">Нет активного выступления</h2>
-                        <p class="mt-2 text-sm text-amber-100/80">Секретарь должен вызвать гимнастку (<code class="text-amber-300">scheduled / on_deck / performing</code>).</p>
+                        <p class="mt-2 text-sm text-amber-100/80">Секретарь должен запустить выступление. Ввод открывается только для статуса <code class="text-amber-300">performing</code>.</p>
                     </div>
                 </div>
             @elseif($requiresManualAverage && ! $manualAverageSubmitted)
@@ -1074,10 +1081,7 @@
         (function () {
             const pageRoot = document.querySelector('[data-async-page]');
             const pingUrl = @json(route('judge.tournament.tablet.ping', $tournament));
-            let lastPid = @json($current?->id);
-            let lastCid = @json($category->id);
-            let lastSubmitted = @json($alreadySubmitted);
-            let lastAverageSubmitted = @json($manualAverageSubmitted);
+            let lastRev = @json($tabletRev);
             const pingInterval = setInterval(async function () {
                 if (pageRoot && ! pageRoot.isConnected) {
                     clearInterval(pingInterval);
@@ -1091,14 +1095,8 @@
                     });
                     if (!r.ok) return;
                     const j = await r.json();
-                    if (!j.resolved) return;
-                    const submitted = !! j.score_submitted;
-                    const averageSubmitted = !! j.average_submitted;
-                    if (j.performance_id !== lastPid || j.category_id !== lastCid || submitted !== lastSubmitted || averageSubmitted !== lastAverageSubmitted) {
-                        lastPid = j.performance_id;
-                        lastCid = j.category_id;
-                        lastSubmitted = submitted;
-                        lastAverageSubmitted = averageSubmitted;
+                    if (!j.resolved || j.rev !== lastRev) {
+                        lastRev = j.rev || null;
                         if (window.JudgeAsync) {
                             await window.JudgeAsync.refresh(window.location.href, { silent: true });
                         } else {

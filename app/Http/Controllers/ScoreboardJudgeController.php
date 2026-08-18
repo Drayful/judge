@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Performance;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class ScoreboardJudgeController extends Controller
@@ -26,19 +27,22 @@ class ScoreboardJudgeController extends Controller
 
     public function accept(Request $request, Performance $performance): RedirectResponse
     {
-        if ($performance->approved_at === null || $performance->total === null || $performance->isWithdrawn()) {
-            abort(422, 'На табло можно принять только подтверждённый главным судьёй результат.');
-        }
+        DB::transaction(function () use ($request, $performance) {
+            $locked = Performance::query()->lockForUpdate()->findOrFail($performance->id);
+            if ($locked->approved_at === null || $locked->total === null || $locked->isWithdrawn()) {
+                abort(422, 'На табло можно принять только подтверждённый главным судьёй результат.');
+            }
 
-        if ($performance->published_at === null) {
-            $acceptedAt = now();
-            $performance->update([
-                'published_at' => $acceptedAt,
-                'scoreboard_accepted_at' => $acceptedAt,
-                'scoreboard_accepted_by' => $request->user()?->id,
-                'status' => 'published',
-            ]);
-        }
+            if ($locked->published_at === null) {
+                $acceptedAt = now();
+                $locked->update([
+                    'published_at' => $acceptedAt,
+                    'scoreboard_accepted_at' => $acceptedAt,
+                    'scoreboard_accepted_by' => $request->user()?->id,
+                    'status' => 'published',
+                ]);
+            }
+        });
 
         return back()->with('status', 'Результат принят: табло обновлено, время принятия сохранено.');
     }

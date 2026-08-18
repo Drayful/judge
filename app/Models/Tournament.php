@@ -15,6 +15,7 @@ class Tournament extends Model
         'timezone',
         'is_published',
         'active_category_id',
+        'active_stream_session_id',
     ];
 
     protected $casts = [
@@ -44,5 +45,10 @@ class Tournament extends Model
     public function activeCategory(): BelongsTo
     {
         return $this->belongsTo(Category::class, 'active_category_id');
+    }
+
+    public function activeStreamSession(): BelongsTo
+    {
+        return $this->belongsTo(StreamSession::class, 'active_stream_session_id');
     }
 }

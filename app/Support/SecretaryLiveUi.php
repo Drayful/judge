@@ -9,8 +9,11 @@ use Illuminate\Support\Collection;
 
 class SecretaryLiveUi
 {
-    /** Слоты, после заполнения которых считаем «все основные судьи выставили» (LINE/RESP не обязательны). */
+    /** Основные D/A/E-слоты; штрафные позиции проверяются отдельно. */
     public const AUTO_ADVANCE_REQUIRED_LABELS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4'];
+
+    /** Штрафные позиции должны явно завершить работу (включая отправку нулевой сбавки). */
+    public const PENALTY_REQUIRED_LABELS = ['LINE1', 'LINE2', 'TIME', 'RESP'];
 
     /** Полный список слотов бригады в порядке отображения. */
     public const ALL_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'];
@@ -194,10 +197,12 @@ class SecretaryLiveUi
                 'E4' => $byPosition($eSorted, 3),
                 'LINE1' => $byPosition($lineSorted, 0),
                 'LINE2' => $byPosition($lineSorted, 1),
-                'TIME' => isset($slotMap['TIME']) || $scores->contains(fn ($s) => $s->panel === 'penalty'
-                    && $s->penalty_type === 'time'
-                    && $s->submitted_at !== null
-                    && ! in_array($s->id, $placedScoreIds, true)),
+                'TIME' => ($perf->timer_started_at !== null && $perf->timer_ended_at !== null)
+                    || isset($slotMap['TIME'])
+                    || $scores->contains(fn ($s) => $s->panel === 'penalty'
+                        && $s->penalty_type === 'time'
+                        && $s->submitted_at !== null
+                        && ! in_array($s->id, $placedScoreIds, true)),
                 'RESP' => isset($slotMap['RESP']) || $scores->contains(fn ($s) => $s->panel === 'penalty'
                     && $s->penalty_type === 'music'
                     && $s->submitted_at !== null
@@ -223,6 +228,17 @@ class SecretaryLiveUi
         $inactive = self::inactiveSlots($category);
         $slots = self::judgeSlots($perf, $category);
 
+        $requiredPanelGroups = [
+            self::D_JUDGE_SLOTS,
+            ['A1', 'A2', 'A3', 'A4'],
+            ['E1', 'E2', 'E3', 'E4'],
+        ];
+        foreach ($requiredPanelGroups as $panelSlots) {
+            if (collect($panelSlots)->every(fn (string $slot) => in_array($slot, $inactive, true))) {
+                return false;
+            }
+        }
+
         $hasAtLeastOneActive = false;
         foreach (self::AUTO_ADVANCE_REQUIRED_LABELS as $label) {
             if (in_array($label, $inactive, true)) {
@@ -247,6 +263,12 @@ class SecretaryLiveUi
             return false;
         }
 
+        // В БП четыре D-судьи образуют одну панель: ручные средние DB/DA
+        // в формуле не участвуют и не должны блокировать поток.
+        if ($perf->isBodyOnlyApparatus()) {
+            return true;
+        }
+
         $category = $category ?? $perf->category;
         $inactive = self::inactiveSlots($category);
         $rows = self::scoreRowsBySlot($perf, $category);
@@ -257,6 +279,44 @@ class SecretaryLiveUi
 
             $row = $rows[$slot] ?? null;
             if ($row === null || $row->submitted_at === null || $row->average_submitted_at === null || $row->average_score === null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Все активные штрафные позиции закончили работу.
+     * LINE/RESP подтверждают даже нулевую сбавку обычной отправкой,
+     * TIME — остановкой официального таймера (либо старой ручной записью).
+     */
+    public static function requiredPenaltyInputsSubmitted(?Performance $perf, ?Category $category = null): bool
+    {
+        if (! $perf) {
+            return false;
+        }
+
+        $category = $category ?? $perf->category;
+        $inactive = self::inactiveSlots($category);
+        $slots = collect(self::judgeSlots($perf, $category))->keyBy('label');
+
+        foreach (self::PENALTY_REQUIRED_LABELS as $label) {
+            if (in_array($label, $inactive, true)) {
+                continue;
+            }
+
+            if ($label === 'TIME') {
+                $timerFinished = $perf->timer_started_at !== null && $perf->timer_ended_at !== null;
+                $legacyScoreSubmitted = (bool) ($slots->get('TIME')['ok'] ?? false);
+                if (! $timerFinished && ! $legacyScoreSubmitted) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (! (bool) ($slots->get($label)['ok'] ?? false)) {
                 return false;
             }
         }
@@ -403,9 +463,11 @@ class SecretaryLiveUi
     {
         return self::requiredScoresSubmitted($perf, $category)
             && self::requiredManualAveragesSubmitted($perf, $category)
+            && self::requiredPenaltyInputsSubmitted($perf, $category)
             // Если хронометрист уже запустил официальный отсчёт, автопереход
             // ждёт именно его «Стоп», чтобы не потерять фактическое время.
             && ($perf?->timer_started_at === null || $perf->timer_ended_at !== null)
+            && $perf?->total !== null
             && ! self::hasPanelSpreadViolation($perf, $category);
     }
 
@@ -445,12 +507,16 @@ class SecretaryLiveUi
                 continue;
             }
             $slot = $s->judge?->slot;
-            if ($slot && array_key_exists($slot, $values) && ! $inactive[$slot] && $s->score !== null) {
-                $values[$slot] = $fmt($s->score);
-                if ($s->panel === 'penalty') {
-                    $penalty[$slot] = true;
-                }
+            if ($slot && array_key_exists($slot, $values)) {
+                // Явно привязанная к отключённому слоту запись не должна
+                // «переехать» в соседний активный слот через fallback.
                 $placedScoreIds[] = $s->id;
+                if (! $inactive[$slot] && $s->score !== null) {
+                    $values[$slot] = $fmt($s->score);
+                    if ($s->panel === 'penalty') {
+                        $penalty[$slot] = true;
+                    }
+                }
             }
         }
 
@@ -503,6 +569,13 @@ class SecretaryLiveUi
             $penalty['TIME'] = true;
             $placedScoreIds[] = $time->id;
         }
+        if (! $inactive['TIME']
+            && $values['TIME'] === '—'
+            && $perf->timer_started_at !== null
+            && $perf->timer_ended_at !== null) {
+            $values['TIME'] = $fmt($perf->time_penalty ?? 0);
+            $penalty['TIME'] = true;
+        }
 
         $resp = $scores->first(fn ($s) => $s->panel === 'penalty'
             && $s->penalty_type === 'music'
@@ -542,6 +615,7 @@ class SecretaryLiveUi
 
         $perf->loadMissing('judgeScores.judge');
         $scores = $perf->judgeScores;
+        $excludedScoreIds = [];
 
         // 1) По слоту судьи.
         foreach ($scores as $s) {
@@ -549,14 +623,20 @@ class SecretaryLiveUi
                 continue;
             }
             $slot = $s->judge?->slot;
-            if ($slot && array_key_exists($slot, $rows) && ! in_array($slot, $inactive, true) && $rows[$slot] === null) {
-                $rows[$slot] = $s;
+            if ($slot && array_key_exists($slot, $rows)) {
+                $excludedScoreIds[] = $s->id;
+                if (! in_array($slot, $inactive, true) && $rows[$slot] === null) {
+                    $rows[$slot] = $s;
+                }
             }
         }
 
         // 2) Резерв: по порядку id для слотов без явной привязки.
-        $fillByOrder = function (string $prefix, $coll, int $count) use (&$rows, $inactive) {
-            $assigned = collect($rows)->filter()->map(fn ($s) => $s->id)->values()->all();
+        $fillByOrder = function (string $prefix, $coll, int $count) use (&$rows, $inactive, $excludedScoreIds) {
+            $assigned = array_values(array_unique(array_merge(
+                $excludedScoreIds,
+                collect($rows)->filter()->map(fn ($s) => $s->id)->values()->all(),
+            )));
             $i = 0;
             foreach ($coll as $row) {
                 if (in_array($row->id, $assigned, true)) {
@@ -582,10 +662,10 @@ class SecretaryLiveUi
         $fillByOrder('E', $scores->where('panel', 'e')->sortBy('id')->values(), 4);
         $fillByOrder('LINE', $scores->where('panel', 'penalty')->whereIn('penalty_type', ['line', 'line_gymnast', 'line_ball'])->sortBy('id')->values(), 2);
 
-        if ($rows['TIME'] === null) {
+        if ($rows['TIME'] === null && ! in_array('TIME', $inactive, true)) {
             $rows['TIME'] = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'time');
         }
-        if ($rows['RESP'] === null) {
+        if ($rows['RESP'] === null && ! in_array('RESP', $inactive, true)) {
             $rows['RESP'] = $scores->first(fn ($s) => $s->panel === 'penalty' && $s->penalty_type === 'music');
         }
 

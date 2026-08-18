@@ -75,6 +75,27 @@ class WithdrawPerformanceTest extends TestCase
         $perf->refresh();
         $this->assertSame('scheduled', $perf->status);
         $this->assertNull($perf->withdrawn_at);
+        $this->assertNull($perf->total);
+    }
+
+    public function test_withdrawing_current_performance_advances_only_its_session(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $perf = $this->makePerformance();
+        $nextAthlete = Athlete::create(['first_name' => 'Next', 'last_name' => 'Athlete']);
+        $next = Performance::create([
+            'category_id' => $perf->category_id,
+            'athlete_id' => $nextAthlete->id,
+            'order_index' => 2,
+            'status' => 'scheduled',
+        ]);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.withdraw', $perf))
+            ->assertRedirect();
+
+        $this->assertSame('withdrawn', $perf->fresh()->status);
+        $this->assertSame('performing', $next->fresh()->status);
     }
 
     public function test_judge_forbidden(): void

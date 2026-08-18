@@ -6,10 +6,12 @@ use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\JudgeScore;
 use App\Models\Performance;
+use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Models\User;
 use App\Services\FinalProtocolService;
 use App\Services\StartProtocolExporter;
+use App\Services\StreamAdvanceService;
 use App\Support\ScoreboardUi;
 use App\Support\SecretaryLiveUi;
 use Carbon\Carbon;
@@ -234,10 +236,12 @@ class LiveResultWorkflowTest extends TestCase
     {
         $performance = $this->performance();
         $performance->category->update([
-            'inactive_judge_slots' => ['DB2', 'DA2', 'A1', 'A2', 'A3', 'A4', 'E1', 'E2', 'E3', 'E4'],
+            'inactive_judge_slots' => ['DB2', 'DA2', 'A2', 'A3', 'A4', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
         ]);
         $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
         $da1 = User::factory()->create(['role' => 'judge_d_da', 'slot' => 'DA1']);
+        $a1 = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        $e1 = User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
 
         $dbScore = JudgeScore::create([
             'performance_id' => $performance->id,
@@ -255,6 +259,20 @@ class LiveResultWorkflowTest extends TestCase
             'panel' => 'd',
             'subpanel' => 'da',
             'score' => 3.4,
+            'submitted_at' => now(),
+        ]);
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $a1->id,
+            'panel' => 'a',
+            'score' => 8.0,
+            'submitted_at' => now(),
+        ]);
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $e1->id,
+            'panel' => 'e',
+            'score' => 7.0,
             'submitted_at' => now(),
         ]);
 
@@ -337,6 +355,297 @@ class LiveResultWorkflowTest extends TestCase
             ->post(route('secretary.performance.confirmScore', $performance))
             ->assertRedirect()
             ->assertSessionHasErrors('confirm');
+    }
+
+    public function test_judge_cannot_change_a_published_result_without_return_for_revision(): void
+    {
+        $performance = $this->performance();
+        $performance->update([
+            'status' => 'published',
+            'finalized_at' => now(),
+            'approved_at' => now(),
+            'published_at' => now(),
+        ]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        $this->actingAs($judge)
+            ->post(route('judge.score', $performance), ['score' => 8.5])
+            ->assertStatus(422);
+
+        $this->assertDatabaseMissing('judge_scores', [
+            'performance_id' => $performance->id,
+            'judge_id' => $judge->id,
+        ]);
+    }
+
+    public function test_returned_score_stays_available_to_its_judge_after_queue_advanced(): void
+    {
+        $returnedPerformance = $this->performance();
+        $category = $returnedPerformance->category;
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+        $returnedPerformance->update([
+            'status' => 'done',
+            'finalized_at' => now(),
+            'approved_at' => now(),
+            'published_at' => now(),
+        ]);
+        $nextAthlete = Athlete::create(['last_name' => 'Петрова', 'first_name' => 'Елена']);
+        Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $nextAthlete->id,
+            'order_index' => 2,
+            'status' => 'performing',
+        ]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        JudgeScore::create([
+            'performance_id' => $returnedPerformance->id,
+            'judge_id' => $judge->id,
+            'panel' => 'a',
+            'score' => 8.2,
+            'submitted_at' => now(),
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.returnScores', $returnedPerformance), ['slot' => 'A1'])
+            ->assertRedirect();
+
+        $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->assertJsonPath('performance_id', $returnedPerformance->id)
+            ->assertJsonPath('score_submitted', false);
+    }
+
+    public function test_tablet_uses_the_session_selected_by_the_secretary(): void
+    {
+        $first = $this->performance();
+        $category = $first->category;
+        $tournament = $category->tournament;
+        $sessionOne = StreamSession::create([
+            'category_id' => $category->id,
+            'session_no' => 1,
+            'scheduled_on' => '2026-08-18',
+            'apparatus' => ['Мяч'],
+        ]);
+        $sessionTwo = StreamSession::create([
+            'category_id' => $category->id,
+            'session_no' => 2,
+            'scheduled_on' => '2026-08-19',
+            'apparatus' => ['Обруч'],
+        ]);
+        $first->update(['stream_session_id' => $sessionOne->id]);
+        $secondAthlete = Athlete::create(['last_name' => 'Second', 'first_name' => 'Athlete']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'stream_session_id' => $sessionTwo->id,
+            'athlete_id' => $secondAthlete->id,
+            'order_index' => 2,
+            'status' => 'performing',
+        ]);
+        $tournament->update([
+            'active_category_id' => $category->id,
+            'active_stream_session_id' => $sessionTwo->id,
+        ]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->assertJsonPath('performance_id', $second->id);
+
+        $this->actingAs($judge)
+            ->post(route('judge.score', $first), ['score' => 8.0])
+            ->assertStatus(422);
+
+        $this->actingAs($judge)
+            ->postJson(route('judge.performance.live-actions', $first), ['action' => 'draft'])
+            ->assertStatus(422);
+    }
+
+    public function test_inactive_judge_slot_cannot_submit_a_score(): void
+    {
+        $performance = $this->performance();
+        $category = $performance->category;
+        $category->update(['inactive_judge_slots' => ['A1', 'TIME']]);
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        $this->actingAs($judge)
+            ->postJson(route('judge.submit-score'), [
+                'tournament_id' => $tournament->id,
+                'score' => 8.0,
+            ])
+            ->assertStatus(422);
+
+        $this->assertDatabaseMissing('judge_scores', [
+            'performance_id' => $performance->id,
+            'judge_id' => $judge->id,
+        ]);
+
+        $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'start'])
+            ->assertStatus(422);
+    }
+
+    public function test_legacy_auto_advance_never_starts_a_performance_from_a_session(): void
+    {
+        $current = $this->performance();
+        $category = $current->category;
+        $session = StreamSession::create([
+            'category_id' => $category->id,
+            'session_no' => 1,
+            'scheduled_on' => '2026-08-18',
+            'apparatus' => ['Мяч'],
+        ]);
+        $legacyAthlete = Athlete::create(['last_name' => 'Legacy', 'first_name' => 'Next']);
+        $legacyNext = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $legacyAthlete->id,
+            'order_index' => 2,
+            'status' => 'scheduled',
+        ]);
+        $sessionAthlete = Athlete::create(['last_name' => 'Session', 'first_name' => 'Next']);
+        $sessionNext = Performance::create([
+            'category_id' => $category->id,
+            'stream_session_id' => $session->id,
+            'athlete_id' => $sessionAthlete->id,
+            'order_index' => 1,
+            'status' => 'scheduled',
+        ]);
+
+        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($category, null));
+        $this->assertSame('done', $current->fresh()->status);
+        $this->assertSame('performing', $legacyNext->fresh()->status);
+        $this->assertSame('scheduled', $sessionNext->fresh()->status);
+    }
+
+    public function test_manual_queue_addition_is_assigned_to_the_open_session(): void
+    {
+        $existing = $this->performance();
+        $existing->update(['status' => 'scheduled']);
+        $category = $existing->category;
+        $session = StreamSession::create([
+            'category_id' => $category->id,
+            'session_no' => 1,
+            'scheduled_on' => '2026-08-18',
+            'apparatus' => ['Мяч'],
+        ]);
+        $existing->update(['stream_session_id' => $session->id, 'order_index' => 1]);
+        $athlete = Athlete::create(['last_name' => 'Added', 'first_name' => 'Athlete']);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.queue.add', $category), [
+                'athlete_id' => $athlete->id,
+                'apparatus' => 'Мяч',
+                'stream_session_id' => $session->id,
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('performances', [
+            'category_id' => $category->id,
+            'stream_session_id' => $session->id,
+            'athlete_id' => $athlete->id,
+            'order_index' => 2,
+            'status' => 'scheduled',
+        ]);
+    }
+
+    public function test_scheduled_performance_is_not_exposed_as_current_to_judges(): void
+    {
+        $performance = $this->performance();
+        $performance->update(['status' => 'scheduled']);
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
+
+        $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->assertJsonPath('performance_id', null);
+    }
+
+    public function test_secretary_can_return_official_time_for_revision(): void
+    {
+        Carbon::setTestNow('2026-08-18 10:00:00');
+        $performance = $this->performance();
+        $performance->update([
+            'status' => 'done',
+            'timer_started_at' => now()->subSeconds(90),
+            'timer_ended_at' => now(),
+            'actual_duration_seconds' => 90,
+            'finalized_at' => now(),
+            'approved_at' => now(),
+        ]);
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.returnScores', $performance), ['slot' => 'TIME'])
+            ->assertRedirect();
+
+        $this->assertNotNull($performance->fresh()->timer_revision_requested_at);
+        $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
+        $this->actingAs($timeJudge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertJsonPath('performance_id', $performance->id);
+
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'start'])
+            ->assertOk();
+        Carbon::setTestNow('2026-08-18 10:01:31');
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'stop'])
+            ->assertOk()
+            ->assertJsonPath('duration_seconds', 91);
+
+        $saved = $performance->fresh();
+        $this->assertNull($saved->timer_revision_requested_at);
+        $this->assertSame(91, $saved->actual_duration_seconds);
+    }
+
+    public function test_tablet_revision_changes_after_secretary_edits_a_score(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $judge->id,
+            'panel' => 'a',
+            'score' => 8.0,
+            'submitted_at' => now(),
+        ]);
+
+        $before = $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->json('rev');
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.updateJudgeScore', $performance), [
+                'slot' => 'A1',
+                'score' => 8.5,
+            ])
+            ->assertRedirect();
+        $after = $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->json('rev');
+
+        $this->assertNotSame($before, $after);
+    }
+
+    public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void
+    {
+        $jury = User::factory()->create(['role' => 'superior_jury']);
+
+        $this->assertFalse($jury->isAnyJudge());
+        $this->assertNull($jury->judgePanel());
     }
 
     public function test_tournament_management_page_renders_for_the_secretary(): void

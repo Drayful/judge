@@ -324,7 +324,7 @@ class ScoringSystemTest extends TestCase
         @unlink($tmp);
     }
 
-    public function test_total_null_when_da_panel_inactive_but_autoadvance_ready(): void
+    public function test_total_uses_zero_for_fully_inactive_da_panel(): void
     {
         // Сценарий: секретарь выключил DA-слоты (только сложность тела).
         $category = $this->makeCategory([
@@ -351,12 +351,11 @@ class ScoringSystemTest extends TestCase
         $ready = SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
         $this->assertTrue($ready, 'автопереход считает готовым: DA выключены');
 
-        // ...но итог НЕ считается, т.к. D требует и DB, и DA.
+        // Выключенная целиком подпанель даёт нулевой вклад, а не ломает итог.
         $perf->recalculateTotals();
 
-        // Документируем фактическое поведение: D=null -> total=null.
-        $this->assertNull($perf->d_score);
-        $this->assertNull($perf->total, 'БАГ-риск: total=null при выключенной DA-бригаде');
+        $this->assertSame(5.0, (float) $perf->d_score);
+        $this->assertSame(20.0, (float) $perf->total);
     }
 
     public function test_total_ok_when_one_judge_per_panel_disabled(): void
@@ -392,6 +391,111 @@ class ScoringSystemTest extends TestCase
         $this->assertEqualsWithDelta(22.8333, $perf->total, 0.001, 'итог считается нормально');
     }
 
+    public function test_score_from_inactive_slot_is_excluded_and_not_moved_to_another_slot(): void
+    {
+        $category = $this->makeCategory([
+            'inactive_judge_slots' => ['DB2', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+        $perf = $this->makePerformance($category);
+
+        $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1');
+        $this->addScore($perf, 'd', 99.0, 'db', null, 'DB2');
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA2');
+        foreach (['A1', 'A2', 'A3', 'A4'] as $slot) {
+            $this->addScore($perf, 'a', 8.0, null, null, $slot);
+        }
+        foreach (['E1', 'E2', 'E3', 'E4'] as $slot) {
+            $this->addScore($perf, 'e', 7.0, null, null, $slot);
+        }
+
+        $perf->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+        $matrix = SecretaryLiveUi::fixedScoreMatrix($perf, $category);
+
+        $this->assertSame('off', $matrix['values']['DB2']);
+        $this->assertSame(5.0, (float) $perf->db_average);
+        $this->assertSame(7.0, (float) $perf->d_score);
+        $this->assertSame(22.0, (float) $perf->total);
+    }
+
+    public function test_a_completely_disabled_required_panel_cannot_produce_a_total(): void
+    {
+        $category = $this->makeCategory([
+            'inactive_judge_slots' => ['A1', 'A2', 'A3', 'A4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+        $perf = $this->makePerformance($category);
+        $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1');
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
+        foreach (['E1', 'E2', 'E3', 'E4'] as $slot) {
+            $this->addScore($perf, 'e', 7.0, null, null, $slot);
+        }
+
+        $perf->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+
+        $this->assertNull($perf->a_score);
+        $this->assertNull($perf->total);
+        $this->assertFalse(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
+    }
+
+    public function test_official_timer_penalty_replaces_legacy_time_score_instead_of_doubling_it(): void
+    {
+        $category = $this->makeCategory();
+        $perf = $this->makePerformance($category);
+        $this->addScore($perf, 'penalty', 0.5, null, 'time', 'TIME');
+        $perf->timer_started_at = now()->subSeconds(92);
+        $perf->timer_ended_at = now();
+        $perf->actual_duration_seconds = 92;
+        $perf->time_penalty = 0.1;
+        $perf->save();
+        $perf->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+
+        $this->assertSame(0.1, (float) $perf->penalty);
+    }
+
+    public function test_inactive_time_slot_excludes_an_existing_official_time_penalty(): void
+    {
+        $category = $this->makeCategory(['inactive_judge_slots' => ['TIME']]);
+        $perf = $this->makePerformance($category);
+        $perf->timer_started_at = now()->subSeconds(92);
+        $perf->timer_ended_at = now();
+        $perf->actual_duration_seconds = 92;
+        $perf->time_penalty = 0.1;
+        $perf->save();
+        $perf->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+
+        $this->assertNull($perf->penalty);
+    }
+
+    public function test_active_penalty_slots_and_timer_are_required_before_finalization(): void
+    {
+        $category = $this->makeCategory();
+        $perf = $this->makePerformance($category);
+        $this->fillRequiredScores($perf);
+        $perf->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+
+        $this->assertFalse(SecretaryLiveUi::requiredPenaltyInputsSubmitted($perf, $category));
+        $this->assertFalse(SecretaryLiveUi::readyToFinalize($perf, $category));
+
+        $this->addScore($perf, 'penalty', 0.0, null, 'line', 'LINE1');
+        $this->addScore($perf, 'penalty', 0.0, null, 'line', 'LINE2');
+        $this->addScore($perf, 'penalty', 0.0, null, 'music', 'RESP');
+        $perf->timer_started_at = now()->subSeconds(90);
+        $perf->timer_ended_at = now();
+        $perf->time_penalty = 0;
+        $perf->save();
+        $perf->refresh()->load(['judgeScores.judge', 'category']);
+        $perf->recalculateTotals();
+
+        $this->assertTrue(SecretaryLiveUi::requiredPenaltyInputsSubmitted($perf, $category));
+        $this->assertTrue(SecretaryLiveUi::readyToFinalize($perf, $category));
+        $this->assertSame('0.000', SecretaryLiveUi::fixedScoreMatrix($perf, $category)['values']['TIME']);
+    }
+
     private function fillRequiredScores(Performance $perf, array $aScores = [8.0, 8.1, 8.2, 8.3], array $eScores = [7.0, 7.1, 7.2, 7.3]): void
     {
         $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1');
@@ -411,11 +515,12 @@ class ScoringSystemTest extends TestCase
 
     public function test_panel_spread_ok_when_difference_within_one(): void
     {
-        $category = $this->makeCategory();
+        $category = $this->makeCategory(['inactive_judge_slots' => ['LINE1', 'LINE2', 'TIME', 'RESP']]);
         $perf = $this->makePerformance($category);
         $this->fillRequiredScores($perf, [8.0, 8.2, 8.4, 8.5], [7.0, 7.5, 7.8, 8.0]);
 
         $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertFalse($report['has_violation']);
@@ -441,11 +546,12 @@ class ScoringSystemTest extends TestCase
 
     public function test_panel_spread_exactly_one_is_allowed(): void
     {
-        $category = $this->makeCategory();
+        $category = $this->makeCategory(['inactive_judge_slots' => ['LINE1', 'LINE2', 'TIME', 'RESP']]);
         $perf = $this->makePerformance($category);
         $this->fillRequiredScores($perf, [8.0, 8.0, 8.0, 9.0], [7.0, 7.0, 7.0, 8.0]);
 
         $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertFalse($report['has_violation'], 'разброс ровно 1.0 допустим');
@@ -501,6 +607,7 @@ class ScoringSystemTest extends TestCase
         $this->fillAeScores($perf);
 
         $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertTrue($report['has_violation'], '3.0 vs 5.5 -> spread > 1.0 в объединённой D-панели БП');
@@ -510,12 +617,13 @@ class ScoringSystemTest extends TestCase
 
     public function test_body_only_spread_ok_within_one(): void
     {
-        $category = $this->makeCategory();
+        $category = $this->makeCategory(['inactive_judge_slots' => ['LINE1', 'LINE2', 'TIME', 'RESP']]);
         $perf = $this->makePerformance($category, apparatus: 'БП');
         $this->fillBodyOnlyDScores($perf, [5.0, 5.2, 5.4, 5.6]);
         $this->fillAeScores($perf);
 
         $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertFalse($report['has_violation']);

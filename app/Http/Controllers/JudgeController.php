@@ -84,13 +84,11 @@ class JudgeController extends Controller
                 ->withErrors(['tablet' => 'Секретарь ещё не выбрал поток в Live для этого турнира.']);
         }
 
-        $performances = Performance::query()
-            ->where('category_id', $category->id)
-            ->orderBy('order_index')
-            ->orderBy('id')
-            ->get();
-        $ordered = SecretaryLiveUi::orderedPerformances($performances);
-        $current = SecretaryLiveUi::currentPerformance($ordered);
+        $current = $this->resolveJudgePerformance(
+            $category,
+            $request->user(),
+            $this->activeSessionId($tournament, $category),
+        );
 
         if (! $current) {
             return redirect()->route('judge.tournament.tablet', $tournament)
@@ -130,15 +128,12 @@ class JudgeController extends Controller
             ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
         }
 
-        $performances = Performance::query()
-            ->where('category_id', $category->id)
-            ->orderBy('order_index')
-            ->orderBy('id')
-            ->get();
-        $ordered = SecretaryLiveUi::orderedPerformances($performances);
-        $current = SecretaryLiveUi::currentPerformance($ordered);
-
         $user = request()->user();
+        $current = $this->resolveJudgePerformance(
+            $category,
+            $user,
+            $this->activeSessionId($tournament, $category),
+        );
         $panel = $user?->judgePanel();
         $myScore = ($current && $panel)
             ? $this->findMyScore($current, $user, $this->effectiveJudgePanel($current, $panel))
@@ -146,6 +141,7 @@ class JudgeController extends Controller
 
         return response()->json([
             'resolved' => true,
+            'rev' => $this->judgeTabletRevision($tournament, $category, $current, $myScore, $user),
             'category_id' => $category->id,
             'performance_id' => $current?->id,
             'performance_status' => $current?->status,
@@ -178,45 +174,56 @@ class JudgeController extends Controller
         if ($category === null) {
             return response()->json(['ok' => false, 'error' => 'Секретарь ещё не выбрал поток в Live.'], 422);
         }
+        if (! $user->isAdmin() && SecretaryLiveUi::isSlotInactive($category, 'TIME')) {
+            return response()->json(['ok' => false, 'error' => 'Слот TIME отключён секретарём для этого потока.'], 422);
+        }
 
-        $performances = Performance::query()
-            ->with('category')
-            ->where('category_id', $category->id)
-            ->orderBy('order_index')
-            ->orderBy('id')
-            ->get();
-        $current = SecretaryLiveUi::currentPerformance(SecretaryLiveUi::orderedPerformances($performances));
+        $sessionId = $this->activeSessionId($tournament, $category);
+        $current = $this->resolveJudgePerformance($category, $user, $sessionId);
 
-        if ($current === null || $current->status !== 'performing') {
+        if ($current === null
+            || ($current->status !== 'performing' && $current->timer_revision_requested_at === null)) {
             return response()->json(['ok' => false, 'error' => 'Сейчас нет выступления, для которого можно зафиксировать время.'], 422);
         }
 
-        if ($data['action'] === 'start') {
-            if ($current->timer_ended_at !== null) {
-                return response()->json(['ok' => false, 'error' => 'Время этого выступления уже зафиксировано.'], 422);
+        DB::transaction(function () use (&$current, $data) {
+            $current = Performance::query()->lockForUpdate()->findOrFail($current->id);
+            $isRevision = $current->timer_revision_requested_at !== null;
+            if ($current->status !== 'performing' && ! $isRevision) {
+                abort(422, 'Это выступление больше не доступно хронометристу.');
             }
 
-            if ($current->timer_started_at === null) {
-                $current->startOfficialTimer();
-                $current->save();
-                event(new ScoreUpdated($current->id, $current->category_id));
+            if ($data['action'] === 'start') {
+                if ($current->timer_ended_at !== null) {
+                    abort(422, 'Время этого выступления уже зафиксировано.');
+                }
+
+                if ($current->timer_started_at === null) {
+                    $current->startOfficialTimer();
+                    $current->save();
+                }
+
+                return;
             }
-        } else {
+
             if ($current->timer_ended_at === null && ! $current->stopOfficialTimer()) {
-                return response()->json(['ok' => false, 'error' => 'Сначала нажмите «Старт».'], 422);
+                abort(422, 'Сначала нажмите «Старт».');
             }
 
+            $current->timer_revision_requested_at = null;
+            $current->load(['judgeScores.judge', 'category']);
             $current->recalculateTotals();
+            if ($isRevision && SecretaryLiveUi::readyToFinalize($current, $current->category)) {
+                $current->finalized_at = now();
+            }
             $current->save();
 
-            if (SecretaryLiveUi::readyToFinalize($current, $current->category)) {
-                $current->finalized_at = now();
-                $current->save();
-                StreamAdvanceService::advanceToNextInCategory($current->category, $current->stream_session_id);
+            if (! $isRevision) {
+                $this->finalizeAndAdvanceIfReady($current);
             }
+        });
 
-            event(new ScoreUpdated($current->id, $current->category_id));
-        }
+        event(new ScoreUpdated($current->id, $current->category_id));
 
         return response()->json([
             'ok' => true,
@@ -230,6 +237,18 @@ class JudgeController extends Controller
 
     public function submitScore(Performance $performance, Request $request): RedirectResponse
     {
+        $performance->loadMissing('category.tournament');
+        $category = $performance->category;
+        $tournament = $category?->tournament;
+        abort_unless($category !== null && $tournament !== null, 404);
+
+        $activeCategory = $this->resolveJudgeCategoryForTournament($tournament);
+        $activeSessionId = $activeCategory ? $this->activeSessionId($tournament, $activeCategory) : null;
+        if ($activeCategory?->id !== $category->id
+            || $this->normalizedSessionId($performance->stream_session_id) !== $this->normalizedSessionId($activeSessionId)) {
+            abort(422, 'Это выступление не относится к активному потоку и сессии секретаря.');
+        }
+
         $message = $this->saveJudgeScore($performance, $request);
 
         return back()->with('status', $message);
@@ -259,13 +278,11 @@ class JudgeController extends Controller
             ], 422);
         }
 
-        $performances = Performance::query()
-            ->where('category_id', $category->id)
-            ->orderBy('order_index')
-            ->orderBy('id')
-            ->get();
-        $ordered = SecretaryLiveUi::orderedPerformances($performances);
-        $current = SecretaryLiveUi::currentPerformance($ordered);
+        $current = $this->resolveJudgePerformance(
+            $category,
+            $request->user(),
+            $this->activeSessionId($tournament, $category),
+        );
 
         if (! $current) {
             return response()->json([
@@ -304,14 +321,10 @@ class JudgeController extends Controller
             return response()->json(['ok' => false, 'error' => 'Поток не выбран секретарём.'], 422);
         }
 
-        $current = SecretaryLiveUi::currentPerformance(
-            SecretaryLiveUi::orderedPerformances(
-                Performance::query()
-                    ->where('category_id', $category->id)
-                    ->orderBy('order_index')
-                    ->orderBy('id')
-                    ->get()
-            )
+        $current = $this->resolveJudgePerformance(
+            $category,
+            $request->user(),
+            $this->activeSessionId($tournament, $category),
         );
         if ($current === null) {
             return response()->json(['ok' => false, 'error' => 'Нет активного выступления.'], 422);
@@ -322,6 +335,9 @@ class JudgeController extends Controller
         $slot = strtoupper((string) ($user->isAdmin() ? ($data['slot'] ?? '') : ($user->slot ?? '')));
         if (! in_array($slot, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true)) {
             abort(403, 'Ручную среднюю могут выставлять только DB1 и DA1.');
+        }
+        if (! $user->isAdmin() && SecretaryLiveUi::isSlotInactive($category, $slot)) {
+            abort(422, 'Ваш судейский слот отключён секретарём для этого потока.');
         }
         if (! $user->isAdmin() && (($panel['panel'] ?? null) !== 'd')) {
             abort(403);
@@ -338,22 +354,31 @@ class JudgeController extends Controller
             $panel = $this->effectiveJudgePanel($current, $panel);
         }
 
-        $score = $this->findMyScore($current, $user, $panel);
-        if ($score === null || $score->submitted_at === null) {
-            return response()->json(['ok' => false, 'error' => 'Сначала отправьте основную оценку.'], 422);
-        }
+        $score = null;
+        $moved = null;
+        DB::transaction(function () use (&$current, &$score, &$moved, $user, $panel, $data) {
+            $current = Performance::query()->lockForUpdate()->findOrFail($current->id);
+            $score = $this->findMyScore($current, $user, $panel);
+            if ($score === null || $score->submitted_at === null) {
+                abort(422, 'Сначала отправьте основную оценку.');
+            }
+            if ($current->finalized_at !== null || $current->approved_at !== null || $current->published_at !== null) {
+                abort(422, 'Зафиксированный результат нельзя изменять без возврата на доработку.');
+            }
 
-        $score->average_score = round((float) $data['average_score'], 3);
-        $score->average_submitted_at = now();
-        $score->save();
+            $score->average_score = round((float) $data['average_score'], 3);
+            $score->average_submitted_at = now();
+            $score->save();
 
-        $current->refresh();
-        $current->load(['judgeScores.judge', 'category']);
-        $current->recalculateTotals();
-        $current->save();
+            $current->unsetRelation('judgeScores');
+            $current->load(['judgeScores.judge', 'category']);
+            $current->recalculateTotals();
+            $current->save();
+            $moved = $this->finalizeAndAdvanceIfReady($current);
+        });
+
         event(new ScoreUpdated($current->id, $current->category_id));
 
-        $moved = $this->finalizeAndAdvanceIfReady($current);
         $message = 'Ручная средняя '.$slot.' сохранена.';
         if ($moved !== null) {
             $message .= $moved
@@ -392,6 +417,20 @@ class JudgeController extends Controller
             abort(422, 'Этот поток сейчас не открыт для судей.');
         }
 
+        $current = $this->resolveJudgePerformance(
+            $activeCategory,
+            $user,
+            $this->activeSessionId($category->tournament, $activeCategory),
+        );
+        if ($current?->id !== $performance->id) {
+            abort(422, 'Это выступление больше не открыто на планшете судьи.');
+        }
+
+        $slot = strtoupper((string) ($panel['slot'] ?? $user->slot ?? ''));
+        if (! $user->isAdmin() && $slot !== '' && SecretaryLiveUi::isSlotInactive($category, $slot)) {
+            abort(422, 'Ваш судейский слот отключён секретарём для этого потока.');
+        }
+
         $data = $request->validate([
             'action' => ['required', 'string', 'max:120'],
             'draft_score' => ['nullable', 'numeric', 'min:0', 'max:99.999'],
@@ -424,6 +463,17 @@ class JudgeController extends Controller
      */
     private function saveJudgeScore(Performance $performance, Request $request): string
     {
+        return DB::transaction(function () use ($performance, $request) {
+            $locked = Performance::query()
+                ->lockForUpdate()
+                ->findOrFail($performance->id);
+
+            return $this->saveJudgeScoreLocked($locked, $request);
+        });
+    }
+
+    private function saveJudgeScoreLocked(Performance $performance, Request $request): string
+    {
         $user = $request->user();
         $panel = $user->judgePanel();
 
@@ -452,6 +502,41 @@ class JudgeController extends Controller
             $subpanel = $panel['subpanel'] ?? null;
             $penaltyType = $panel['penalty_type'] ?? null;
             $score = (float) $request->input('score');
+        }
+
+        $performance->loadMissing('category.tournament');
+        $slot = strtoupper((string) ($panel['slot'] ?? $user->slot ?? ''));
+        if (! $user->isAdmin()
+            && $slot !== ''
+            && SecretaryLiveUi::isSlotInactive($performance->category, $slot)) {
+            abort(422, 'Ваш судейский слот отключён секретарём для этого потока.');
+        }
+
+        $existingScore = JudgeScore::query()
+            ->where('performance_id', $performance->id)
+            ->where('judge_id', $user->id)
+            ->where('panel', $panelKey)
+            ->where('subpanel', $subpanel)
+            ->where('penalty_type', $penaltyType)
+            ->first();
+        $isReturnedForRevision = $existingScore !== null && $existingScore->submitted_at === null;
+
+        $category = $performance->category;
+        $tournament = $category?->tournament;
+        if (! $isReturnedForRevision
+            && ($tournament === null
+                || (int) ($tournament->active_category_id ?? 0) !== (int) $performance->category_id
+                || $this->normalizedSessionId($tournament->active_stream_session_id)
+                    !== $this->normalizedSessionId($performance->stream_session_id))) {
+            abort(422, 'Это выступление больше не относится к активному потоку и сессии секретаря.');
+        }
+
+        if ($performance->status !== 'performing' && ! $isReturnedForRevision) {
+            abort(422, 'Оценку можно отправить только для текущего выступления или после возврата на доработку.');
+        }
+
+        if (($performance->approved_at !== null || $performance->published_at !== null) && ! $isReturnedForRevision) {
+            abort(422, 'Утверждённый или опубликованный результат нельзя изменять без возврата на доработку.');
         }
 
         // История нажатий с планшета (для просмотра секретарём / главным судьёй).
@@ -544,31 +629,26 @@ class JudgeController extends Controller
      */
     private function finalizeAndAdvanceIfReady(Performance $performance): ?bool
     {
-        $performance->loadMissing(['judgeScores.judge', 'category']);
-        if ($performance->status !== 'performing'
-            || ! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
-            return null;
-        }
-
         $moved = false;
         $finalized = false;
         DB::transaction(function () use ($performance, &$moved, &$finalized) {
-            $performance->refresh();
-            $performance->load(['judgeScores.judge', 'category']);
+            $locked = Performance::query()->lockForUpdate()->findOrFail($performance->id);
+            $locked->load(['judgeScores.judge', 'category']);
+            $locked->recalculateTotals();
 
-            if (! SecretaryLiveUi::readyToFinalize($performance, $performance->category)) {
+            if ($locked->status !== 'performing'
+                || ! SecretaryLiveUi::readyToFinalize($locked, $locked->category)) {
                 return;
             }
 
-            $performance->recalculateTotals();
-            $performance->finalized_at = now();
-            $performance->save();
+            $locked->finalized_at = now();
+            $locked->save();
             $finalized = true;
 
-            if ($performance->category) {
+            if ($locked->category) {
                 $moved = StreamAdvanceService::advanceToNextInCategory(
-                    $performance->category,
-                    $performance->stream_session_id,
+                    $locked->category,
+                    $locked->stream_session_id,
                 );
             }
         });
@@ -579,6 +659,7 @@ class JudgeController extends Controller
     public function finalize(Performance $performance): RedirectResponse
     {
         $performance->load(['judgeScores.judge', 'category']);
+        $performance->recalculateTotals();
 
         if (! SecretaryLiveUi::requiredScoresSubmitted($performance, $performance->category)) {
             return back()->withErrors([
@@ -590,6 +671,16 @@ class JudgeController extends Controller
             return back()->withErrors([
                 'finalize' => 'DB1 и DA1 ещё не отправили отдельные ручные средние.',
             ]);
+        }
+
+        if (! SecretaryLiveUi::requiredPenaltyInputsSubmitted($performance, $performance->category)) {
+            return back()->withErrors([
+                'finalize' => 'Не все активные штрафные позиции (LINE/TIME/RESP) завершили работу.',
+            ]);
+        }
+
+        if ($performance->total === null) {
+            return back()->withErrors(['finalize' => 'Итог не рассчитан: проверьте состав активных панелей и оценки.']);
         }
 
         if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $performance->category)) {
@@ -622,11 +713,69 @@ class JudgeController extends Controller
             }
         }
 
-        return Category::query()
-            ->where('tournament_id', $tournament->id)
-            ->whereHas('performances', fn ($q) => $q->whereIn('status', ['performing', 'on_deck']))
+        return null;
+    }
+
+    /**
+     * Возвращённая конкретному судье оценка имеет приоритет над текущим выходом.
+     * Для DB1/DA1 доработка остаётся активной и на втором шаге ручной средней.
+     */
+    private function resolveJudgePerformance(Category $category, $user, ?int $sessionId): ?Performance
+    {
+        if ($user !== null && ! $user->isAdmin()) {
+            $slot = strtoupper((string) ($user->slot ?? ''));
+            $needsManualAverage = in_array($slot, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true);
+
+            if ($slot === 'TIME') {
+                $timerRevision = Performance::query()
+                    ->where('category_id', $category->id)
+                    ->whereNotNull('timer_revision_requested_at')
+                    ->orderByDesc('timer_revision_requested_at')
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($timerRevision !== null) {
+                    return $timerRevision;
+                }
+            }
+
+            $revision = Performance::query()
+                ->where('category_id', $category->id)
+                ->whereNull('finalized_at')
+                ->whereHas('judgeScores', function ($query) use ($user, $needsManualAverage) {
+                    $query->where('judge_id', $user->id)
+                        ->where(function ($state) use ($needsManualAverage) {
+                            $state->whereNull('submitted_at');
+                            if ($needsManualAverage) {
+                                $state->orWhere(function ($average) {
+                                    $average->whereNotNull('submitted_at')
+                                        ->whereNull('average_submitted_at');
+                                });
+                            }
+                        });
+                })
+                ->orderByDesc('updated_at')
+                ->orderByDesc('id')
+                ->first();
+
+            if ($revision !== null) {
+                return $revision;
+            }
+        }
+
+        $performances = Performance::query()
+            ->where('category_id', $category->id)
+            ->when(
+                $sessionId !== null,
+                fn ($query) => $query->where('stream_session_id', $sessionId),
+                fn ($query) => $query->whereNull('stream_session_id'),
+            )
+            ->where('status', 'performing')
+            ->orderBy('order_index')
             ->orderBy('id')
-            ->first();
+            ->get();
+
+        return SecretaryLiveUi::currentPerformance(SecretaryLiveUi::orderedPerformances($performances));
     }
 
     private function renderTabletForCategory(Tournament $tournament, Category $category, Request $request): View
@@ -678,7 +827,11 @@ class JudgeController extends Controller
             ->get();
 
         $ordered = SecretaryLiveUi::orderedPerformances($performances);
-        $current = SecretaryLiveUi::currentPerformance($ordered);
+        $current = $this->resolveJudgePerformance(
+            $category,
+            $user,
+            $this->activeSessionId($tournament, $category),
+        );
         $streamStatus = SecretaryLiveUi::streamStatus($current);
 
         if ($current) {
@@ -686,6 +839,9 @@ class JudgeController extends Controller
         }
 
         $myScore = $current ? $this->findMyScore($current, $user, $panel) : null;
+        $slotInactive = ! $user->isAdmin()
+            && ! empty($panel['slot'])
+            && SecretaryLiveUi::isSlotInactive($category, (string) $panel['slot']);
 
         $rules = $category->scoring_rules ?? [];
         $aBase = (float) ($rules['a_base'] ?? 10.0);
@@ -699,6 +855,8 @@ class JudgeController extends Controller
             'streamStatus' => $streamStatus,
             'panel' => $panel,
             'myScore' => $myScore,
+            'slotInactive' => $slotInactive,
+            'tabletRev' => $this->judgeTabletRevision($tournament, $category, $current, $myScore, $user),
             'aBase' => $aBase,
             'eBase' => $eBase,
         ]);
@@ -735,5 +893,60 @@ class JudgeController extends Controller
 
             return ($s->penalty_type ?? null) === ($panel['penalty_type'] ?? null);
         });
+    }
+
+    private function activeSessionId(Tournament $tournament, Category $category): ?int
+    {
+        $sessionId = $tournament->active_stream_session_id;
+        if ($sessionId === null) {
+            return null;
+        }
+
+        return $category->sessions()->whereKey((int) $sessionId)->exists()
+            ? (int) $sessionId
+            : null;
+    }
+
+    private function normalizedSessionId(mixed $sessionId): ?int
+    {
+        return $sessionId === null ? null : (int) $sessionId;
+    }
+
+    private function judgeTabletRevision(
+        Tournament $tournament,
+        Category $category,
+        ?Performance $performance,
+        ?JudgeScore $score,
+        $user,
+    ): string {
+        $slot = strtoupper((string) ($user?->slot ?? ''));
+
+        return md5(json_encode([
+            'category' => $category->id,
+            'session' => $tournament->active_stream_session_id,
+            'inactive_slots' => $category->inactiveJudgeSlotList(),
+            'slot_inactive' => $slot !== '' && SecretaryLiveUi::isSlotInactive($category, $slot),
+            'performance' => $performance?->only([
+                'id',
+                'status',
+                'updated_at',
+                'finalized_at',
+                'approved_at',
+                'published_at',
+                'timer_started_at',
+                'timer_ended_at',
+                'timer_revision_requested_at',
+                'actual_duration_seconds',
+                'time_penalty',
+            ]),
+            'score' => $score?->only([
+                'id',
+                'score',
+                'average_score',
+                'submitted_at',
+                'average_submitted_at',
+                'updated_at',
+            ]),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 }
