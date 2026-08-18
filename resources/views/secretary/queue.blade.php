@@ -1247,12 +1247,17 @@
     const pageRoot = document.querySelector('[data-async-page]');
     const pingUrl = @json(route('secretary.queue.ping', $category).($streamSession ? '?session='.$streamSession->id : ''));
     let lastRev = @json($queueRev);
-    const intervalMs = 3000;
+    let requestInFlight = false;
+    let failedRefreshes = 0;
+    const intervalMs = 1500;
     const checkForUpdates = async function () {
         if (pageRoot && ! pageRoot.isConnected) {
             clearInterval(pingInterval);
             return;
         }
+        if (requestInFlight) return;
+
+        requestInFlight = true;
         try {
             const r = await fetch(pingUrl, {
                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1267,13 +1272,25 @@
                 return;
             }
             if (j.rev !== lastRev) {
+                let refreshed = false;
                 if (window.JudgeAsync) {
-                    await window.JudgeAsync.refresh(window.location.href, { silent: true });
-                } else {
+                    refreshed = await window.JudgeAsync.refresh(window.location.href, { silent: true });
+                }
+
+                if (refreshed) return;
+
+                // JudgeAsync may be temporarily busy with a secretary action. Retry once;
+                // if background replacement is still unavailable, reload automatically.
+                failedRefreshes += 1;
+                if (!window.JudgeAsync || failedRefreshes >= 2) {
                     window.location.reload();
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            // A short network interruption must not stop the next polling attempt.
+        } finally {
+            requestInFlight = false;
+        }
     };
     const pingInterval = setInterval(checkForUpdates, intervalMs);
     checkForUpdates();

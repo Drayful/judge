@@ -757,6 +757,51 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotSame($before, $after);
     }
 
+    public function test_secretary_queue_revision_changes_for_score_manual_average_and_penalty(): void
+    {
+        $performance = $this->performance();
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $dbJudge = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+        $lineJudge = User::factory()->create(['role' => 'line_judge', 'slot' => 'LINE1']);
+        $pingUrl = route('secretary.queue.ping', $performance->category);
+
+        $initialRevision = $this->actingAs($secretary)
+            ->getJson($pingUrl)
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'must-revalidate, no-cache, no-store, private')
+            ->json('rev');
+
+        $dbScore = JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $dbJudge->id,
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'score' => 7.5,
+            'submitted_at' => now(),
+        ]);
+        $scoreRevision = $this->actingAs($secretary)->getJson($pingUrl)->json('rev');
+
+        $dbScore->update([
+            'average_score' => 7.4,
+            'average_submitted_at' => now(),
+        ]);
+        $averageRevision = $this->actingAs($secretary)->getJson($pingUrl)->json('rev');
+
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $lineJudge->id,
+            'panel' => 'penalty',
+            'penalty_type' => 'line',
+            'score' => 0.3,
+            'submitted_at' => now(),
+        ]);
+        $penaltyRevision = $this->actingAs($secretary)->getJson($pingUrl)->json('rev');
+
+        $this->assertNotSame($initialRevision, $scoreRevision);
+        $this->assertNotSame($scoreRevision, $averageRevision);
+        $this->assertNotSame($averageRevision, $penaltyRevision);
+    }
+
     public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void
     {
         $jury = User::factory()->create(['role' => 'superior_jury']);
