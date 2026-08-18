@@ -47,6 +47,21 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertSame(0.05, (float) $performance->time_penalty);
     }
 
+    public function test_duration_with_microseconds_is_saved_as_whole_seconds(): void
+    {
+        $performance = $this->performance('individual');
+        $startedAt = Carbon::parse('2026-08-18 09:07:56.000000');
+        $finishedAt = Carbon::parse('2026-08-18 09:08:48.842468');
+
+        $performance->startOfficialTimer($startedAt);
+        $performance->stopOfficialTimer($finishedAt);
+        $performance->save();
+
+        $saved = $performance->fresh();
+        $this->assertSame(52, $saved->actual_duration_seconds);
+        $this->assertSame(1.15, (float) $saved->time_penalty);
+    }
+
     public function test_time_judge_starts_and_stops_the_official_timer_from_the_tablet(): void
     {
         Carbon::setTestNow('2026-08-03 10:00:00');

@@ -76,6 +76,20 @@ class SecretaryController extends Controller
     {
         $tournament->load(['categories' => fn ($q) => $q->orderedByPerformanceTime()]);
 
+        $poolEntriesCount = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->count();
+
+        $poolIndividualCount = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('program', 'individual')
+            ->count();
+
+        $poolTeamCount = Entry::query()
+            ->where('tournament_id', $tournament->id)
+            ->where('program', 'group')
+            ->count();
+
         $athletes = Athlete::query()
             ->select('athletes.*')
             ->join('performances', 'performances.athlete_id', '=', 'athletes.id')
@@ -92,6 +106,9 @@ class SecretaryController extends Controller
         return view('secretary.tournament', [
             'tournament' => $tournament,
             'athletes' => $athletes,
+            'poolEntriesCount' => $poolEntriesCount,
+            'poolIndividualCount' => $poolIndividualCount,
+            'poolTeamCount' => $poolTeamCount,
             'protocolGroups' => $protocols->groups($tournament),
         ]);
     }

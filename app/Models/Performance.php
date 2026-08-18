@@ -119,7 +119,10 @@ class Performance extends Model
         }
 
         $finishedAt ??= now();
-        $seconds = max(0, $this->timer_started_at->diffInSeconds($finishedAt));
+        // Carbon 3 возвращает дробные секунды, если одна из меток содержит микросекунды.
+        // В БД длительность хранится как unsignedSmallInteger, а планшет показывает
+        // полные прошедшие секунды, поэтому фиксируем то же целое значение.
+        $seconds = max(0, (int) floor($this->timer_started_at->diffInSeconds($finishedAt)));
         $bounds = $this->durationBounds();
         $outside = $seconds < $bounds['min']
             ? $bounds['min'] - $seconds

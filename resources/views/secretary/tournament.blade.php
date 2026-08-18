@@ -59,7 +59,16 @@
 
             <x-card>
                 <div class="mb-4">
-                    <div class="font-semibold text-slate-100">Импорт списка участвующих (Excel)</div>
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div class="font-semibold text-slate-100">Импорт списка участвующих (Excel)</div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <x-badge tone="green">{{ $poolEntriesCount }} записей в пуле</x-badge>
+                            @if($poolEntriesCount > 0)
+                                <x-badge tone="gray">{{ $poolIndividualCount }} личных</x-badge>
+                                <x-badge tone="violet">{{ $poolTeamCount }} команд</x-badge>
+                            @endif
+                        </div>
+                    </div>
                     <div class="mt-2 rounded-lg border border-emerald-800/50 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100/95">
                         Участницы загружаются в <strong>пул этого турнира</strong>:
                         «{{ $tr->name }}» <span class="font-mono text-emerald-300/90">#{{ $tr->id }}</span>.
@@ -89,8 +98,9 @@
                         Добавьте категорию вручную или используйте импорт Excel выше.
                     </div>
                     <div class="flex items-center gap-2">
-                        <x-badge tone="violet">{{ $tr->categories->count() }} категорий</x-badge>
-                        <x-badge tone="gray">{{ $athletes->count() }} атлетов</x-badge>
+                        <x-badge tone="green">{{ $poolEntriesCount }} в пуле</x-badge>
+                        <x-badge tone="violet">{{ $tr->categories->count() }} потоков</x-badge>
+                        <x-badge tone="gray">{{ $athletes->count() }} в старт-листах</x-badge>
                     </div>
                 </div>
 
@@ -186,9 +196,18 @@
                             </div>
                         </div>
                     @empty
-                        <div class="text-sm text-slate-400">
-                            Пока нет категорий. Импортируйте протокол или создайте категорию вручную.
-                        </div>
+                        @if($poolEntriesCount > 0)
+                            <div class="rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
+                                В пуле загружено <strong>{{ $poolEntriesCount }}</strong> записей.
+                                Теперь откройте
+                                <a class="font-semibold underline hover:text-white" href="{{ route('secretary.tournament.groups', $tr) }}">«Группы и потоки»</a>,
+                                чтобы сформировать группы, потоки и старт-листы.
+                            </div>
+                        @else
+                            <div class="text-sm text-slate-400">
+                                Пока нет потоков и участников в пуле. Импортируйте список Excel или создайте поток вручную.
+                            </div>
+                        @endif
                     @endforelse
                 </div>
             </x-card>
@@ -202,9 +221,16 @@
                 </div>
 
                 @if($athletes->isEmpty())
-                    <div class="text-sm text-slate-400">
-                        В этом турнире пока нет атлетов. Импортируйте протокол или добавьте их в очередь категории.
-                    </div>
+                    @if($poolEntriesCount > 0)
+                        <div class="text-sm text-slate-400">
+                            В пуле уже {{ $poolEntriesCount }} записей, но старт-листы ещё не сформированы.
+                            Перейдите в <a class="text-emerald-400 underline hover:text-emerald-300" href="{{ route('secretary.tournament.groups', $tr) }}">«Группы и потоки»</a>.
+                        </div>
+                    @else
+                        <div class="text-sm text-slate-400">
+                            В этом турнире пока нет атлетов. Импортируйте список или добавьте их в очередь потока.
+                        </div>
+                    @endif
                 @else
                     <div x-data="{ search: '' }">
                         <input x-model="search" type="search" placeholder="Поиск по ФИО или ИИН"

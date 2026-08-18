@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Athlete;
 use App\Models\Entry;
 use App\Models\Tournament;
+use App\Models\User;
 use App\Services\StartProtocolImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -147,5 +148,34 @@ class ParticipantRosterImportTest extends TestCase
         $this->assertSame(0, $stats['athletes_created']);
         $this->assertSame(1, Athlete::where('iin', '181234567890')->count());
         $this->assertSame($existing->id, Entry::where('tournament_id', $tournament->id)->value('athlete_id'));
+    }
+
+    public function test_tournament_page_shows_imported_pool_before_streams_are_created(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $individual = Athlete::create(['last_name' => 'Иванова', 'first_name' => 'Анна']);
+        $team = Athlete::create(['last_name' => 'Команда', 'first_name' => '—', 'is_team' => true]);
+
+        Entry::create([
+            'tournament_id' => $tournament->id,
+            'athlete_id' => $individual->id,
+            'program' => 'individual',
+            'birth_year' => 2018,
+        ]);
+        Entry::create([
+            'tournament_id' => $tournament->id,
+            'athlete_id' => $team->id,
+            'program' => 'group',
+            'birth_year' => 2015,
+        ]);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.tournament', $tournament))
+            ->assertOk()
+            ->assertSeeText('2 записей в пуле')
+            ->assertSeeText('1 личных')
+            ->assertSeeText('1 команд')
+            ->assertSeeText('0 в старт-листах');
     }
 }
