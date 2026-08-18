@@ -393,14 +393,15 @@ class ScoreboardUi
     }
 
     /**
+     * Все турниры для экрана выбора табло. Доступность табло больше не зависит
+     * от служебных флагов публикации турнира или потока.
+     *
      * @return Collection<int, Tournament>
      */
-    public static function publishedTournaments(): Collection
+    public static function scoreboardTournaments(): Collection
     {
         return Tournament::query()
-            ->where('is_published', true)
-            ->whereHas('categories', fn ($q) => $q->where('is_published', true))
-            ->with(['categories' => fn ($q) => $q->where('is_published', true)->orderedByPerformanceTime()])
+            ->with(['categories' => fn ($query) => $query->orderedByPerformanceTime()])
             ->orderByDesc('id')
             ->get();
     }

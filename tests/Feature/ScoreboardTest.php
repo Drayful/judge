@@ -31,7 +31,7 @@ class ScoreboardTest extends TestCase
         $response = $this->get(route('scoreboard.index', ['category' => $category->id]));
 
         $response->assertOk();
-        $response->assertSee('Выберите поток');
+        $response->assertSee('Выберите турнир');
         $response->assertSee('Public Cup');
         $response->assertSee('Общая таблица результатов');
     }
@@ -64,7 +64,7 @@ class ScoreboardTest extends TestCase
             ->assertRedirect(route('scoreboard.table', $category));
     }
 
-    public function test_category_results_requires_published(): void
+    public function test_category_results_are_available_without_publication_flags(): void
     {
         $tournament = Tournament::create(['name' => 'Hidden', 'is_published' => false]);
         $category = Category::create([
@@ -73,7 +73,37 @@ class ScoreboardTest extends TestCase
             'is_published' => true,
         ]);
 
-        $this->get(route('scoreboard.table', $category))->assertNotFound();
+        $this->get(route('scoreboard.table', $category))
+            ->assertOk()
+            ->assertSee('Hidden stream');
+    }
+
+    public function test_picker_shows_all_tournaments_and_uses_the_active_stream(): void
+    {
+        $draftTournament = Tournament::create(['name' => 'Draft Cup', 'is_published' => false]);
+        $first = Category::create([
+            'tournament_id' => $draftTournament->id,
+            'name' => 'Первый поток',
+            'is_published' => false,
+        ]);
+        $active = Category::create([
+            'tournament_id' => $draftTournament->id,
+            'name' => 'Поток на ковре',
+            'is_published' => false,
+        ]);
+        $draftTournament->update(['active_category_id' => $active->id]);
+
+        $otherTournament = Tournament::create(['name' => 'Empty Cup', 'is_published' => false]);
+
+        $response = $this->get(route('scoreboard.index', ['tournament' => $draftTournament->id]));
+
+        $response->assertOk();
+        $response->assertSee('Draft Cup');
+        $response->assertSee('Empty Cup');
+        $response->assertSee('Поток на ковре');
+        $response->assertDontSee('Первый поток');
+        $response->assertSee(route('scoreboard.performance', $active), false);
+        $this->assertNotSame($first->id, $active->id);
     }
 
     public function test_performance_live_returns_current_athlete(): void

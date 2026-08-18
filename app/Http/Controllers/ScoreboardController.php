@@ -20,26 +20,32 @@ class ScoreboardController extends Controller
 
     public function index(): View
     {
-        $tournaments = ScoreboardUi::publishedTournaments();
-        $selected = $this->resolveSelectedCategory(request()->integer('category'));
+        $tournaments = ScoreboardUi::scoreboardTournaments();
+        $selected = $this->resolveSelectedCategory(
+            request()->integer('category'),
+            request()->integer('tournament'),
+        );
+        $selectedTournament = $selected?->tournament
+            ?? $tournaments->firstWhere('id', request()->integer('tournament'));
 
         return view('scoreboard.index', [
             'tournaments' => $tournaments,
             'selected' => $selected,
+            'selectedTournament' => $selectedTournament,
         ]);
     }
 
     /** @deprecated Используйте scoreboard.table — ссылка для родителей. */
     public function category(Category $category): RedirectResponse
     {
-        $this->ensurePublic($category);
+        $this->ensureAvailable($category);
 
         return redirect()->route('scoreboard.table', $category);
     }
 
     public function table(Category $category): View
     {
-        $this->ensurePublic($category);
+        $this->ensureAvailable($category);
         $category->loadMissing('tournament');
 
         return view('scoreboard.table', [
@@ -50,7 +56,7 @@ class ScoreboardController extends Controller
 
     public function categoryLive(Category $category): JsonResponse
     {
-        $this->ensurePublic($category);
+        $this->ensureAvailable($category);
 
         $rows = $this->publishedRowPayloads($category);
         $rev = md5(collect($rows)->map(fn ($r) => $r['id'].':'.$r['place'].':'.$r['total'].':'.($r['inquiry_status'] ?? ''))->implode('|'));
@@ -65,7 +71,7 @@ class ScoreboardController extends Controller
 
     public function performance(Category $category): View
     {
-        $this->ensurePublic($category);
+        $this->ensureAvailable($category);
         $category->loadMissing('tournament');
         $livePerformance = ScoreboardUi::livePerformance($category);
 
@@ -77,49 +83,80 @@ class ScoreboardController extends Controller
 
     public function performanceLive(Category $category): JsonResponse
     {
-        $this->ensurePublic($category);
+        $this->ensureAvailable($category);
 
         return response()->json(
             ScoreboardUi::performancePayload($category, ScoreboardUi::livePerformance($category))
         );
     }
 
-    private function resolveSelectedCategory(int $categoryId): ?Category
+    private function resolveSelectedCategory(int $categoryId, int $tournamentId): ?Category
     {
         if ($categoryId > 0) {
             $category = Category::query()->with('tournament')->find($categoryId);
-            if ($category && $category->is_published && $category->tournament?->is_published) {
+            if ($category?->tournament !== null) {
                 return $category;
             }
         }
 
-        return $this->defaultPublicCategory();
+        if ($tournamentId > 0) {
+            $tournament = Tournament::query()->find($tournamentId);
+
+            return $tournament ? $this->currentCategoryForTournament($tournament) : null;
+        }
+
+        return $this->defaultScoreboardCategory();
     }
 
-    private function defaultPublicCategory(): ?Category
+    private function defaultScoreboardCategory(): ?Category
     {
-        $tournament = Tournament::query()
-            ->where('is_published', true)
-            ->whereHas('categories', fn ($q) => $q->where('is_published', true))
+        $tournaments = Tournament::query()
+            ->whereHas('categories')
             ->orderByDesc('id')
-            ->first();
+            ->get();
+
+        $tournament = $tournaments->first(fn (Tournament $item) => $item->active_category_id !== null)
+            ?? $tournaments->first();
 
         if ($tournament === null) {
             return null;
         }
 
-        return Category::query()
+        return $this->currentCategoryForTournament($tournament);
+    }
+
+    private function currentCategoryForTournament(Tournament $tournament): ?Category
+    {
+        if ($tournament->active_category_id !== null) {
+            $active = Category::query()
+                ->with('tournament')
+                ->where('tournament_id', $tournament->id)
+                ->find($tournament->active_category_id);
+
+            if ($active !== null) {
+                return $active;
+            }
+        }
+
+        $live = Category::query()
+            ->with('tournament')
             ->where('tournament_id', $tournament->id)
-            ->where('is_published', true)
+            ->whereHas('performances', fn ($query) => $query->whereIn('status', ['performing', 'on_deck']))
+            ->orderedByPerformanceTime()
+            ->first();
+
+        return $live ?? Category::query()
+            ->with('tournament')
+            ->where('tournament_id', $tournament->id)
             ->orderedByPerformanceTime()
             ->first();
     }
 
-    private function ensurePublic(Category $category): void
+    private function ensureAvailable(Category $category): void
     {
         $category->loadMissing('tournament');
 
-        if (! $category->is_published || ! $category->tournament?->is_published) {
+        if ($category->tournament === null) {
             abort(404);
         }
     }
