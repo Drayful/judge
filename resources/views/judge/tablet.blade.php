@@ -37,42 +37,47 @@
 @endphp
 
 @section('content')
-    <div class="h-screen overflow-hidden flex flex-col select-none">
-        <div class="w-full max-w-[1600px] mx-auto px-2 py-2 flex-1 min-h-0 flex flex-col gap-2">
+    <div class="judge-console h-screen overflow-hidden flex flex-col select-none" data-panel="{{ $pKey }}" data-slot="{{ $slot }}">
+        <div class="judge-shell w-full max-w-[1600px] mx-auto px-2.5 py-2.5 flex-1 min-h-0 flex flex-col gap-2.5">
 
             {{-- ====== ШАПКА (одна строка) ====== --}}
-            <div class="shrink-0 flex items-center gap-2 h-12">
-                <a href="{{ route('judge.tournaments') }}" class="text-xs text-slate-400 hover:text-slate-200 px-2">←</a>
+            <div class="judge-topbar shrink-0 flex items-center gap-2 h-14 px-2">
+                <a href="{{ route('judge.tournaments') }}" class="judge-back-button grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg text-slate-300 hover:text-white" aria-label="Назад к турнирам">←</a>
 
-                <div class="flex-1 min-w-0 rounded-lg bg-[#0f1830] border border-slate-800 px-3 py-1.5 flex items-center gap-3 h-full">
+                <div class="flex-1 min-w-0 px-2 py-1 flex items-center gap-3 h-full">
                     @if($athlete)
-                        <span class="text-base font-semibold text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
-                        <span class="text-[11px] text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
+                        <div class="min-w-0">
+                            <div class="text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live performance</div>
+                            <div class="flex min-w-0 items-baseline gap-3">
+                                <span class="text-lg font-bold tracking-tight text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
+                                <span class="text-[11px] text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
+                            </div>
+                        </div>
                     @else
                         <span class="text-sm text-amber-200">Нет активного выступления</span>
                     @endif
                 </div>
 
                 @if($ageMin !== null)
-                    <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2" title="Минимальный возраст в категории">
-                        <span class="text-[10px] uppercase text-slate-400">Мин.</span>
+                    <div class="judge-meta-chip rounded-xl px-3 h-10 flex items-center gap-2" title="Минимальный возраст в категории">
+                        <span class="text-[9px] uppercase tracking-wider text-slate-500">Мин.</span>
                         <span class="text-base font-bold text-cyan-200 tabular-nums">{{ $ageMin }}</span>
                     </div>
                 @endif
                 @if($ageMax !== null)
-                    <div class="rounded-lg bg-[#1c2547] border border-slate-700 px-3 h-full flex items-center gap-2" title="Максимальный возраст в категории">
-                        <span class="text-[10px] uppercase text-slate-400">Макс.</span>
+                    <div class="judge-meta-chip rounded-xl px-3 h-10 flex items-center gap-2" title="Максимальный возраст в категории">
+                        <span class="text-[9px] uppercase tracking-wider text-slate-500">Макс.</span>
                         <span class="text-base font-bold text-cyan-200 tabular-nums">{{ $ageMax }}</span>
                     </div>
                 @endif
                 @if($isHeadJudge)
-                    <div class="rounded-lg bg-[#0e5a3f] border border-emerald-700 px-3 h-full flex items-center">
-                        <span class="text-xs font-semibold uppercase tracking-wider text-emerald-50">Ответственный судья</span>
+                    <div class="judge-meta-chip rounded-xl px-3 h-10 flex items-center">
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">Ответственный</span>
                     </div>
                 @endif
-                <div class="rounded-lg bg-[#0f1830] border border-slate-800 px-3 h-full flex items-center">
-                    <span class="text-[10px] uppercase text-slate-400 mr-1">Слот</span>
-                    <span class="text-sm font-mono text-emerald-300">{{ $slot ?? '—' }}</span>
+                <div class="judge-meta-chip judge-slot-chip rounded-xl px-3 h-10 flex items-center">
+                    <span class="text-[9px] uppercase tracking-wider text-slate-400 mr-2">Панель</span>
+                    <span class="text-base font-mono font-bold">{{ $slot ?? '—' }}</span>
                 </div>
             </div>
 
@@ -84,14 +89,14 @@
 
             @if($slotInactive)
                 <div class="flex-1 min-h-0 grid place-items-center">
-                    <div class="rounded-xl border border-slate-700 bg-slate-950/70 p-6 text-center max-w-md">
+                    <div class="judge-state-card rounded-3xl p-8 text-center max-w-md">
                         <h2 class="text-lg font-semibold text-slate-100">Слот {{ $slot }} отключён</h2>
                         <p class="mt-2 text-sm text-slate-400">Секретарь исключил этот слот из состава бригады. Оценка не требуется и не принимается сервером.</p>
                     </div>
                 </div>
             @elseif(! $current || ! $athlete)
                 <div class="flex-1 min-h-0 grid place-items-center">
-                    <div class="rounded-xl border border-amber-800/50 bg-amber-950/30 p-6 text-center max-w-md">
+                    <div class="judge-state-card rounded-3xl p-8 text-center max-w-md">
                         <h2 class="text-lg font-semibold text-amber-100">Нет активного выступления</h2>
                         <p class="mt-2 text-sm text-amber-100/80">Секретарь должен запустить выступление. Ввод открывается только для статуса <code class="text-amber-300">performing</code>.</p>
                     </div>
@@ -139,9 +144,9 @@
                                 }
                             },
                         }"
-                        class="w-full max-w-2xl rounded-2xl border border-cyan-700/60 bg-slate-950/80 p-8 text-center shadow-2xl"
+                        class="judge-state-card w-full max-w-2xl rounded-3xl p-8 text-center"
                     >
-                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Второй этап · {{ $slot }}</div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Второй этап · финальный · {{ $slot }}</div>
                         <h2 class="mt-3 text-3xl font-bold text-white">Введите ручную среднюю {{ $slot === 'DB1' ? 'DB' : 'DA' }}</h2>
                         <p class="mt-2 text-sm text-slate-400">Основная оценка {{ $submittedDisplay }} уже сохранена. Введите согласованную среднюю подпанели отдельным значением.</p>
 
@@ -155,11 +160,11 @@
                                 required
                                 inputmode="decimal"
                                 autofocus
-                                class="block w-full rounded-2xl border border-cyan-700 bg-slate-900 px-6 py-5 text-center font-mono text-6xl font-extrabold tabular-nums text-cyan-100 focus:border-cyan-400 focus:ring-cyan-400"
+                                class="block w-full rounded-lg border border-cyan-700 bg-slate-900 px-6 py-5 text-center font-mono text-6xl font-extrabold tabular-nums text-cyan-100 shadow-inner focus:border-cyan-400 focus:ring-cyan-400"
                                 placeholder="0.000"
                             >
                             <button type="submit" :disabled="busy || average === ''"
-                                class="mt-5 w-full rounded-2xl bg-emerald-700 px-6 py-5 text-2xl font-bold uppercase tracking-wide text-white hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50">
+                                class="mt-5 w-full rounded-lg bg-emerald-600 px-6 py-5 text-2xl font-bold uppercase tracking-wide text-white shadow-lg hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50">
                                 <span x-show="! busy">Отправить среднюю</span>
                                 <span x-show="busy">Сохранение…</span>
                             </button>
@@ -170,7 +175,7 @@
                 </div>
             @elseif($alreadySubmitted)
                 <div class="flex-1 min-h-0 grid place-items-center">
-                    <div class="rounded-2xl border border-emerald-800/60 bg-emerald-950/30 p-10 text-center">
+                    <div class="judge-state-card rounded-3xl p-10 text-center">
                         <div class="text-xs uppercase tracking-widest text-emerald-300/80">Оценка {{ $slot }} отправлена</div>
                         <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ $submittedDisplay }}</div>
                         @if($manualAverageSubmitted)

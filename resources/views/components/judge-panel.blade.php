@@ -43,7 +43,7 @@
         penaltyType: @js($penaltyType),
         groupProgram: @js((bool) $groupProgram),
     })"
-    class="flex-1 min-h-0 grid grid-cols-12 gap-2 relative"
+    class="judge-workspace flex-1 min-h-0 grid grid-cols-12 gap-2.5 relative"
 >
     @if ($type === 'd' && $subpanel === 'da' && $groupProgram)
         @include('judge.partials._tablet_da_group', ['slot' => $slot, 'subpanel' => $subpanel])
@@ -62,8 +62,8 @@
     @endif
 
     {{-- Плашка "идёт отправка" / ошибки сети --}}
-    <div x-cloak x-show="busy" class="absolute inset-0 z-30 bg-black/40 grid place-items-center">
-        <div class="rounded-xl bg-slate-900 border border-slate-700 px-5 py-3 text-sm text-slate-100">Отправка…</div>
+    <div x-cloak x-show="busy" class="absolute inset-0 z-30 bg-black/55 backdrop-blur-sm grid place-items-center">
+        <div class="judge-state-card rounded-2xl px-6 py-4 text-sm font-semibold text-slate-100">Отправка оценки…</div>
     </div>
     <div x-cloak x-show="error" class="absolute top-2 left-1/2 -translate-x-1/2 z-30 rounded-xl bg-rose-900/90 border border-rose-700 px-4 py-2 text-sm text-white shadow-lg"
          x-text="error"></div>

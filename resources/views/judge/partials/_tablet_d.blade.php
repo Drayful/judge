@@ -69,7 +69,7 @@
         </button>
     </div>
 
-    <div class="flex-1 min-h-0 rounded-2xl border border-slate-700 bg-[#0f1830] p-3 flex flex-col items-center justify-center text-center">
+    <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
         <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая оценка</div>
         <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="finalScore().toFixed(2)"></div>
 
@@ -137,7 +137,7 @@
     </div>
 
     <button type="button" @click="submit()" :disabled="busy"
-        class="shrink-0 rounded-2xl bg-[#3b3070] hover:bg-[#4a3d8a] disabled:opacity-50 disabled:cursor-wait border border-indigo-700/60 py-3 text-lg font-bold text-white shadow-lg shadow-indigo-950/40 active:scale-[0.99]">
+        class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
         ОТПРАВИТЬ
     </button>
 </div>

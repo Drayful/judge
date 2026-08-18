@@ -13,55 +13,56 @@
 @endphp
 
 @if ($penaltyType === 'time')
-    <div class="col-span-12 grid h-full min-h-0 grid-cols-1 gap-3 md:grid-cols-3">
-        <button type="button" @click="recordOfficialTimer('start')"
-            :disabled="timerBusy || officialTimerRunning() || timerEndedAt"
-            class="rounded-2xl border border-emerald-700/60 bg-emerald-700 px-5 py-8 text-3xl font-bold text-white shadow-lg transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40">
-            ▶ Старт таймера
-        </button>
-
-        <div class="rounded-2xl border border-sky-700/60 bg-slate-950/70 p-6 text-center shadow-lg">
+    <div class="col-span-12 grid h-full min-h-0 grid-cols-2 grid-rows-[auto_1fr] gap-3 !pt-0">
+        <div class="judge-score-stage col-span-2 rounded-xl border p-5 text-center">
             <div class="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">Официальное время</div>
-            <div class="mt-4 font-mono text-7xl font-extrabold tabular-nums text-white" x-text="officialTimerValue()">—</div>
-            <div class="mt-4 text-sm text-slate-400">Норматив считает система после остановки таймера.</div>
+            <div class="mt-2 font-mono text-7xl font-extrabold tabular-nums text-white" x-text="officialTimerValue()">—</div>
+            <div class="mt-2 text-sm text-slate-500">Норматив считает система после остановки таймера.</div>
             <template x-if="timerEndedAt">
-                <div class="mt-2 text-sm text-rose-200">Сбавка по времени: −<span x-text="timePenalty.toFixed(2)"></span></div>
+                <div class="mt-2 text-sm font-semibold text-rose-200">Сбавка по времени: −<span x-text="timePenalty.toFixed(2)"></span></div>
             </template>
         </div>
 
+        <button type="button" @click="recordOfficialTimer('start')"
+            :disabled="timerBusy || officialTimerRunning() || timerEndedAt"
+            class="self-end rounded-lg border border-emerald-700/60 bg-emerald-700 px-5 py-10 text-3xl font-bold text-white shadow-lg transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40">
+            ▶ Старт таймера
+        </button>
+
         <button type="button" @click="recordOfficialTimer('stop')"
             :disabled="timerBusy || ! officialTimerRunning()"
-            class="rounded-2xl border border-rose-700/60 bg-rose-700 px-5 py-8 text-3xl font-bold text-white shadow-lg transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40">
+            class="self-end rounded-lg border border-rose-700/60 bg-rose-700 px-5 py-10 text-3xl font-bold text-white shadow-lg transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-40">
             ■ Стоп и сохранить
         </button>
     </div>
 @elseif ($penaltyType === 'line')
-    <div class="col-span-12 grid h-full min-h-0 grid-rows-[1fr_auto] gap-3">
+    <div class="col-span-12 grid h-full min-h-0 grid-rows-[auto_1fr] gap-3 !pt-0">
+        <div class="judge-score-stage grid grid-cols-1 gap-3 rounded-xl border p-5 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Сумма сбавки</div>
+                <div class="mt-1 font-mono text-6xl font-extrabold tabular-nums text-rose-200" x-text="draft.toFixed(2)"></div>
+                <div class="mt-1 text-xs text-slate-500">Нажатий: <span x-text="actions.length"></span></div>
+            </div>
+            <button type="button" @click="submit()" :disabled="busy"
+                class="judge-submit-button rounded-lg border px-8 py-5 text-xl font-bold uppercase tracking-wide text-white transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
+                Отправить
+            </button>
+        </div>
+
         <div class="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2">
             <button type="button" @click="setLinePenalty('line_gymnast')" :disabled="busy"
-                class="rounded-2xl border border-cyan-700/50 bg-[#0f5f6f] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#117383] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
+                class="self-end rounded-lg border border-cyan-700/50 bg-[#0f5f6f] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#117383] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
                 <span class="block text-6xl font-extrabold tabular-nums">0.30</span>
                 <span class="mt-3 block text-xl font-bold uppercase tracking-wide">Гимнастка за линию</span>
             </button>
 
             <button type="button" @click="setLinePenalty('line_ball')" :disabled="busy"
-                class="rounded-2xl border border-cyan-700/50 bg-[#1e6a85] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#247c9b] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
+                class="self-end rounded-lg border border-cyan-700/50 bg-[#1e6a85] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#247c9b] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
                 <span class="block text-6xl font-extrabold tabular-nums">0.30</span>
                 <span class="mt-3 block text-xl font-bold uppercase tracking-wide">Мяч за линию</span>
             </button>
         </div>
 
-        <div class="grid grid-cols-1 gap-3 rounded-2xl border border-slate-700 bg-slate-950/80 p-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Сумма сбавки</div>
-                <div class="mt-1 font-mono text-6xl font-extrabold tabular-nums text-rose-200" x-text="draft.toFixed(2)"></div>
-                <div class="mt-1 text-xs text-slate-500">Нажатий: <span x-text="actions.length"></span></div>
-            </div>
-            <button type="button" @click="submit()" :disabled="busy"
-                class="rounded-2xl border border-emerald-700/70 bg-emerald-700 px-8 py-5 text-xl font-bold uppercase tracking-wide text-white shadow-lg transition hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
-                Отправить
-            </button>
-        </div>
     </div>
 @else
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
@@ -78,7 +79,7 @@
 </div>
 
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-    <div class="flex-1 min-h-0 rounded-2xl border border-slate-700 bg-[#0f1830] p-4 flex flex-col items-center justify-center text-center">
+    <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-4 flex flex-col items-center justify-center text-center">
         <div class="text-[10px] uppercase tracking-widest text-slate-400">{{ $titleByType }}</div>
         <div class="my-2 text-6xl xl:text-7xl font-extrabold tabular-nums text-white leading-none" x-text="draft.toFixed(2)"></div>
 
@@ -96,7 +97,7 @@
     </div>
 
     <button type="button" @click="submit()" :disabled="busy"
-        class="shrink-0 rounded-2xl bg-[#3b3070] hover:bg-[#4a3d8a] disabled:opacity-50 disabled:cursor-wait border border-indigo-700/60 py-3 text-lg font-bold text-white shadow-lg shadow-indigo-950/40 active:scale-[0.99]">
+        class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
         ОТПРАВИТЬ
     </button>
 </div>
