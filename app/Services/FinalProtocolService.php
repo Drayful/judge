@@ -15,14 +15,14 @@ use Illuminate\Support\Collection;
  *   - у гимнастки несколько «видов» (по числу её выступлений в группе),
  *     каждый вид = Performance::total (D + A + E − штрафы);
  *   - Итог = сумма видов;
- *   - сортировка по убыванию Итога;
- *   - места «плотным» рангом (dense rank): равные суммы — одно место,
- *     следующее значение получает следующее целое без пропусков.
+ *   - сортировка по убыванию Итога, затем суммы E, затем суммы A;
+ *   - места «плотным» рангом (dense rank): одинаковые Итог, E и A — одно место,
+ *     следующее сочетание получает следующее целое без пропусков.
  */
 class FinalProtocolService
 {
     /** Точность сравнения сумм для определения равенства мест. */
-    private const PLACE_PRECISION = 2;
+    private const PLACE_PRECISION = 3;
 
     /**
      * Доступные группы протоколов в турнире: по (год, категория).
@@ -149,6 +149,8 @@ class FinalProtocolService
             $vidi = $perfs->map(fn (Performance $p) => round((float) $p->total, 3))->values()->all();
             $maxVidi = max($maxVidi, count($vidi));
             $total = round(array_sum($vidi), 3);
+            $eTieBreak = round($perfs->sum(fn (Performance $p) => (float) ($p->e_score ?? 0)), 3);
+            $aTieBreak = round($perfs->sum(fn (Performance $p) => (float) ($p->a_score ?? 0)), 3);
 
             $rows[] = [
                 'athlete_id' => $athlete->id,
@@ -157,38 +159,12 @@ class FinalProtocolService
                 'club' => trim((string) ($athlete->club ?? '')),
                 'vidi' => $vidi,
                 'total' => $total,
+                '_e_tiebreak' => $eTieBreak,
+                '_a_tiebreak' => $aTieBreak,
             ];
         }
 
-        usort($rows, function (array $a, array $b): int {
-            $aNotPerformed = abs((float) $a['total']) < 0.0005;
-            $bNotPerformed = abs((float) $b['total']) < 0.0005;
-            if ($aNotPerformed !== $bNotPerformed) {
-                return $aNotPerformed ? 1 : -1;
-            }
-
-            return $b['total'] <=> $a['total'];
-        });
-
-        // Плотный ранг (dense rank) с округлением для сравнения.
-        $place = 0;
-        $prevRounded = null;
-        foreach ($rows as &$row) {
-            if (abs((float) $row['total']) < 0.0005) {
-                $row['place'] = null;
-                $row['status'] = 'not_performed';
-
-                continue;
-            }
-            $rounded = round($row['total'], self::PLACE_PRECISION);
-            if ($prevRounded === null || $rounded !== $prevRounded) {
-                $place++;
-                $prevRounded = $rounded;
-            }
-            $row['place'] = $place;
-            $row['status'] = 'ranked';
-        }
-        unset($row);
+        $this->sortAndAssignPlaces($rows, 'total');
 
         return [
             'title' => $this->label($birthYear, $division),
@@ -235,47 +211,26 @@ class FinalProtocolService
                 }
                 // На одну гимнастку по одному предмету — одна строка (на всякий случай — лучший результат).
                 $score = round((float) $perf->total, 3);
-                if (isset($rows[$athlete->id]) && $rows[$athlete->id]['score'] >= $score) {
-                    continue;
-                }
-                $rows[$athlete->id] = [
+                $eTieBreak = round((float) ($perf->e_score ?? 0), 3);
+                $aTieBreak = round((float) ($perf->a_score ?? 0), 3);
+                $candidate = [
                     'athlete_id' => $athlete->id,
                     'name' => trim(($athlete->last_name ?? '').' '.($athlete->first_name ?? '')),
                     'year' => $athlete->birthdate?->year ?? $birthYear,
                     'club' => trim((string) ($athlete->club ?? '')),
                     'score' => $score,
+                    '_e_tiebreak' => $eTieBreak,
+                    '_a_tiebreak' => $aTieBreak,
                 ];
+                if (isset($rows[$athlete->id])
+                    && $this->compareRankedRows($rows[$athlete->id], $candidate, 'score') <= 0) {
+                    continue;
+                }
+                $rows[$athlete->id] = $candidate;
             }
 
             $rows = array_values($rows);
-            usort($rows, function (array $a, array $b): int {
-                $aNotPerformed = abs((float) $a['score']) < 0.0005;
-                $bNotPerformed = abs((float) $b['score']) < 0.0005;
-                if ($aNotPerformed !== $bNotPerformed) {
-                    return $aNotPerformed ? 1 : -1;
-                }
-
-                return $b['score'] <=> $a['score'];
-            });
-
-            $place = 0;
-            $prevRounded = null;
-            foreach ($rows as &$row) {
-                if (abs((float) $row['score']) < 0.0005) {
-                    $row['place'] = null;
-                    $row['status'] = 'not_performed';
-
-                    continue;
-                }
-                $rounded = round($row['score'], self::PLACE_PRECISION);
-                if ($prevRounded === null || $rounded !== $prevRounded) {
-                    $place++;
-                    $prevRounded = $rounded;
-                }
-                $row['place'] = $place;
-                $row['status'] = 'ranked';
-            }
-            unset($row);
+            $this->sortAndAssignPlaces($rows, 'score');
 
             $apparatus[] = ['label' => (string) $label, 'rows' => $rows];
         }
@@ -296,6 +251,68 @@ class FinalProtocolService
             'division' => $division,
             'apparatus' => $apparatus,
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function sortAndAssignPlaces(array &$rows, string $scoreKey): void
+    {
+        usort($rows, fn (array $a, array $b): int => $this->compareRankedRows($a, $b, $scoreKey));
+
+        $place = 0;
+        $previousKey = null;
+        foreach ($rows as &$row) {
+            if (abs((float) $row[$scoreKey]) < 0.0005) {
+                $row['place'] = null;
+                $row['status'] = 'not_performed';
+                unset($row['_e_tiebreak'], $row['_a_tiebreak']);
+
+                continue;
+            }
+
+            $rankingKey = $this->rankingKey($row, $scoreKey);
+            if ($previousKey === null || $rankingKey !== $previousKey) {
+                $place++;
+                $previousKey = $rankingKey;
+            }
+            $row['place'] = $place;
+            $row['status'] = 'ranked';
+            unset($row['_e_tiebreak'], $row['_a_tiebreak']);
+        }
+        unset($row);
+    }
+
+    private function compareRankedRows(array $a, array $b, string $scoreKey): int
+    {
+        $aNotPerformed = abs((float) $a[$scoreKey]) < 0.0005;
+        $bNotPerformed = abs((float) $b[$scoreKey]) < 0.0005;
+        if ($aNotPerformed !== $bNotPerformed) {
+            return $aNotPerformed ? 1 : -1;
+        }
+
+        foreach ([$scoreKey, '_e_tiebreak', '_a_tiebreak'] as $key) {
+            $comparison = round((float) ($b[$key] ?? 0), self::PLACE_PRECISION)
+                <=> round((float) ($a[$key] ?? 0), self::PLACE_PRECISION);
+            if ($comparison !== 0) {
+                return $comparison;
+            }
+        }
+
+        return ((int) ($a['athlete_id'] ?? 0)) <=> ((int) ($b['athlete_id'] ?? 0));
+    }
+
+    private function rankingKey(array $row, string $scoreKey): string
+    {
+        return implode('|', array_map(
+            fn (string $key) => number_format(
+                round((float) ($row[$key] ?? 0), self::PLACE_PRECISION),
+                self::PLACE_PRECISION,
+                '.',
+                '',
+            ),
+            [$scoreKey, '_e_tiebreak', '_a_tiebreak'],
+        ));
     }
 
     private function key(?int $year, ?string $division): string

@@ -267,6 +267,38 @@ class ScoringSystemTest extends TestCase
         $this->assertSame(2, $rows[2]['place'], 'dense rank: следующее место 2, без пропуска');
     }
 
+    public function test_final_protocol_breaks_equal_totals_by_e_then_a(): void
+    {
+        $category = $this->makeCategory();
+        $athletes = collect([
+            ['name' => 'Ниже E', 'e' => 8.0, 'a' => 9.0],
+            ['name' => 'Ниже A', 'e' => 9.0, 'a' => 7.0],
+            ['name' => 'Выше A', 'e' => 9.0, 'a' => 8.0],
+            ['name' => 'Полная ничья', 'e' => 9.0, 'a' => 8.0],
+        ])->map(function (array $data, int $index) use ($category) {
+            $athlete = Athlete::forceCreate([
+                'first_name' => $data['name'],
+                'last_name' => 'Тест',
+                'birthdate' => '2015-01-0'.($index + 1),
+            ]);
+            $this->makePerformance($category, $athlete, $index + 1)->update([
+                'total' => 20.0,
+                'e_score' => $data['e'],
+                'a_score' => $data['a'],
+            ]);
+
+            return $athlete;
+        });
+
+        $rows = collect(app(FinalProtocolService::class)->build($category->tournament, 2015, 'A')['rows'])
+            ->keyBy('athlete_id');
+
+        $this->assertSame(3, $rows[$athletes[0]->id]['place']);
+        $this->assertSame(2, $rows[$athletes[1]->id]['place']);
+        $this->assertSame(1, $rows[$athletes[2]->id]['place']);
+        $this->assertSame(1, $rows[$athletes[3]->id]['place']);
+    }
+
     public function test_protocol_download_produces_valid_xlsx_with_values(): void
     {
         $secretary = User::forceCreate([

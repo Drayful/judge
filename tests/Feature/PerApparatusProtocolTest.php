@@ -62,6 +62,41 @@ class PerApparatusProtocolTest extends TestCase
         $this->assertSame(2, $ball[$a1->id]['place']);
     }
 
+    public function test_by_apparatus_breaks_equal_scores_by_e_then_a(): void
+    {
+        [$tournament, $category, $a1, $a2] = $this->setupCategory();
+        Performance::query()->where('athlete_id', $a1->id)->where('apparatus', 'Мяч')->update([
+            'total' => 20.0,
+            'e_score' => 9.0,
+            'a_score' => 7.0,
+        ]);
+        Performance::query()->where('athlete_id', $a2->id)->where('apparatus', 'Мяч')->update([
+            'total' => 20.0,
+            'e_score' => 9.0,
+            'a_score' => 8.0,
+        ]);
+        $a3 = Athlete::create(['first_name' => 'Лена', 'last_name' => 'Третья']);
+        Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $a3->id,
+            'apparatus' => 'Мяч',
+            'order_index' => 5,
+            'status' => 'done',
+            'is_counted' => true,
+            'total' => 20.0,
+            'e_score' => 8.0,
+            'a_score' => 10.0,
+        ]);
+
+        $ball = collect(app(FinalProtocolService::class)->buildByApparatus($tournament, 2018, 'A')['apparatus'])
+            ->firstWhere('label', 'Мяч')['rows'];
+        $places = collect($ball)->keyBy('athlete_id');
+
+        $this->assertSame(1, $places[$a2->id]['place']);
+        $this->assertSame(2, $places[$a1->id]['place']);
+        $this->assertSame(3, $places[$a3->id]['place']);
+    }
+
     public function test_download_by_apparatus_returns_xlsx(): void
     {
         [$tournament] = $this->setupCategory();

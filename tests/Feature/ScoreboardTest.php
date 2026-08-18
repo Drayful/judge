@@ -346,6 +346,56 @@ class ScoreboardTest extends TestCase
             ->assertJsonPath('performance.place_of', 2);
     }
 
+    public function test_live_place_breaks_equal_totals_by_e_then_a(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id,
+            'name' => '2015 A',
+            'birth_year' => 2015,
+            'division' => 'A',
+            'is_published' => true,
+        ]);
+
+        foreach ([
+            ['name' => 'Leader', 'total' => 25.0, 'e' => 7.0, 'a' => 7.0],
+            ['name' => 'Higher A', 'total' => 20.0, 'e' => 9.0, 'a' => 8.0],
+            ['name' => 'Lower A', 'total' => 20.0, 'e' => 9.0, 'a' => 6.0],
+        ] as $index => $data) {
+            $athlete = Athlete::create(['first_name' => $data['name'], 'last_name' => 'Published']);
+            Performance::create([
+                'category_id' => $category->id,
+                'athlete_id' => $athlete->id,
+                'order_index' => $index + 1,
+                'status' => 'published',
+                'is_counted' => true,
+                'total' => $data['total'],
+                'e_score' => $data['e'],
+                'a_score' => $data['a'],
+                'published_at' => now(),
+            ]);
+        }
+
+        $currentAthlete = Athlete::create(['first_name' => 'Current', 'last_name' => 'Gymnast']);
+        Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $currentAthlete->id,
+            'order_index' => 4,
+            'status' => 'performing',
+            'is_counted' => true,
+            'scores_overridden' => true,
+            'total' => 20.0,
+            'e_score' => 9.0,
+            'a_score' => 7.0,
+            'published_at' => now(),
+        ]);
+
+        $this->getJson(route('scoreboard.performance.live', $category))
+            ->assertOk()
+            ->assertJsonPath('performance.place', 3)
+            ->assertJsonPath('performance.place_of', 4);
+    }
+
     public function test_live_place_uses_excel_sheet_pool_and_sums_all_accepted_apparatus(): void
     {
         $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);

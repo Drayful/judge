@@ -10,6 +10,8 @@ use Illuminate\Support\Collection;
 
 class ScoreboardUi
 {
+    private const PLACE_PRECISION = 3;
+
     /**
      * @return array<string, string>
      */
@@ -195,16 +197,19 @@ class ScoreboardUi
             ->whereNotNull('total')
             ->whereNotNull('published_at')
             ->whereNull('withdrawn_at')
-            ->get(['id', 'athlete_id', 'total']);
+            ->get(['id', 'athlete_id', 'total', 'e_score', 'a_score']);
 
-        $totals = [];
+        $rankings = [];
         foreach ($published as $publishedPerformance) {
             if ((int) $publishedPerformance->id === (int) $performance->id) {
                 continue;
             }
 
             $athleteId = (int) $publishedPerformance->athlete_id;
-            $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $publishedPerformance->total;
+            $rankings[$athleteId] ??= ['total' => 0.0, 'e' => 0.0, 'a' => 0.0];
+            $rankings[$athleteId]['total'] += (float) $publishedPerformance->total;
+            $rankings[$athleteId]['e'] += (float) ($publishedPerformance->e_score ?? 0);
+            $rankings[$athleteId]['a'] += (float) ($publishedPerformance->a_score ?? 0);
         }
 
         if ($performance->published_at !== null
@@ -212,24 +217,30 @@ class ScoreboardUi
             && $performance->is_counted
             && ! $performance->isWithdrawn()) {
             $athleteId = (int) $performance->athlete_id;
-            $totals[$athleteId] = ($totals[$athleteId] ?? 0.0) + (float) $performance->total;
+            $rankings[$athleteId] ??= ['total' => 0.0, 'e' => 0.0, 'a' => 0.0];
+            $rankings[$athleteId]['total'] += (float) $performance->total;
+            $rankings[$athleteId]['e'] += (float) ($performance->e_score ?? 0);
+            $rankings[$athleteId]['a'] += (float) ($performance->a_score ?? 0);
         }
 
-        $currentTotal = $totals[(int) $performance->athlete_id] ?? null;
+        $currentRanking = $rankings[(int) $performance->athlete_id] ?? null;
+        $currentTotal = $currentRanking['total'] ?? null;
         $place = null;
         if ($currentTotal !== null && $currentTotal > 0.0004) {
-            $higher = collect($totals)
+            $higher = collect($rankings)
                 ->except([(int) $performance->athlete_id])
-                ->filter(fn (float $total) => $total > $currentTotal + 0.0004)
+                ->filter(fn (array $ranking) => self::rankingIsHigher($ranking, $currentRanking))
+                ->map(fn (array $ranking) => self::rankingKey($ranking))
+                ->unique()
                 ->count();
             $place = $higher + 1;
         }
 
         $placeOf = $poolAthleteIds !== null
             ? count($poolAthleteIds)
-            : collect($totals)
+            : collect($rankings)
                 ->except([(int) $performance->athlete_id])
-                ->filter(fn (float $total) => $total > 0.0004)
+                ->filter(fn (array $ranking) => $ranking['total'] > 0.0004)
                 ->count() + 1;
 
         return [
@@ -238,6 +249,36 @@ class ScoreboardUi
             'overall_total' => $currentTotal !== null ? round($currentTotal, 3) : null,
             'pool_label' => $pool['label'],
         ];
+    }
+
+    /** @param array{total:float,e:float,a:float} $candidate
+     * @param  array{total:float,e:float,a:float}  $current
+     */
+    private static function rankingIsHigher(array $candidate, array $current): bool
+    {
+        foreach (['total', 'e', 'a'] as $key) {
+            $candidateValue = round($candidate[$key], self::PLACE_PRECISION);
+            $currentValue = round($current[$key], self::PLACE_PRECISION);
+            if ($candidateValue !== $currentValue) {
+                return $candidateValue > $currentValue;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array{total:float,e:float,a:float} $ranking */
+    private static function rankingKey(array $ranking): string
+    {
+        return implode('|', array_map(
+            fn (string $key) => number_format(
+                round($ranking[$key], self::PLACE_PRECISION),
+                self::PLACE_PRECISION,
+                '.',
+                '',
+            ),
+            ['total', 'e', 'a'],
+        ));
     }
 
     /**
