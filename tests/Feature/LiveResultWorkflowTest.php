@@ -15,7 +15,9 @@ use App\Services\StreamAdvanceService;
 use App\Support\ScoreboardUi;
 use App\Support\SecretaryLiveUi;
 use Carbon\Carbon;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class LiveResultWorkflowTest extends TestCase
@@ -64,7 +66,7 @@ class LiveResultWorkflowTest extends TestCase
 
     public function test_time_judge_starts_and_stops_the_official_timer_from_the_tablet(): void
     {
-        Carbon::setTestNow('2026-08-03 10:00:00');
+        Carbon::setTestNow('2026-08-03 10:00:00.654321');
         $performance = $this->performance();
         $performance->load('category.tournament');
         $tournament = $performance->category->tournament;
@@ -72,12 +74,20 @@ class LiveResultWorkflowTest extends TestCase
         $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
 
         $this->actingAs($timeJudge)
-            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'start'])
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'start',
+                'performance_id' => $performance->id,
+            ])
             ->assertOk();
 
-        Carbon::setTestNow('2026-08-03 10:01:32');
+        $this->assertSame('654321', $performance->fresh()->timer_started_at->format('u'));
+
+        Carbon::setTestNow('2026-08-03 10:01:32.654321');
         $this->actingAs($timeJudge)
-            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'stop'])
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'stop',
+                'performance_id' => $performance->id,
+            ])
             ->assertOk()
             ->assertJsonPath('duration_seconds', 92)
             ->assertJsonPath('time_penalty', 0.1);
@@ -86,6 +96,89 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotNull($saved->timer_started_at);
         $this->assertNotNull($saved->timer_ended_at);
         $this->assertSame(92, $saved->actual_duration_seconds);
+        $this->assertSame('654321', $saved->timer_ended_at->format('u'));
+    }
+
+    public function test_database_processing_delay_is_not_added_to_official_duration(): void
+    {
+        Carbon::setTestNow('2026-08-03 10:00:00');
+        $performance = $this->performance();
+        $performance->startOfficialTimer();
+        $performance->save();
+        $performance->load('category.tournament');
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
+
+        Carbon::setTestNow('2026-08-03 10:01:32');
+        $processingDelaySimulated = false;
+        DB::listen(function (QueryExecuted $query) use (&$processingDelaySimulated): void {
+            if (! $processingDelaySimulated && str_contains($query->sql, 'performances')) {
+                $processingDelaySimulated = true;
+                Carbon::setTestNow('2026-08-03 10:01:40');
+            }
+        });
+
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'stop',
+                'performance_id' => $performance->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('duration_seconds', 92);
+
+        $saved = $performance->fresh();
+        $this->assertTrue($processingDelaySimulated);
+        $this->assertSame(92, $saved->actual_duration_seconds);
+        $this->assertTrue($saved->timer_ended_at->equalTo(Carbon::parse('2026-08-03 10:01:32')));
+    }
+
+    public function test_time_command_from_a_stale_tablet_cannot_change_the_next_performance(): void
+    {
+        $first = $this->performance();
+        $category = $first->category;
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+        $secondAthlete = Athlete::create(['last_name' => 'Second', 'first_name' => 'Athlete']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'order_index' => 2,
+            'status' => 'scheduled',
+        ]);
+        $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
+
+        $first->update(['status' => 'done']);
+        $second->update(['status' => 'performing']);
+
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'start',
+                'performance_id' => $first->id,
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('error', 'Выступление уже сменилось. Обновите планшет и повторите действие для текущей гимнастки.');
+
+        $this->assertNull($first->fresh()->timer_started_at);
+        $this->assertNull($second->fresh()->timer_started_at);
+    }
+
+    public function test_time_judge_gets_a_clear_error_when_stopping_before_start(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
+
+        $this->actingAs($timeJudge)
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'stop',
+                'performance_id' => $performance->id,
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Сначала нажмите «Старт».');
+
+        $this->assertNull($performance->fresh()->timer_ended_at);
     }
 
     public function test_line_judge_total_is_applied_without_separate_confirmation(): void
@@ -502,7 +595,10 @@ class LiveResultWorkflowTest extends TestCase
 
         $timeJudge = User::factory()->create(['role' => 'time_judge', 'slot' => 'TIME']);
         $this->actingAs($timeJudge)
-            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'start'])
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'start',
+                'performance_id' => $performance->id,
+            ])
             ->assertStatus(422);
     }
 
@@ -611,11 +707,17 @@ class LiveResultWorkflowTest extends TestCase
             ->assertJsonPath('performance_id', $performance->id);
 
         $this->actingAs($timeJudge)
-            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'start'])
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'start',
+                'performance_id' => $performance->id,
+            ])
             ->assertOk();
         Carbon::setTestNow('2026-08-18 10:01:31');
         $this->actingAs($timeJudge)
-            ->postJson(route('judge.tournament.timer', $tournament), ['action' => 'stop'])
+            ->postJson(route('judge.tournament.timer', $tournament), [
+                'action' => 'stop',
+                'performance_id' => $performance->id,
+            ])
             ->assertOk()
             ->assertJsonPath('duration_seconds', 91);
 

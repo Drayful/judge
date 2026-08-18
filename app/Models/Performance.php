@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\PerformanceApparatus;
 use App\Support\SecretaryLiveUi;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -73,6 +74,22 @@ class Performance extends Model
         'is_counted' => 'bool',
         'scores_overridden' => 'bool',
     ];
+
+    /** PostgreSQL хранит официальный таймер с микросекундами; стандартный формат Eloquent их отбрасывает. */
+    protected function timerStartedAt(): Attribute
+    {
+        return Attribute::set(fn ($value) => $value === null
+            ? null
+            : $this->asDateTime($value)->format('Y-m-d H:i:s.u'));
+    }
+
+    /** PostgreSQL хранит официальный таймер с микросекундами; стандартный формат Eloquent их отбрасывает. */
+    protected function timerEndedAt(): Attribute
+    {
+        return Attribute::set(fn ($value) => $value === null
+            ? null
+            : $this->asDateTime($value)->format('Y-m-d H:i:s.u'));
+    }
 
     public function isWithdrawn(): bool
     {

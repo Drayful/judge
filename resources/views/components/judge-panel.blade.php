@@ -32,6 +32,7 @@
         liveActionUrl: @js(route('judge.performance.live-actions', $performance)),
         tabletUrl: @js(route('judge.tournament.tablet', $tournament)),
         timerUrl: @js(route('judge.tournament.timer', $tournament)),
+        performanceId: {{ (int) $performance->id }},
         timerStartedAt: @js($performance->timer_started_at?->toIso8601String()),
         timerEndedAt: @js($performance->timer_ended_at?->toIso8601String()),
         timerDurationSeconds: @js($performance->actual_duration_seconds),

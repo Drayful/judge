@@ -159,6 +159,9 @@ class JudgeController extends Controller
      */
     public function recordOfficialTimer(Tournament $tournament, Request $request): JsonResponse
     {
+        // Фиксируем момент команды до проверок, блокировок и записи в БД,
+        // чтобы их длительность не добавлялась к официальному времени.
+        $timerActionAt = now();
         $user = $request->user();
         $panel = $user->judgePanel();
 
@@ -168,6 +171,7 @@ class JudgeController extends Controller
 
         $data = $request->validate([
             'action' => ['required', Rule::in(['start', 'stop'])],
+            'performance_id' => ['required', 'integer', 'min:1'],
         ]);
 
         $category = $this->resolveJudgeCategoryForTournament($tournament);
@@ -185,10 +189,28 @@ class JudgeController extends Controller
             || ($current->status !== 'performing' && $current->timer_revision_requested_at === null)) {
             return response()->json(['ok' => false, 'error' => 'Сейчас нет выступления, для которого можно зафиксировать время.'], 422);
         }
+        if ((int) $data['performance_id'] !== (int) $current->id) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'Выступление уже сменилось. Обновите планшет и повторите действие для текущей гимнастки.',
+            ], 409);
+        }
 
-        DB::transaction(function () use (&$current, $data) {
+        DB::transaction(function () use (&$current, $data, $timerActionAt, $tournament, $user) {
+            $lockedTournament = Tournament::query()->lockForUpdate()->findOrFail($tournament->id);
             $current = Performance::query()->lockForUpdate()->findOrFail($current->id);
+            $category = Category::query()->lockForUpdate()->findOrFail($current->category_id);
             $isRevision = $current->timer_revision_requested_at !== null;
+
+            if ((int) ($lockedTournament->active_category_id ?? 0) !== (int) $current->category_id
+                || (! $isRevision
+                    && $this->normalizedSessionId($lockedTournament->active_stream_session_id)
+                        !== $this->normalizedSessionId($current->stream_session_id))) {
+                abort(409, 'Активный поток или сессия уже изменились. Обновите планшет.');
+            }
+            if (! $user->isAdmin() && SecretaryLiveUi::isSlotInactive($category, 'TIME')) {
+                abort(422, 'Слот TIME отключён секретарём для этого потока.');
+            }
             if ($current->status !== 'performing' && ! $isRevision) {
                 abort(422, 'Это выступление больше не доступно хронометристу.');
             }
@@ -199,14 +221,14 @@ class JudgeController extends Controller
                 }
 
                 if ($current->timer_started_at === null) {
-                    $current->startOfficialTimer();
+                    $current->startOfficialTimer($timerActionAt);
                     $current->save();
                 }
 
                 return;
             }
 
-            if ($current->timer_ended_at === null && ! $current->stopOfficialTimer()) {
+            if ($current->timer_ended_at === null && ! $current->stopOfficialTimer($timerActionAt)) {
                 abort(422, 'Сначала нажмите «Старт».');
             }
 

@@ -224,6 +224,7 @@
                 liveActionUrl: opts.liveActionUrl,
                 tabletUrl: opts.tabletUrl,
                 timerUrl: opts.timerUrl,
+                performanceId: opts.performanceId,
                 timerStartedAt: opts.timerStartedAt,
                 timerEndedAt: opts.timerEndedAt,
                 timerDurationSeconds: opts.timerDurationSeconds,
@@ -354,12 +355,32 @@
                 async recordOfficialTimer(action) {
                     if (! this.timerUrl || this.timerBusy) return;
 
+                    const previousTimerState = {
+                        endedAt: this.timerEndedAt,
+                        durationSeconds: this.timerDurationSeconds,
+                    };
+
+                    // По нажатию «Стоп» сразу замораживаем показание на планшете.
+                    // Сохранение и пересчёт на сервере выполняются уже после этого.
+                    if (action === 'stop' && this.officialTimerRunning()) {
+                        const stoppedAt = Date.now();
+                        const startedAt = Date.parse(this.timerStartedAt);
+                        if (Number.isFinite(startedAt)) {
+                            this.timerDurationSeconds = Math.max(0, Math.floor((stoppedAt - startedAt) / 1000));
+                        }
+                        this.timerEndedAt = new Date(stoppedAt).toISOString();
+                        this.stopTimerTicker();
+                    }
+
                     this.timerBusy = true;
                     this.error = null;
                     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                    const abortController = new AbortController();
+                    const requestTimeout = setTimeout(() => abortController.abort(), 15000);
                     try {
                         const response = await fetch(this.timerUrl, {
                             method: 'POST',
+                            signal: abortController.signal,
                             credentials: 'same-origin',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -367,10 +388,21 @@
                                 'X-Requested-With': 'XMLHttpRequest',
                                 'X-CSRF-TOKEN': csrfToken,
                             },
-                            body: JSON.stringify({ action }),
+                            body: JSON.stringify({ action, performance_id: this.performanceId }),
                         });
-                        const result = await response.json();
-                        if (! response.ok || ! result.ok) throw new Error(result.error || 'Не удалось зафиксировать время.');
+                        const responseText = await response.text();
+                        let result = {};
+                        try {
+                            result = responseText ? JSON.parse(responseText) : {};
+                        } catch (parseError) {
+                            result = {};
+                        }
+                        if (! response.ok || ! result.ok) {
+                            const statusHint = response.status === 419
+                                ? 'Сессия истекла. Обновите страницу и войдите снова.'
+                                : 'Не удалось зафиксировать время (HTTP ' + response.status + ').';
+                            throw new Error(result.error || result.message || statusHint);
+                        }
 
                         this.timerStartedAt = result.timer_started_at;
                         this.timerEndedAt = result.timer_ended_at;
@@ -379,8 +411,16 @@
                         if (this.officialTimerRunning()) this.startTimerTicker();
                         else this.stopTimerTicker();
                     } catch (error) {
-                        this.error = error?.message || 'Не удалось зафиксировать время.';
+                        if (action === 'stop') {
+                            this.timerEndedAt = previousTimerState.endedAt;
+                            this.timerDurationSeconds = previousTimerState.durationSeconds;
+                            if (this.officialTimerRunning()) this.startTimerTicker();
+                        }
+                        this.error = error?.name === 'AbortError'
+                            ? 'Сервер не ответил за 15 секунд. Проверьте соединение; состояние таймера обновится автоматически.'
+                            : (error?.message || 'Не удалось зафиксировать время.');
                     } finally {
+                        clearTimeout(requestTimeout);
                         this.timerBusy = false;
                     }
                 },
