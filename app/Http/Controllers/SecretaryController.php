@@ -1790,7 +1790,6 @@ class SecretaryController extends Controller
                     'age_group' => $row->age_group,
                     'submitted_at' => $row->submitted_at?->format('H:i:s'),
                     'entries' => $row->entries ?? [],
-                    'notes' => $row->notes,
                 ];
             }
 

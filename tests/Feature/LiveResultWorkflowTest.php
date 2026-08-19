@@ -315,7 +315,9 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('Музыкальное вступление 4+ сек.')
             ->assertSee('Музыка не соответствует нормам')
             ->assertSee('Окончание не совпадает с музыкой')
-            ->assertSee('Личные заметки судьи')
+            ->assertDontSee('Личные заметки судьи')
+            ->assertSee('openFinalScoreNumpad()', false)
+            ->assertSee('Вставить')
             ->assertSee("selectPenalty('bodyExpr', 0.6)", false)
             ->assertDontSee("selectPenalty('bodyExpr', 1", false)
             ->assertDontSee('Соответствие муз.характеру')
@@ -323,7 +325,7 @@ class LiveResultWorkflowTest extends TestCase
             ->assertDontSee('Связь упражнения');
     }
 
-    public function test_a_tablet_saves_long_notes_and_full_categorized_history(): void
+    public function test_a_tablet_saves_full_categorized_history(): void
     {
         $performance = $this->performance();
         $tournament = $performance->category->tournament;
@@ -335,24 +337,20 @@ class LiveResultWorkflowTest extends TestCase
             'label' => $index <= 20 ? 'Соединения' : 'Ритм',
             'counted' => true,
         ])->all();
-        $notes = str_repeat('Подробная заметка судьи. ', 30);
-
         $this->actingAs($judge)
             ->postJson(route('judge.submit-score'), [
                 'tournament_id' => $tournament->id,
                 'score' => 6.0,
                 'entries' => json_encode($entries, JSON_UNESCAPED_UNICODE),
-                'notes' => $notes,
             ])
             ->assertOk();
 
         $saved = JudgeScore::query()->where('performance_id', $performance->id)->where('judge_id', $judge->id)->firstOrFail();
-        $this->assertSame($notes, $saved->notes);
         $this->assertCount(65, $saved->entries);
         $this->assertSame('connections', $saved->entries[0]['cat']);
     }
 
-    public function test_returned_a_score_without_history_is_restored_as_a_deduction(): void
+    public function test_returned_a_score_without_history_does_not_duplicate_automatic_deductions(): void
     {
         $performance = $this->performance();
         $tournament = $performance->category->tournament;
@@ -373,6 +371,8 @@ class LiveResultWorkflowTest extends TestCase
             ->assertOk()
             ->assertSee('hasInitial: true', false)
             ->assertSee('this.base - opts.initial', false)
+            ->assertSee("this.panel === 'a'", false)
+            ->assertSee('restored - this.comboPenalty()', false)
             ->assertSee('initial: 8.2', false);
     }
 

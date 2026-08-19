@@ -17,7 +17,6 @@ class JudgeScore extends Model
         'average_score',
         'entries',
         'age_group',
-        'notes',
         'submitted_at',
         'average_submitted_at',
     ];

@@ -1012,9 +1012,6 @@
         const entries = Array.isArray(h.entries) && h.entries.length
             ? `<ul class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">${h.entries.map(entryLine).join('')}</ul>`
             : '<div class="mt-2 text-xs text-slate-500">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
-        const notes = h.notes
-            ? `<div class="mt-2 rounded-md border border-cyan-900/60 bg-cyan-950/30 px-2 py-1.5 text-xs text-cyan-100"><span class="font-semibold">Заметки судьи:</span> ${esc(h.notes)}</div>`
-            : '';
         const actions = withActions ? slotActions(performanceHistory, slot, h.score) : '';
         return `
             <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
@@ -1023,7 +1020,6 @@
                     <div class="text-[11px] text-slate-500">${meta}</div>
                 </div>
                 ${entries}
-                ${notes}
                 ${actions}
             </div>`;
     };

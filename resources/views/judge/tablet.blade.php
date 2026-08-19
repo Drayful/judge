@@ -204,7 +204,6 @@
                     :base="$panelBase"
                     :saved="$saved"
                     :entries="$myScore?->entries ?? []"
-                    :notes="$myScore?->notes ?? ''"
                     :age-group="$myScore?->age_group ?? 'junior'"
                     :group-program="$isGroupProgram"
                     :tournament="$tournament"
@@ -242,7 +241,6 @@
                 page: 1,
                 draft: 0,
                 actions: [],                 // [{v, cat, label}] или [{v, symbol, label, notDone}]
-                personalNotes: opts.initialNotes || '',
                 busy: false,
                 error: null,
                 timerBusy: false,
@@ -250,6 +248,7 @@
                 _timerInterval: null,
                 numpadOpen: false,
                 numpadValue: '',
+                numpadPurpose: 'value',
                 // D-бригада: выбранный символ элемента (сначала символ, потом значение/«не выполнен»)
                 pendingSymbol: null,         // { symbol, label }
                 _hintT: null,
@@ -325,7 +324,13 @@
                         const restored = this.mode === 'subtract'
                             ? Math.max(0, Math.min(this.deductionLimit, this.base - opts.initial))
                             : Math.max(0, opts.initial);
-                        this.draft = this.round3(restored);
+                        // У старых оценок A без истории итоговая сбавка уже включала штрафы
+                        // за отсутствующие S и динамику. Они также считаются в comboPenalty(),
+                        // поэтому отделяем их от ручной части, чтобы не начислять дважды.
+                        const manualRestored = this.panel === 'a'
+                            ? Math.max(0, restored - this.comboPenalty())
+                            : restored;
+                        this.draft = this.round3(manualRestored);
                         this.actions = this.draft === 0
                             ? []
                             : [{ v: this.draft, cat: null, label: '', inTotal: true }];
@@ -1152,7 +1157,6 @@
                     if (this.penaltyType) body.append('penalty_type', this.penaltyType);
                     body.append('score', this.submitValue());
                     body.append('entries', JSON.stringify(this.historyForSubmit()));
-                    body.append('notes', this.personalNotes || '');
                     body.append('age_group', this.ageGroup);
                     try {
                         const r = await fetch(this.submitUrl, {
@@ -1184,11 +1188,12 @@
                 },
 
                 // ====== Numpad ======
-                openNumpad() { this.numpadOpen = true; this.numpadValue = ''; },
-                closeNumpad() { this.numpadOpen = false; this.numpadValue = ''; },
+                openNumpad() { this.numpadPurpose = 'value'; this.numpadOpen = true; this.numpadValue = ''; },
+                openFinalScoreNumpad() { this.numpadPurpose = 'finalScore'; this.numpadOpen = true; this.numpadValue = ''; },
+                closeNumpad() { this.numpadOpen = false; this.numpadValue = ''; this.numpadPurpose = 'value'; },
                 numpadAppend(c) {
                     if (c === '.') {
-                        if (this.numpadValue.includes('.')) return;
+                        if (this.numpadValue.includes('.') || this.numpadValue.includes(',')) return;
                         if (this.numpadValue === '') this.numpadValue = '0';
                         this.numpadValue += '.';
                         return;
@@ -1198,9 +1203,53 @@
                     this.numpadValue += c;
                 },
                 numpadBackspace() { this.numpadValue = this.numpadValue.slice(0, -1); },
+                applyManualFinalScore(value) {
+                    if (this.mode !== 'subtract') return;
+                    const score = this.round3(value);
+                    if (score < 0 || score > 10) {
+                        this.flashHint('Итоговая оценка должна быть от 0.00 до 10.00');
+                        return;
+                    }
+
+                    this.clearAll();
+                    // Ручной итог не содержит расшифровки требований. Для A считаем
+                    // обязательные S и динамику выполненными, иначе автосбавка исказит ввод.
+                    if (this.panel === 'a') {
+                        for (const cat of this.comboCats) {
+                            for (let i = 0; i < (this.catMax[cat] || 0); i++) {
+                                this.add(this.comboStep, cat);
+                            }
+                        }
+                    }
+
+                    const deduction = this.round3(Math.max(0, this.base - score));
+                    this.draft = deduction;
+                    if (deduction > 0) {
+                        this.actions.unshift({
+                            v: deduction,
+                            cat: null,
+                            label: 'Ручная итоговая оценка ' + score.toFixed(2),
+                            inTotal: true,
+                        });
+                    }
+                },
                 applyNumpad() {
-                    const v = parseFloat(this.numpadValue || '0');
-                    if (isNaN(v) || v <= 0) { this.closeNumpad(); return; }
+                    const normalized = String(this.numpadValue).trim().replace(',', '.');
+                    if (! /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) {
+                        this.flashHint('Введите корректное числовое значение');
+                        return;
+                    }
+                    const v = parseFloat(normalized);
+                    if (this.numpadPurpose === 'finalScore') {
+                        if (v < 0 || v > 10) {
+                            this.flashHint('Итоговая оценка должна быть от 0.00 до 10.00');
+                            return;
+                        }
+                        this.applyManualFinalScore(v);
+                        this.closeNumpad();
+                        return;
+                    }
+                    if (v <= 0) { this.closeNumpad(); return; }
                     if (this.mode === 'add') {
                         this.assignValue(this.round3(v));
                     } else {

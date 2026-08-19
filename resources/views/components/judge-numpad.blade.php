@@ -1,5 +1,5 @@
-{{-- Numpad-модалка для ввода произвольного дробного значения.
-     Открывается по нажатию «Вставить»; применяется к draft через add(parsedValue).
+{{-- Numpad-модалка для ввода произвольного значения или итоговой оценки A/E.
+     Открывается по нажатию «Вставить».
      Завязана на Alpine-стейт x-data="judgeTablet({...})" в родителе. --}}
 <div
     x-cloak
@@ -11,12 +11,16 @@
     <div @click.outside="closeNumpad()"
          class="judge-numpad w-[380px] rounded-3xl p-4">
         <div class="flex items-center justify-between mb-2">
-            <div class="text-[11px] uppercase tracking-widest text-slate-400">Ввести своё значение</div>
+            <div class="text-[11px] uppercase tracking-widest text-slate-400"
+                 x-text="numpadPurpose === 'finalScore' ? 'Итоговая оценка · от 0.00 до 10.00' : 'Ввести своё значение'"></div>
             <button type="button" @click="closeNumpad()"
                 class="rounded-md text-slate-400 hover:text-white text-lg leading-none px-2 py-0.5">✕</button>
         </div>
-        <div class="rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-3 text-3xl font-mono tabular-nums text-white text-right h-14 flex items-center justify-end shadow-inner"
-             x-text="numpadValue || '0'"></div>
+        <input type="text" inputmode="decimal" maxlength="6" x-model="numpadValue"
+               @keydown.enter.prevent="applyNumpad()"
+               class="h-14 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-3 text-right font-mono text-3xl tabular-nums text-white shadow-inner focus:border-cyan-500 focus:ring-cyan-500"
+               placeholder="0.00" aria-label="Ввод оценки">
+        <div x-cloak x-show="error" class="mt-2 text-center text-xs font-semibold text-rose-300" x-text="error"></div>
 
         <div class="grid grid-cols-3 gap-2 mt-3">
             @foreach ([7,8,9,4,5,6,1,2,3] as $n)

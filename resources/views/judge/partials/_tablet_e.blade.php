@@ -1,5 +1,5 @@
 {{-- E-бригада: Execution. Зелёная лента истории сбавок.
-     «Вставить» → numpad (произвольное значение). «ОТМЕНА» → удалить последнее. --}}
+     «Вставить» → numpad итоговой оценки. «ОТМЕНА» → удалить последнее. --}}
 
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
     <button type="button" @click="cancel()"
@@ -25,7 +25,7 @@
             <div class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1 text-sm font-mono tabular-nums text-emerald-200 min-w-[100px] text-center">
                 {{ $slot }} (оценка)
             </div>
-            <button type="button" @click="openNumpad()"
+            <button type="button" @click="openFinalScoreNumpad()"
                 class="rounded-lg bg-[#5547a5] hover:bg-[#6657c2] border border-indigo-700/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
                 Вставить
             </button>

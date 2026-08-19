@@ -76,7 +76,10 @@
             <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                 <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
                 <div class="my-1 text-6xl font-extrabold tabular-nums text-white" x-text="workingTotal().toFixed(2)"></div>
-                <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                <div class="flex items-center justify-center gap-2">
+                    <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                    <button type="button" @click="openFinalScoreNumpad()" class="rounded-lg border border-indigo-700/60 bg-[#5547a5] px-3 py-1.5 text-xs font-semibold text-white active:scale-[0.98]">Вставить</button>
+                </div>
                 <div class="mt-1 text-[10px] text-slate-500">{{ number_format((float) $base, 2, '.', '') }} − сбавка · максимум 10.00</div>
             </div>
 
@@ -117,8 +120,8 @@
 <template x-if="page === 2">
     <div class="col-span-12 h-full min-h-0 flex flex-col gap-2">
         <div class="flex-1 min-h-0 grid grid-cols-12 gap-2">
-            <div class="col-span-4 min-h-0 flex flex-col gap-2">
-                <div class="rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+            <div class="col-span-3 min-h-0 flex flex-col gap-1.5">
+                <div class="flex-1 rounded-2xl border border-slate-800 bg-[#0c1429] p-2 flex flex-col justify-center">
                     <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Идея / характер · выбрать одно</div>
                     <div class="grid grid-cols-4 gap-1">
                         @foreach ([0, 0.3, 0.6, 1.0] as $value)
@@ -128,7 +131,7 @@
                         @endforeach
                     </div>
                 </div>
-                <div class="rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                <div class="flex-1 rounded-2xl border border-slate-800 bg-[#0c1429] p-2 flex flex-col justify-center">
                     <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Экспрессия тела · выбрать одно</div>
                     <div class="grid grid-cols-3 gap-1">
                         @foreach ([0, 0.3, 0.6] as $value)
@@ -140,13 +143,7 @@
                 </div>
                 <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
                     :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                    class="rounded-xl border px-3 py-2 text-left text-sm font-semibold active:scale-[0.98]"><span class="font-mono font-bold">−0.30</span> · Недостаточная экспрессия лица</button>
-                <label class="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
-                    <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Личные заметки судьи</span>
-                    <textarea x-model="personalNotes" maxlength="2000" placeholder="Наблюдения для конференции судей…"
-                        class="mt-1 flex-1 min-h-16 resize-none rounded-lg border border-slate-700 bg-slate-950/70 p-2 text-xs text-slate-100 focus:border-cyan-500 focus:ring-cyan-500"></textarea>
-                    <span class="mt-1 text-right text-[9px] text-slate-500" x-text="personalNotes.length + '/2000'"></span>
-                </label>
+                    class="flex-1 rounded-xl border px-3 py-2 text-left text-xs font-semibold leading-tight active:scale-[0.98]"><span class="block font-mono text-base font-bold">−0.30</span>Недостаточная экспрессия лица</button>
             </div>
 
             <div class="col-span-4 min-h-0 flex flex-col gap-2">
@@ -157,24 +154,27 @@
                 <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                     <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
                     <div class="my-1 text-6xl font-extrabold tabular-nums text-white" x-text="workingTotal().toFixed(2)"></div>
-                    <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                    <div class="flex items-center justify-center gap-2">
+                        <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                        <button type="button" @click="openFinalScoreNumpad()" class="rounded-lg border border-indigo-700/60 bg-[#5547a5] px-3 py-1.5 text-xs font-semibold text-white active:scale-[0.98]">Вставить</button>
+                    </div>
                     <div class="mt-1 text-[10px] text-slate-500">{{ number_format((float) $base, 2, '.', '') }} − сбавка · максимум 10.00</div>
                 </div>
                 <button type="button" @click="submit()" :disabled="busy" class="judge-submit-button shrink-0 rounded-2xl border py-3 text-lg font-bold text-white disabled:cursor-wait disabled:opacity-50 active:scale-[0.99]">ОТПРАВИТЬ</button>
             </div>
 
-            <div class="col-span-4 min-h-0 grid grid-cols-2 gap-1.5 content-stretch">
+            <div class="col-span-5 min-h-0 grid grid-cols-3 gap-1 content-stretch">
                 @foreach($eventPenalties as $item)
                     <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
                         :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                        class="min-h-0 rounded-xl border px-2 py-2 text-left text-[11px] font-semibold leading-tight active:scale-[0.98]">
-                        <span class="block font-mono text-lg font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
+                        class="min-h-0 rounded-xl border px-2 py-1.5 text-left text-[10px] font-semibold leading-tight active:scale-[0.98]">
+                        <span class="block font-mono text-base font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
                     </button>
                 @endforeach
                 @if($groupProgram)
                     <div class="min-h-0 flex flex-col rounded-xl border border-amber-700/60 bg-amber-900/60 p-1.5 text-white">
-                        <button type="button" @click="add(0.6, 'bodyConstruction')" class="flex-1 text-left text-[11px] font-semibold leading-tight active:scale-[0.98]">
-                            <span class="block font-mono text-lg font-extrabold">−0.60</span>Конструкция / поднятое положение · за каждый элемент
+                        <button type="button" @click="add(0.6, 'bodyConstruction')" class="flex-1 text-left text-[10px] font-semibold leading-tight active:scale-[0.98]">
+                            <span class="block font-mono text-base font-extrabold">−0.60</span>Конструкция / поднятое положение · за каждый элемент
                             <span class="mt-1 block text-[9px] text-amber-200" x-text="'Сумма: −' + categoryPenalty('bodyConstruction').toFixed(2)"></span>
                         </button>
                         <button type="button" @click="decrementPenalty(0.6, 'bodyConstruction')" :disabled="categoryPenalty('bodyConstruction') <= 0" class="rounded-md bg-black/25 py-1 text-[9px] font-semibold disabled:opacity-30">Убрать один элемент</button>

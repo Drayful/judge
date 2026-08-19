@@ -517,7 +517,6 @@ class JudgeController extends Controller
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
                 'subpanel' => ['nullable', 'string', 'max:32'],
                 'penalty_type' => ['nullable', 'string', 'max:32'],
-                'notes' => ['nullable', 'string', 'max:2000'],
             ]);
             $panelKey = $data['panel'];
             $subpanel = $data['subpanel'] ?: null;
@@ -527,7 +526,6 @@ class JudgeController extends Controller
             $data = $request->validate([
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
                 'penalty_type' => ['nullable', 'string', 'max:32'],
-                'notes' => ['nullable', 'string', 'max:2000'],
             ]);
             $panel = $this->effectiveJudgePanel($performance, $panel);
             $panelKey = $panel['panel'];
@@ -539,8 +537,6 @@ class JudgeController extends Controller
         if (in_array($panelKey, ['a', 'e'], true) && $score > 10.0) {
             abort(422, 'Оценка бригад A и E должна быть в диапазоне от 0 до 10 баллов.');
         }
-        $notes = trim((string) ($data['notes'] ?? ''));
-
         $performance->loadMissing('category.tournament');
         $slot = strtoupper((string) ($panel['slot'] ?? $user->slot ?? ''));
         if (! $user->isAdmin()
@@ -616,7 +612,6 @@ class JudgeController extends Controller
                 'average_score' => null,
                 'entries' => $entries,
                 'age_group' => $ageGroup,
-                'notes' => $notes !== '' ? $notes : null,
                 'submitted_at' => now(),
                 'average_submitted_at' => null,
             ],
