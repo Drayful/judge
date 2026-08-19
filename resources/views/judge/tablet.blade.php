@@ -280,13 +280,29 @@
                 },
 
                 // Лимиты по категориям (A1: dance, dynamic — макс. 2)
-                cat: { dance: 0, dynamic: 0 },
-                catMax: { dance: 2, dynamic: opts.groupProgram ? 4 : 2 },
+                cat: {
+                    dance: 0,
+                    dynamic: 0,
+                    collectiveSync: 0,
+                    collectiveContrast: 0,
+                    collectiveCanon: 0,
+                    collectiveChoral: 0,
+                },
+                catMax: {
+                    dance: 2,
+                    dynamic: opts.groupProgram ? 4 : 2,
+                    collectiveSync: opts.groupProgram ? 1 : 0,
+                    collectiveContrast: opts.groupProgram ? 1 : 0,
+                    collectiveCanon: opts.groupProgram ? 1 : 0,
+                    collectiveChoral: opts.groupProgram ? 1 : 0,
+                },
                 // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
                 // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
                 hasCombo: opts.panel === 'a',
                 comboStep: 0.3,
-                comboCats: ['dance', 'dynamic'],
+                comboCats: opts.groupProgram
+                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral']
+                    : ['dance', 'dynamic'],
                 catLabel: {
                     dance: 'Танц. шаги',
                     dynamic: 'Дин./эфф.',
@@ -300,10 +316,10 @@
                     musicNorms: 'Нормы музыки',
                     musicIntro: 'Муз. вступл.',
                     musicEnd: 'Финал не с музыкой',
-                    collectiveSync: 'Нет синхронизации',
-                    collectiveContrast: 'Нет контраста',
-                    collectiveCanon: 'Нет быстрой последовательности/канона',
-                    collectiveChoral: 'Нет хоровой работы',
+                    collectiveSync: 'Синхронизация выполнена',
+                    collectiveContrast: 'Контраст выполнен',
+                    collectiveCanon: 'Последовательность/канон выполнены',
+                    collectiveChoral: 'Хоровая работа выполнена',
                     formationDesign: 'Построения: рисунок',
                     formationAmplitude: 'Построения: амплитуда',
                     groupContactDuration: 'Без предмета 5+ секунд',
@@ -504,6 +520,14 @@
                     this.resetCats();
                     for (const e of entries) {
                         const cat = e.cat || this.catFromLabel(e.label);
+                        // До обратной логики коллективные кнопки сохранялись как штрафы.
+                        // Теперь тот же штраф создаётся автоматически, поэтому старую запись
+                        // пропускаем: кнопка останется неотмеченной, а итог не удвоится.
+                        const legacyCollectivePenalty = this.panel === 'a'
+                            && this.groupProgram
+                            && ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral'].includes(cat)
+                            && ! e.combo;
+                        if (legacyCollectivePenalty) continue;
                         const action = {
                             v: e.v ?? 0,
                             cat: cat,
@@ -578,20 +602,6 @@
                         return;
                     }
                     this.add(value, cat);
-                },
-
-                decrementPenalty(value, cat) {
-                    const index = this.actions.findIndex(a => a.cat === cat && a.inTotal !== false && ! a.combo);
-                    if (index === -1) return;
-                    this.actions.splice(index, 1);
-                    this.recalculateDraft();
-                },
-
-                decrementCombo(cat) {
-                    const index = this.actions.findIndex(a => a.cat === cat && a.combo);
-                    if (index === -1) return;
-                    this.actions.splice(index, 1);
-                    this.cat[cat] = Math.max(0, (this.cat[cat] || 0) - 1);
                 },
 
                 /** Добавить значение (всегда положительное; mode определяет, прибавлять или вычитать на итог). */

@@ -22,10 +22,10 @@
         ];
 
     $collectivePenalties = [
-        ['cat' => 'collectiveSync',     'label' => 'Нет синхронизации'],
-        ['cat' => 'collectiveContrast', 'label' => 'Нет контраста'],
-        ['cat' => 'collectiveCanon',    'label' => 'Нет быстрой последовательности / канона'],
-        ['cat' => 'collectiveChoral',   'label' => 'Нет хоровой работы'],
+        ['cat' => 'collectiveSync',     'label' => 'Синхронизация'],
+        ['cat' => 'collectiveContrast', 'label' => 'Контраст'],
+        ['cat' => 'collectiveCanon',    'label' => 'Быстрая последовательность / канон'],
+        ['cat' => 'collectiveChoral',   'label' => 'Хоровая работа'],
     ];
 @endphp
 
@@ -34,33 +34,34 @@
     <div class="col-span-12 h-full min-h-0 grid grid-cols-12 gap-2">
         <div class="col-span-4 min-h-0 flex flex-col gap-2">
             @foreach ([['connections', 'Соединения'], ['rhythm', 'Ритм']] as [$cat, $label])
-                <div class="judge-score-stage flex-1 min-h-0 rounded-2xl border p-3 flex flex-col justify-center">
+                <div class="judge-score-stage {{ $groupProgram ? 'shrink-0' : 'flex-1 min-h-0' }} rounded-2xl border p-2 flex flex-col justify-center">
                     <div class="flex items-center justify-between gap-2">
                         <div>
                             <div class="text-xs font-bold uppercase tracking-wide text-slate-200">{{ $label }}</div>
                             <div class="mt-1 text-[10px] text-slate-500">FIG: 0.00–2.00 · шаг 0.10</div>
                         </div>
-                        <div class="font-mono text-3xl font-extrabold text-white tabular-nums" x-text="categoryPenalty('{{ $cat }}').toFixed(2)"></div>
+                        <div class="font-mono text-2xl font-extrabold text-white tabular-nums" x-text="categoryPenalty('{{ $cat }}').toFixed(2)"></div>
                     </div>
-                    <div class="mt-2 grid grid-cols-2 gap-2">
+                    <div class="mt-1">
                         <button type="button" @click="incrementPenalty(0.1, '{{ $cat }}', 2.0)"
                             :disabled="categoryPenalty('{{ $cat }}') >= 2"
-                            class="rounded-xl bg-[#0e6a7a] px-3 py-2 text-xl font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]">−0.10</button>
-                        <button type="button" @click="decrementPenalty(0.1, '{{ $cat }}')"
-                            :disabled="categoryPenalty('{{ $cat }}') <= 0"
-                            class="rounded-xl bg-slate-800 px-3 py-2 text-sm font-bold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]">Убрать 0.10</button>
+                            class="w-full rounded-xl bg-[#0e6a7a] px-3 py-1.5 text-lg font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]">−0.10</button>
                     </div>
                 </div>
             @endforeach
 
             @if($groupProgram)
-                <div class="shrink-0 rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
-                    <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Отсутствующие типы коллективной работы · по −0.30</div>
-                    <div class="grid grid-cols-2 gap-1.5">
+                <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                    <div class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Типы коллективной работы · не отмечено = −0.30</div>
+                    <div class="flex-1 min-h-0 grid grid-cols-2 gap-2">
                         @foreach($collectivePenalties as $item)
-                            <button type="button" @click="togglePenalty(0.3, '{{ $item['cat'] }}')"
-                                :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                                class="min-h-10 rounded-lg border px-2 py-1 text-[10px] font-semibold leading-tight active:scale-[0.98]">{{ $item['label'] }}</button>
+                            <button type="button" @click="add(0.3, '{{ $item['cat'] }}')" :disabled="!can('{{ $item['cat'] }}')"
+                                :class="cat.{{ $item['cat'] }} > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
+                                class="min-h-0 rounded-xl border p-2 text-center text-sm font-bold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
+                                <span x-show="cat.{{ $item['cat'] }} > 0" class="mb-1 block text-3xl leading-none text-emerald-200">✓</span>
+                                <span x-show="cat.{{ $item['cat'] }} === 0" class="mb-1 block font-mono text-lg text-rose-300">−0.30</span>
+                                {{ $item['label'] }}
+                            </button>
                         @endforeach
                     </div>
                 </div>
@@ -102,7 +103,6 @@
                     <div class="mt-2 text-sm text-cyan-100/80">За каждую выполненную комбинацию танцевальных шагов</div>
                     <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dance').toFixed(2)"></div>
                 </button>
-                <button type="button" @click="decrementCombo('dance')" :disabled="cat.dance <= 0" class="mt-1 rounded-lg bg-black/25 py-1 text-xs font-semibold disabled:opacity-30">Убрать одну выполненную S</button>
             </div>
             <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-amber-700/40 bg-[#7a4a1f] p-2 text-white">
                 <button type="button" @click="add(0.3, 'dynamic')" :disabled="!can('dynamic')" :class="can('dynamic') ? 'hover:brightness-110' : 'cursor-not-allowed opacity-50'" class="flex-1 min-h-0 p-1 text-left active:scale-[0.98]">
@@ -110,7 +110,6 @@
                     <div class="mt-2 text-sm text-amber-100/80">За каждое выполненное динамическое изменение или эффект</div>
                     <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dynamic').toFixed(2)"></div>
                 </button>
-                <button type="button" @click="decrementCombo('dynamic')" :disabled="cat.dynamic <= 0" class="mt-1 rounded-lg bg-black/25 py-1 text-xs font-semibold disabled:opacity-30">Убрать один выполненный дин./эффект</button>
             </div>
         </div>
     </div>
@@ -177,7 +176,6 @@
                             <span class="block font-mono text-base font-extrabold">−0.60</span>Конструкция / поднятое положение · за каждый элемент
                             <span class="mt-1 block text-[9px] text-amber-200" x-text="'Сумма: −' + categoryPenalty('bodyConstruction').toFixed(2)"></span>
                         </button>
-                        <button type="button" @click="decrementPenalty(0.6, 'bodyConstruction')" :disabled="categoryPenalty('bodyConstruction') <= 0" class="rounded-md bg-black/25 py-1 text-[9px] font-semibold disabled:opacity-30">Убрать один элемент</button>
                     </div>
                 @endif
             </div>
