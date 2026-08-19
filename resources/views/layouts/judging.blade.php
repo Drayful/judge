@@ -13,6 +13,24 @@
         [x-cloak] { display: none !important; }
         html, body { overscroll-behavior: none; }
 
+        /*
+         * The judging workspace is designed around a 1366x768 landscape canvas.
+         * Scale every rem-based control from both viewport dimensions so the same
+         * layout fits compact 8.7" tablets and grows naturally on larger screens.
+         * The 9px floor still supports the common 800x480 CSS viewport used by
+         * compact Android tablets, while the upper bound prevents oversized text
+         * on external 4K displays.
+         */
+        html {
+            font-size: clamp(9px, min(1.1713vw, 2.0833vh), 22px);
+        }
+
+        @supports (height: 100dvh) {
+            html {
+                font-size: clamp(9px, min(1.1713vw, 2.0833dvh), 22px);
+            }
+        }
+
         :root {
             --judge-accent: 45 212 191;
             --judge-accent-soft: 20 184 166;
@@ -56,6 +74,27 @@
 
         .judge-shell {
             position: relative;
+            max-width: none !important;
+            padding-top: max(.625rem, env(safe-area-inset-top)) !important;
+            padding-right: max(.625rem, env(safe-area-inset-right)) !important;
+            padding-bottom: max(.625rem, env(safe-area-inset-bottom)) !important;
+            padding-left: max(.625rem, env(safe-area-inset-left)) !important;
+        }
+
+        .judge-console,
+        #app-async-page,
+        body {
+            height: 100vh;
+            max-height: 100vh;
+        }
+
+        @supports (height: 100dvh) {
+            .judge-console,
+            #app-async-page,
+            body {
+                height: 100dvh !important;
+                max-height: 100dvh;
+            }
         }
 
         .judge-shell::before {
@@ -205,6 +244,14 @@
             background-color: rgb(6 78 59) !important;
             color: rgb(209 250 229) !important;
         }
+
+        /* Tailwind arbitrary pixel utilities do not follow the root scale. */
+        .judge-console .text-\[9px\] { font-size: .5625rem !important; }
+        .judge-console .text-\[10px\] { font-size: .625rem !important; }
+        .judge-console .text-\[11px\] { font-size: .6875rem !important; }
+        .judge-console .min-w-\[100px\] { min-width: 6.25rem !important; }
+        .judge-console .min-h-\[20px\] { min-height: 1.25rem !important; }
+        .judge-console .w-\[380px\] { width: min(23.75rem, calc(100vw - 2rem)) !important; }
 
         @media (prefers-reduced-motion: reduce) {
             .judge-workspace button { transition: none; }
