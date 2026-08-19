@@ -305,16 +305,17 @@
                     collectiveContrast: opts.groupProgram ? 1 : 0,
                     collectiveCanon: opts.groupProgram ? 1 : 0,
                     collectiveChoral: opts.groupProgram ? 1 : 0,
-                    faceExpr: 1,
-                    floorArea: opts.groupProgram ? 0 : 1,
-                    formationDesign: opts.groupProgram ? 1 : 0,
-                    formationAmplitude: opts.groupProgram ? 1 : 0,
-                    interrupt: 1,
-                    groupContactDuration: opts.groupProgram ? 1 : 0,
-                    groupContactPose: opts.groupProgram ? 1 : 0,
-                    musicIntro: 1,
-                    musicNorms: 1,
-                    musicEnd: 1,
+                    ...(opts.groupProgram ? {
+                        faceExpr: 1,
+                        formationDesign: 1,
+                        formationAmplitude: 1,
+                        interrupt: 1,
+                        groupContactDuration: 1,
+                        groupContactPose: 1,
+                        musicIntro: 1,
+                        musicNorms: 1,
+                        musicEnd: 1,
+                    } : {}),
                 },
                 // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
                 // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
@@ -322,10 +323,10 @@
                 comboStep: 0.3,
                 comboCats: opts.groupProgram
                     ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
-                    : ['dance', 'dynamic', 'faceExpr', 'floorArea', 'interrupt', 'musicIntro', 'musicNorms', 'musicEnd'],
+                    : ['dance', 'dynamic'],
                 oneTimeCreditCats: opts.groupProgram
                     ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
-                    : ['faceExpr', 'floorArea', 'interrupt', 'musicIntro', 'musicNorms', 'musicEnd'],
+                    : [],
                 creditValues: {
                     interrupt: 0.6,
                     groupContactPose: 0.6,
@@ -338,17 +339,17 @@
                     interrupt: 'Нет прерывания 4+ сек.',
                     character: 'Характер',
                     bodyExpr: 'Экспр. тела',
-                    faceExpr: 'Экспрессия лица достаточная',
-                    floorArea: 'Площадка использована достаточно',
-                    musicNorms: 'Музыка соответствует нормам',
-                    musicIntro: 'Вступление короче 4 сек.',
-                    musicEnd: 'Окончание совпадает с музыкой',
+                    faceExpr: 'Экспрессия лица',
+                    floorArea: 'Площадка',
+                    musicNorms: 'Музыка',
+                    musicIntro: 'Музыкальное вступление',
+                    musicEnd: 'Конец',
                     collectiveSync: 'Синхронизация выполнена',
                     collectiveContrast: 'Контраст выполнен',
                     collectiveCanon: 'Последовательность/канон выполнены',
                     collectiveChoral: 'Хоровая работа выполнена',
-                    formationDesign: 'Достаточно рисунков построений',
-                    formationAmplitude: 'Достаточная амплитуда построений',
+                    formationDesign: 'Рисунки построений',
+                    formationAmplitude: 'Амплитуда построений',
                     groupContactDuration: 'Нет гимнастки без предмета 5+ сек.',
                     groupContactPose: 'Есть контакт в начале/конце',
                     bodyConstruction: 'Конструкция/поднятое положение',
@@ -601,6 +602,8 @@
                         .reduce((sum, a) => sum + Number(a.v || 0), 0));
                 },
 
+                hasPenalty(cat) { return this.actions.some(a => a.cat === cat && a.inTotal !== false); },
+
                 recalculateDraft() {
                     this.draft = this.round3(this.actions
                         .filter(a => a.inTotal !== false && ! a.combo)
@@ -624,6 +627,15 @@
                     }
                     this.clearCategory(cat);
                     if (value > 0) this.add(value, cat);
+                },
+
+                /** Обычный одноразовый штраф: нажатие добавляет, повторное снимает. */
+                togglePenalty(value, cat) {
+                    if (this.hasPenalty(cat)) {
+                        this.clearCategory(cat);
+                        return;
+                    }
+                    this.add(value, cat);
                 },
 
                 /** Счётчик с шагом и официальным максимумом категории. */
