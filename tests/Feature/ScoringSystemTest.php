@@ -346,11 +346,13 @@ class ScoringSystemTest extends TestCase
         // Первая строка данных (строка 6): лидер Петрова 40.0, место 1
         $this->assertSame('Петрова Белла', $sheet->getCell('B6')->getValue());
         $this->assertEqualsWithDelta(40.0, (float) $sheet->getCell('F6')->getValue(), 0.0005);
+        $this->assertSame('0.000', $sheet->getStyle('F6')->getNumberFormat()->getFormatCode());
         $this->assertSame(1, (int) $sheet->getCell('G6')->getValue());
 
         // Вторая строка (строка 7): Иванова 38.5, место 2
         $this->assertSame('Иванова Анна', $sheet->getCell('B7')->getValue());
         $this->assertEqualsWithDelta(38.5, (float) $sheet->getCell('F7')->getValue(), 0.0005);
+        $this->assertSame('0.000', $sheet->getStyle('E7')->getNumberFormat()->getFormatCode());
         $this->assertSame(2, (int) $sheet->getCell('G7')->getValue());
 
         @unlink($tmp);

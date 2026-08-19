@@ -655,12 +655,15 @@
                 </span>
             </div>
             <div class="overflow-x-auto rounded-xl border border-slate-800">
-                <table class="w-full min-w-[640px] text-sm">
+                <table class="w-full min-w-[2100px] text-sm">
                     <thead>
                         <tr class="border-b border-slate-800 bg-slate-900/90 text-left text-xs uppercase tracking-wide text-slate-400">
                             <th class="px-3 py-3">#</th>
                             <th class="px-3 py-3">Гимнастка</th>
                             <th class="px-3 py-3">Предмет</th>
+                            @foreach($historyJudgeColumns as $judgeColumn)
+                                <th class="px-2 py-3 text-right font-mono text-[11px]">{{ $judgeColumn }}</th>
+                            @endforeach
                             <th class="px-3 py-3 text-right">D</th>
                             <th class="px-3 py-3 text-right">A</th>
                             <th class="px-3 py-3 text-right">E</th>
@@ -674,6 +677,23 @@
                                 <td class="px-3 py-2.5 font-mono text-slate-500">{{ $loop->iteration }}</td>
                                 <td class="px-3 py-2.5 text-slate-100">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</td>
                                 <td class="px-3 py-2.5 text-slate-400">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</td>
+                                @foreach($historyJudgeColumns as $judgeColumn)
+                                    @php($judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null)
+                                    <td class="px-2 py-2.5 text-right font-mono">
+                                        @if($judgeHistory)
+                                            <button type="button"
+                                                data-stream-history-score
+                                                data-performance-id="{{ $p->id }}"
+                                                data-slot="{{ $judgeColumn }}"
+                                                class="rounded px-1.5 py-1 text-emerald-200 underline decoration-emerald-700/60 underline-offset-2 hover:bg-emerald-950/60 hover:text-white"
+                                                title="Нажмите, чтобы посмотреть и исправить оценку {{ $judgeColumn }}">
+                                                {{ $judgeHistory['score'] }}
+                                            </button>
+                                        @else
+                                            <span class="text-slate-600">—</span>
+                                        @endif
+                                    </td>
+                                @endforeach
                                 <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->d_score !== null ? (float) $p->d_score : null) }}</td>
                                 <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->a_score !== null ? (float) $p->a_score : null) }}</td>
                                 <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->e_score !== null ? (float) $p->e_score : null) }}</td>
@@ -913,8 +933,6 @@
             </div>
         </details>
     </div>
-</x-app-layout>
-
 {{-- ===== Модалка: история выставления оценки ===== --}}
 <div id="score-history-modal" class="hidden fixed inset-0 z-50">
     <div class="absolute inset-0 bg-black/60" data-history-close></div>
@@ -930,10 +948,9 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script>
 (() => {
-    const history = @json($scoreHistory ?? []);
+    const histories = @json($scoreHistoryByPerformance ?? []);
+    const currentPerformanceId = @json($currentPerformance?->id);
     const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-    const updateUrl = @json($currentPerformance ? route('secretary.performance.updateJudgeScore', $currentPerformance) : null);
-    const returnUrl = @json($currentPerformance ? route('secretary.performance.returnScores', $currentPerformance) : null);
     const modal = document.getElementById('score-history-modal');
     const title = document.getElementById('score-history-title');
     const body = document.getElementById('score-history-body');
@@ -941,7 +958,9 @@
 
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-    const slotActions = (slot, score) => {
+    const slotActions = (performanceHistory, slot, score) => {
+        const updateUrl = performanceHistory?.update_url;
+        const returnUrl = performanceHistory?.return_url;
         if (! updateUrl || ! returnUrl) return '';
         const returnConfirm = /^(LINE|TIME|RESP)/.test(slot)
             ? ''
@@ -983,15 +1002,15 @@
         return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
     };
 
-    const slotBlock = (slot, withActions = false) => {
-        const h = history[slot];
+    const slotBlock = (performanceHistory, slot, withActions = false) => {
+        const h = performanceHistory?.slots?.[slot];
         if (! h) return '';
         const ag = h.age_group === 'junior' ? 'Юниоры' : (h.age_group === 'senior' ? 'Сеньоры' : null);
         const meta = [h.judge, ag, h.submitted_at ? 'отправлено ' + h.submitted_at : null].filter(Boolean).map(esc).join(' · ');
         const entries = Array.isArray(h.entries) && h.entries.length
             ? `<ul class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">${h.entries.map(entryLine).join('')}</ul>`
             : '<div class="mt-2 text-xs text-slate-500">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
-        const actions = withActions ? slotActions(slot, h.score) : '';
+        const actions = withActions ? slotActions(performanceHistory, slot, h.score) : '';
         return `
             <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <div class="flex items-center justify-between gap-2">
@@ -1003,8 +1022,8 @@
             </div>`;
     };
 
-    const open = (slots, heading, withActions = false) => {
-        const blocks = slots.map((s) => slotBlock(s, withActions && slots.length === 1)).filter(Boolean);
+    const open = (performanceHistory, slots, heading, withActions = false) => {
+        const blocks = slots.map((s) => slotBlock(performanceHistory, s, withActions && slots.length === 1)).filter(Boolean);
         if (! blocks.length) return;
         title.textContent = heading;
         body.innerHTML = blocks.join('');
@@ -1014,14 +1033,32 @@
     document.querySelectorAll('[data-history-slot]').forEach((td) => {
         td.addEventListener('click', () => {
             const slot = td.dataset.historySlot;
-            if (history[slot]) open([slot], 'История выставления — ' + slot, true);
+            const performanceHistory = histories[String(currentPerformanceId)];
+            if (performanceHistory?.slots?.[slot]) open(performanceHistory, [slot], 'История выставления — ' + slot, true);
+        });
+    });
+
+    document.querySelectorAll('[data-stream-history-score]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const performanceHistory = histories[String(button.dataset.performanceId)];
+            const slot = button.dataset.slot;
+            if (! performanceHistory?.slots?.[slot]) return;
+            open(
+                performanceHistory,
+                [slot],
+                `${performanceHistory.athlete || 'Гимнастка'} — ${slot}`,
+                true,
+            );
         });
     });
 
     const totalBadge = document.getElementById('total-score-badge');
     if (totalBadge) {
         totalBadge.addEventListener('click', () => {
-            open(Object.keys(history), 'История выставления оценок — все судьи');
+            const performanceHistory = histories[String(currentPerformanceId)];
+            if (performanceHistory) {
+                open(performanceHistory, Object.keys(performanceHistory.slots || {}), 'История выставления оценок — все судьи');
+            }
         });
     }
 
@@ -1296,3 +1333,4 @@
     checkForUpdates();
 })();
 </script>
+</x-app-layout>

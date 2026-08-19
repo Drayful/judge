@@ -603,11 +603,11 @@ class SecretaryLiveUi
      *
      * @return array<string, ?JudgeScore>
      */
-    public static function scoreRowsBySlot(?Performance $perf, ?Category $category = null): array
+    public static function scoreRowsBySlot(?Performance $perf, ?Category $category = null, bool $includeInactive = false): array
     {
         $rows = array_fill_keys(self::ALL_JUDGE_SLOTS, null);
         $category = $category ?? $perf?->category;
-        $inactive = self::inactiveSlots($category);
+        $inactive = $includeInactive ? [] : self::inactiveSlots($category);
 
         if (! $perf) {
             return $rows;

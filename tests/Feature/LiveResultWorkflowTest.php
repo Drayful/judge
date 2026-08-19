@@ -802,6 +802,63 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotSame($averageRevision, $penaltyRevision);
     }
 
+    public function test_stream_history_lists_every_judge_score_and_keeps_controls_inside_async_page(): void
+    {
+        $first = $this->performance();
+        $category = $first->category;
+        $category->update(['inactive_judge_slots' => ['DB1']]);
+        $secondAthlete = Athlete::create(['last_name' => 'Петрова', 'first_name' => 'Елена']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'done',
+            'order_index' => 2,
+        ]);
+        $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+        $a1 = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        JudgeScore::create([
+            'performance_id' => $first->id,
+            'judge_id' => $db1->id,
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'score' => 3.125,
+            'submitted_at' => now(),
+        ]);
+        JudgeScore::create([
+            'performance_id' => $second->id,
+            'judge_id' => $a1->id,
+            'panel' => 'a',
+            'score' => 8.375,
+            'submitted_at' => now(),
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $response = $this->actingAs($secretary)->get(route('secretary.queue', $category));
+
+        $response->assertOk()
+            ->assertSee('DB1')
+            ->assertSee('DA2')
+            ->assertSee('A1')
+            ->assertSee('3.125')
+            ->assertSee('8.375')
+            ->assertSee('data-stream-history-score', false)
+            ->assertSee('data-performance-id="'.$first->id.'"', false)
+            ->assertSee('data-performance-id="'.$second->id.'"', false);
+        $this->assertMatchesRegularExpression(
+            '/const toggleUrl.*<\/div>\s*<\/body>/s',
+            $response->getContent(),
+            'Обработчик отключения судей должен повторно запускаться внутри асинхронно заменяемой области.',
+        );
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.updateJudgeScore', $first), [
+                'slot' => 'DB1',
+                'score' => 3.333,
+            ])
+            ->assertRedirect();
+        $this->assertEqualsWithDelta(3.333, (float) JudgeScore::query()->where('performance_id', $first->id)->value('score'), 0.0005);
+    }
+
     public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void
     {
         $jury = User::factory()->create(['role' => 'superior_jury']);

@@ -153,6 +153,12 @@ class FinalProtocolExporter
         if ($lastDataRow >= $firstDataRow) {
             $sheet->getStyle("A{$headerRow}:{$lastColLetter}{$lastDataRow}")
                 ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+
+            // Числовые значения остаются числами, но в итоговом протоколе всегда
+            // отображаются с точностью до тысячных (включая завершающие нули).
+            $lastScoreCol = Coordinate::stringFromColumnIndex(5 + $maxVidi);
+            $sheet->getStyle("E{$firstDataRow}:{$lastScoreCol}{$lastDataRow}")
+                ->getNumberFormat()->setFormatCode('0.000');
         }
 
         // Подписи

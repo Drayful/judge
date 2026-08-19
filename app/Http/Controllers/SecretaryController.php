@@ -1775,21 +1775,35 @@ class SecretaryController extends Controller
                 ->get()
             : collect();
 
-        // История выставления оценок по слотам (для модалки по клику на оценку).
-        $scoreHistory = [];
-        foreach (SecretaryLiveUi::scoreRowsBySlot($currentPerformance, $category) as $slot => $row) {
-            if ($row === null) {
-                continue;
+        // История по каждой гимнастке потока: все индивидуальные оценки доступны
+        // прямо из общей таблицы, включая отключённые позднее судейские слоты.
+        $scoreHistoryByPerformance = $ordered->mapWithKeys(function (Performance $performance) use ($category) {
+            $slots = [];
+            foreach (SecretaryLiveUi::scoreRowsBySlot($performance, $category, true) as $slot => $row) {
+                if ($row === null) {
+                    continue;
+                }
+                $slots[$slot] = [
+                    'slot' => $slot,
+                    'judge' => $row->judge?->name ?? '—',
+                    'score' => $row->score !== null ? number_format((float) $row->score, 3, '.', '') : '—',
+                    'age_group' => $row->age_group,
+                    'submitted_at' => $row->submitted_at?->format('H:i:s'),
+                    'entries' => $row->entries ?? [],
+                ];
             }
-            $scoreHistory[$slot] = [
-                'slot' => $slot,
-                'judge' => $row->judge?->name ?? '—',
-                'score' => $row->score !== null ? number_format((float) $row->score, 3, '.', '') : '—',
-                'age_group' => $row->age_group,
-                'submitted_at' => $row->submitted_at?->format('H:i:s'),
-                'entries' => $row->entries ?? [],
-            ];
-        }
+
+            return [$performance->id => [
+                'performance_id' => $performance->id,
+                'athlete' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
+                'update_url' => route('secretary.performance.updateJudgeScore', $performance),
+                'return_url' => route('secretary.performance.returnScores', $performance),
+                'slots' => $slots,
+            ]];
+        })->all();
+        $scoreHistory = $currentPerformance
+            ? ($scoreHistoryByPerformance[$currentPerformance->id]['slots'] ?? [])
+            : [];
 
         $liveJudgeActions = $currentPerformance
             ? JudgeScoreAction::query()
@@ -1839,6 +1853,8 @@ class SecretaryController extends Controller
             'activeJudgeSlots' => $activeJudgeSlots,
             'athletes' => $athletes,
             'scoreHistory' => $scoreHistory,
+            'scoreHistoryByPerformance' => $scoreHistoryByPerformance,
+            'historyJudgeColumns' => SecretaryLiveUi::ALL_JUDGE_SLOTS,
             'liveJudgeActions' => $liveJudgeActions,
             'queueRev' => $this->queuePing(request(), $category)->getData(true)['rev'] ?? null,
         ];
@@ -2049,7 +2065,7 @@ class SecretaryController extends Controller
         return DB::transaction(function () use ($performance, $data) {
             $performance = Performance::query()->lockForUpdate()->findOrFail($performance->id);
             $performance->load(['judgeScores.judge', 'category']);
-            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category, true);
             $row = $rows[$data['slot']] ?? null;
 
             if ($row === null) {
