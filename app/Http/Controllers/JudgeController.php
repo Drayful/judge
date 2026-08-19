@@ -951,7 +951,6 @@ class JudgeController extends Controller
             'performance' => $performance?->only([
                 'id',
                 'status',
-                'updated_at',
                 'finalized_at',
                 'approved_at',
                 'published_at',

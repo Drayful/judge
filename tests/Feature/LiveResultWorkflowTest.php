@@ -757,6 +757,43 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotSame($before, $after);
     }
 
+    public function test_score_from_another_panel_does_not_reset_current_judge_draft(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $aJudge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        $dbJudge = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB2']);
+
+        $aRevisionBefore = $this->actingAs($aJudge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->json('rev');
+        $dbRevisionBefore = $this->actingAs($dbJudge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->json('rev');
+
+        $this->actingAs($dbJudge)
+            ->postJson(route('judge.submit-score'), [
+                'tournament_id' => $tournament->id,
+                'score' => 4.2,
+            ])
+            ->assertOk();
+
+        $aPingAfter = $this->actingAs($aJudge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk();
+        $dbRevisionAfter = $this->actingAs($dbJudge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->json('rev');
+
+        $this->assertSame($performance->id, $aPingAfter->json('performance_id'));
+        $this->assertSame($aRevisionBefore, $aPingAfter->json('rev'));
+        $this->assertNotSame($dbRevisionBefore, $dbRevisionAfter);
+    }
+
     public function test_secretary_queue_revision_changes_for_score_manual_average_and_penalty(): void
     {
         $performance = $this->performance();
