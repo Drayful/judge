@@ -31,6 +31,12 @@
 <template x-if="page === 1">
     <div class="col-span-12 h-full min-h-0 grid grid-cols-12 gap-2">
         <div class="col-span-4 min-h-0 flex flex-col gap-2">
+            <button type="button" @click="togglePenalty(0.6, 'interrupt')"
+                :class="hasPenalty('interrupt') ? 'border-rose-400 bg-rose-900/80 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
+                class="shrink-0 min-h-24 w-full rounded-2xl border px-5 py-4 text-center text-lg font-bold shadow-md active:scale-[0.98]">
+                <span class="mr-3 font-mono text-3xl font-extrabold">−0.60</span>Прерывание непрерывности 4+ сек.
+            </button>
+
             @foreach ([['connections', 'Соединения'], ['rhythm', 'Ритм']] as [$cat, $label])
                 <button type="button" @click="incrementPenalty(0.1, '{{ $cat }}', 2.0)"
                     :disabled="categoryPenalty('{{ $cat }}') >= 2"
@@ -69,12 +75,6 @@
                 <button type="button" @click="cancel()" class="rounded-lg border border-rose-800/60 bg-[#6f1d2e] px-3 py-2 text-xs font-semibold text-white active:scale-[0.98]">ОТМЕНА</button>
                 <button type="button" @click="page = 2" class="flex-1 rounded-lg border border-emerald-700/40 bg-[#0e5a3f] px-4 py-2 text-sm font-bold text-emerald-50 active:scale-[0.98]">Общие и событийные штрафы →</button>
             </div>
-
-            <button type="button" @click="togglePenalty(0.6, 'interrupt')"
-                :class="hasPenalty('interrupt') ? 'border-rose-400 bg-rose-900/80 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
-                class="shrink-0 min-h-16 rounded-2xl border px-4 py-3 text-center text-sm font-bold active:scale-[0.98]">
-                <span class="mr-2 font-mono text-xl font-extrabold">−0.60</span>Прерывание непрерывности 4+ сек.
-            </button>
 
             <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                 <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
