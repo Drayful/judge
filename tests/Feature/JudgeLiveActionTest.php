@@ -39,7 +39,8 @@ class JudgeLiveActionTest extends TestCase
             ->postJson(route('judge.performance.live-actions', $performance), [
                 'action' => 'Добавлена сбавка: Ритм',
                 'draft_score' => 0.3,
-                'entries' => [['v' => 0.3, 'label' => 'Ритм', 'counted' => true]],
+                // Планшет отправляет историю как JSON внутри FormData.
+                'entries' => json_encode([['v' => 0.3, 'cat' => 'rhythm', 'label' => 'Ритм', 'counted' => true]], JSON_UNESCAPED_UNICODE),
                 'age_group' => 'junior',
             ])
             ->assertOk()
@@ -54,5 +55,6 @@ class JudgeLiveActionTest extends TestCase
         ]);
         $this->assertSame(0, JudgeScore::query()->where('performance_id', $performance->id)->count());
         $this->assertSame(1, JudgeScoreAction::query()->where('performance_id', $performance->id)->count());
+        $this->assertSame('rhythm', JudgeScoreAction::query()->where('performance_id', $performance->id)->firstOrFail()->entries[0]['cat']);
     }
 }

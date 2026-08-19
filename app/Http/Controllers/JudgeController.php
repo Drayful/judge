@@ -453,10 +453,18 @@ class JudgeController extends Controller
             abort(422, 'Ваш судейский слот отключён секретарём для этого потока.');
         }
 
+        $rawEntries = $request->input('entries');
+        if (is_string($rawEntries) && $rawEntries !== '') {
+            $decodedEntries = json_decode($rawEntries, true);
+            if (is_array($decodedEntries)) {
+                $request->merge(['entries' => $decodedEntries]);
+            }
+        }
+
         $data = $request->validate([
             'action' => ['required', 'string', 'max:120'],
             'draft_score' => ['nullable', 'numeric', 'min:0', 'max:99.999'],
-            'entries' => ['nullable', 'array', 'max:60'],
+            'entries' => ['nullable', 'array', 'max:120'],
             'age_group' => ['nullable', Rule::in(['junior', 'senior'])],
         ]);
 
@@ -473,7 +481,7 @@ class JudgeController extends Controller
             'penalty_type' => $effectivePanel['penalty_type'] ?? null,
             'action' => $data['action'],
             'draft_score' => $data['draft_score'] ?? null,
-            'entries' => isset($data['entries']) ? array_slice($data['entries'], 0, 60) : null,
+            'entries' => isset($data['entries']) ? array_slice($data['entries'], 0, 120) : null,
             'age_group' => $data['age_group'] ?? null,
         ]);
 
@@ -509,6 +517,7 @@ class JudgeController extends Controller
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
                 'subpanel' => ['nullable', 'string', 'max:32'],
                 'penalty_type' => ['nullable', 'string', 'max:32'],
+                'notes' => ['nullable', 'string', 'max:2000'],
             ]);
             $panelKey = $data['panel'];
             $subpanel = $data['subpanel'] ?: null;
@@ -518,6 +527,7 @@ class JudgeController extends Controller
             $data = $request->validate([
                 'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
                 'penalty_type' => ['nullable', 'string', 'max:32'],
+                'notes' => ['nullable', 'string', 'max:2000'],
             ]);
             $panel = $this->effectiveJudgePanel($performance, $panel);
             $panelKey = $panel['panel'];
@@ -525,6 +535,11 @@ class JudgeController extends Controller
             $penaltyType = $panel['penalty_type'] ?? null;
             $score = (float) $request->input('score');
         }
+
+        if (in_array($panelKey, ['a', 'e'], true) && $score > 10.0) {
+            abort(422, 'Оценка бригад A и E должна быть в диапазоне от 0 до 10 баллов.');
+        }
+        $notes = trim((string) ($data['notes'] ?? ''));
 
         $performance->loadMissing('category.tournament');
         $slot = strtoupper((string) ($panel['slot'] ?? $user->slot ?? ''));
@@ -564,10 +579,12 @@ class JudgeController extends Controller
         // История нажатий с планшета (для просмотра секретарём / главным судьёй).
         $entries = null;
         $rawEntries = $request->input('entries');
-        if (is_string($rawEntries) && $rawEntries !== '') {
+        if (is_array($rawEntries)) {
+            $entries = array_slice($rawEntries, 0, 120);
+        } elseif (is_string($rawEntries) && $rawEntries !== '') {
             $decoded = json_decode($rawEntries, true);
             if (is_array($decoded)) {
-                $entries = array_slice($decoded, 0, 60);
+                $entries = array_slice($decoded, 0, 120);
             }
         }
         $ageGroup = $request->input('age_group');
@@ -599,6 +616,7 @@ class JudgeController extends Controller
                 'average_score' => null,
                 'entries' => $entries,
                 'age_group' => $ageGroup,
+                'notes' => $notes !== '' ? $notes : null,
                 'submitted_at' => now(),
                 'average_submitted_at' => null,
             ],

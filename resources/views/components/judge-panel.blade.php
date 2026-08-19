@@ -6,6 +6,7 @@
     'base' => 10.0,
     'saved' => null,
     'entries' => [],
+    'notes' => '',
     'ageGroup' => 'junior',
     'groupProgram' => false,
     'tournament',
@@ -25,8 +26,10 @@
     x-data="judgeTablet({
         mode: @js($mode),
         base: {{ json_encode((float) $base) }},
+        hasInitial: @js($saved !== null),
         initial: {{ json_encode($saved !== null ? (float) $saved : 0.0) }},
         initialEntries: @js($entries),
+        initialNotes: @js($notes),
         initialAgeGroup: @js($ageGroup),
         submitUrl: @js(route('judge.submit-score')),
         liveActionUrl: @js(route('judge.performance.live-actions', $performance)),

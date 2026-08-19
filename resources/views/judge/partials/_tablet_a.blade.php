@@ -1,252 +1,197 @@
-{{-- A-бригада: Artistry. Landscape, без прокрутки.
-     Лимит 2/2 на «Танц. шаги» и «Дин. изменения»: бейдж → красный, тайл → серый/disabled.
-     «Вставить» → numpad, «ОТМЕНА» → удалить последнее действие. --}}
+{{-- A-бригада по FIG RG Code of Points 2025-2028.
+     Индивидуальная и групповая программы имеют разные наборы штрафов. --}}
 
-{{-- ====== Страница 1 ====== --}}
+@php
+    $eventPenalties = $groupProgram
+        ? [
+            ['v' => 0.3, 'cat' => 'formationDesign',     'label' => 'Построения: недостаточно рисунков'],
+            ['v' => 0.3, 'cat' => 'formationAmplitude',  'label' => 'Построения: недостаточно амплитуды'],
+            ['v' => 0.6, 'cat' => 'interrupt',           'label' => 'Прерывание непрерывности 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Гимнастка без предмета 5+ сек.'],
+            ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Нет контакта с предметом в начале/конце'],
+            ['v' => 0.3, 'cat' => 'musicIntro',          'label' => 'Музыкальное вступление 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'musicNorms',          'label' => 'Музыка не соответствует нормам'],
+            ['v' => 0.3, 'cat' => 'musicEnd',            'label' => 'Окончание не совпадает с музыкой'],
+        ]
+        : [
+            ['v' => 0.3, 'cat' => 'floorArea',  'label' => 'Недостаточное использование площадки'],
+            ['v' => 0.6, 'cat' => 'interrupt',  'label' => 'Прерывание непрерывности 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'musicIntro', 'label' => 'Музыкальное вступление 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыка не соответствует нормам'],
+            ['v' => 0.3, 'cat' => 'musicEnd',   'label' => 'Окончание не совпадает с музыкой'],
+        ];
+
+    $collectivePenalties = [
+        ['cat' => 'collectiveSync',     'label' => 'Нет синхронизации'],
+        ['cat' => 'collectiveContrast', 'label' => 'Нет контраста'],
+        ['cat' => 'collectiveCanon',    'label' => 'Нет быстрой последовательности / канона'],
+        ['cat' => 'collectiveChoral',   'label' => 'Нет хоровой работы'],
+    ];
+@endphp
+
+{{-- ====== Страница 1: считаемые штрафы и обязательные элементы ====== --}}
 <template x-if="page === 1">
     <div class="col-span-12 h-full min-h-0 grid grid-cols-12 gap-2">
-
-        <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-            @php
-                $catLeft1 = $groupProgram
-                    ? [
-                        ['v' => 0.3, 'label' => 'Синхронизация', 'cat' => 'synchronization', 'color' => '#1f78c4'],
-                        ['v' => 0.3, 'label' => 'Контраст',       'cat' => 'contrast',        'color' => '#0e6a7a'],
-                        ['v' => 0.3, 'label' => 'Каноническая',   'cat' => 'canonical',       'color' => '#5547a5'],
-                        ['v' => 0.3, 'label' => 'Хоровая',        'cat' => 'choral',          'color' => '#9a6c1a'],
-                    ]
-                    : [
-                        ['v' => 0.1, 'label' => 'Соединение',  'cat' => 'union',     'color' => '#1f78c4'],
-                        ['v' => 0.1, 'label' => 'Ритм',         'cat' => 'rhythm',    'color' => '#9a6c1a'],
-                        ['v' => 0.6, 'label' => 'Прерывание',  'cat' => 'interrupt', 'color' => '#5547a5'],
-                    ];
-            @endphp
-            @foreach ($catLeft1 as $c)
-                <button type="button" @click="add({{ $c['v'] }}, '{{ $c['cat'] }}')"
-                    style="background-color: {{ $c['color'] }}"
-                    class="flex-1 min-h-0 rounded-2xl border border-slate-700/40 hover:brightness-110 px-3 py-2 text-left text-white shadow-md active:scale-[0.98] flex flex-col justify-center">
-                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">−{{ number_format($c['v'], 1) }}</div>
-                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">{{ $c['label'] }}</div>
-                </button>
+        <div class="col-span-4 min-h-0 flex flex-col gap-2">
+            @foreach ([['connections', 'Соединения'], ['rhythm', 'Ритм']] as [$cat, $label])
+                <div class="judge-score-stage flex-1 min-h-0 rounded-2xl border p-3 flex flex-col justify-center">
+                    <div class="flex items-center justify-between gap-2">
+                        <div>
+                            <div class="text-xs font-bold uppercase tracking-wide text-slate-200">{{ $label }}</div>
+                            <div class="mt-1 text-[10px] text-slate-500">FIG: 0.00–2.00 · шаг 0.10</div>
+                        </div>
+                        <div class="font-mono text-3xl font-extrabold text-white tabular-nums" x-text="categoryPenalty('{{ $cat }}').toFixed(2)"></div>
+                    </div>
+                    <div class="mt-2 grid grid-cols-2 gap-2">
+                        <button type="button" @click="incrementPenalty(0.1, '{{ $cat }}', 2.0)"
+                            :disabled="categoryPenalty('{{ $cat }}') >= 2"
+                            class="rounded-xl bg-[#0e6a7a] px-3 py-2 text-xl font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]">−0.10</button>
+                        <button type="button" @click="decrementPenalty(0.1, '{{ $cat }}')"
+                            :disabled="categoryPenalty('{{ $cat }}') <= 0"
+                            class="rounded-xl bg-slate-800 px-3 py-2 text-sm font-bold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.98]">Убрать 0.10</button>
+                    </div>
+                </div>
             @endforeach
+
+            @if($groupProgram)
+                <div class="shrink-0 rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                    <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Отсутствующие типы коллективной работы · по −0.30</div>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        @foreach($collectivePenalties as $item)
+                            <button type="button" @click="togglePenalty(0.3, '{{ $item['cat'] }}')"
+                                :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
+                                class="min-h-10 rounded-lg border px-2 py-1 text-[10px] font-semibold leading-tight active:scale-[0.98]">{{ $item['label'] }}</button>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
         </div>
 
-        <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-            <div class="shrink-0 flex items-stretch gap-2">
-                <button type="button" @click="cancel()"
-                    class="shrink-0 rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-2 text-xs font-semibold text-white">
-                    ОТМЕНА
-                </button>
-                <button type="button" @click="page = 2"
-                    class="flex-1 rounded-lg bg-[#0e5a3f] hover:bg-[#117a52] border border-emerald-700/40 px-4 py-3 text-base font-bold text-emerald-50 active:scale-[0.98]">
-                    Следующая стр. →
-                </button>
+        <div class="col-span-4 min-h-0 flex flex-col gap-2">
+            <div class="shrink-0 flex gap-2">
+                <button type="button" @click="cancel()" class="rounded-lg border border-rose-800/60 bg-[#6f1d2e] px-3 py-2 text-xs font-semibold text-white active:scale-[0.98]">ОТМЕНА</button>
+                <button type="button" @click="page = 2" class="flex-1 rounded-lg border border-emerald-700/40 bg-[#0e5a3f] px-4 py-2 text-sm font-bold text-emerald-50 active:scale-[0.98]">Общие и событийные штрафы →</button>
             </div>
 
             <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                 <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
-                <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="workingTotal().toFixed(2)"></div>
-
-                <div class="flex items-center gap-2 w-full justify-center">
-                    <div class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1 text-sm font-mono tabular-nums text-emerald-200 min-w-[90px] text-center">
-                        {{ $slot }} (оценка)
-                    </div>
-                    <button type="button" @click="openNumpad()"
-                        class="rounded-lg bg-[#5547a5] hover:bg-[#6657c2] border border-indigo-700/60 px-3 py-1.5 text-xs font-semibold text-white">
-                        Вставить
-                    </button>
-                </div>
-
-                <div class="mt-1 text-[10px] text-slate-500">{{ $slot }}: финал A = 10.00 − сбавка → <span class="text-emerald-300 font-mono" x-text="finalScore().toFixed(2)"></span></div>
+                <div class="my-1 text-6xl font-extrabold tabular-nums text-white" x-text="workingTotal().toFixed(2)"></div>
+                <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                <div class="mt-1 text-[10px] text-slate-500">{{ number_format((float) $base, 2, '.', '') }} − сбавка · максимум 10.00</div>
             </div>
 
             <div class="shrink-0 rounded-xl border border-slate-800 bg-[#0c1429] p-2">
-                <div class="text-[9px] uppercase tracking-wider text-slate-400 mb-1">
-                    @if($groupProgram)
-                        Авто-сбавка: танц. шаги −0.6 · динамика −1.2 · контакт −0.3
-                    @else
-                        Авто-сбавка: танц. шаги + дин./эффекты (по −0.6, нажатия убирают)
-                    @endif
-                </div>
-                <div class="grid gap-1 text-center font-mono tabular-nums text-xs" :class="groupProgram ? 'grid-cols-4' : 'grid-cols-3'">
-                    <div class="rounded-md bg-[#0e3d4a]/70 border border-cyan-900/40 px-1 py-1">
-                        <div class="text-[9px] uppercase text-cyan-200/70">Танц. шаги</div>
-                        <div class="text-sm" :class="blockPenalty('dance') === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + blockPenalty('dance').toFixed(2)"></div>
-                        <div class="text-[9px]" :class="cat.dance >= catMax.dance ? 'text-emerald-400 font-bold' : 'text-slate-400'" x-text="cat.dance + '/' + catMax.dance"></div>
-                    </div>
-                    <div class="rounded-md bg-[#7a4a1f]/70 border border-amber-900/40 px-1 py-1">
-                        <div class="text-[9px] uppercase text-amber-200/80">Дин./эфф.</div>
-                        <div class="text-sm" :class="blockPenalty('dynamic') === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + blockPenalty('dynamic').toFixed(2)"></div>
-                        <div class="text-[9px]" :class="cat.dynamic >= catMax.dynamic ? 'text-emerald-400 font-bold' : 'text-slate-400'" x-text="cat.dynamic + '/' + catMax.dynamic"></div>
-                    </div>
-                    <div x-show="groupProgram" class="rounded-md bg-[#1b4d3e]/70 border border-emerald-900/40 px-1 py-1">
-                        <div class="text-[9px] uppercase text-emerald-200/80">Контакт</div>
-                        <div class="text-sm" :class="blockPenalty('contact') === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + blockPenalty('contact').toFixed(2)"></div>
-                        <div class="text-[9px]" :class="cat.contact >= catMax.contact ? 'text-emerald-400 font-bold' : 'text-slate-400'" x-text="cat.contact + '/' + catMax.contact"></div>
-                    </div>
-                    <div class="rounded-md bg-[#1c2547] border border-indigo-900/40 px-1 py-1">
-                        <div class="text-[9px] uppercase text-indigo-200/80">Итого</div>
-                        <div class="text-sm" :class="comboPenalty() === 0 ? 'text-emerald-300' : 'text-white'" x-text="'-' + comboPenalty().toFixed(2)"></div>
-                        <div class="text-[9px] text-slate-400">&nbsp;</div>
-                    </div>
+                <div class="text-[9px] uppercase tracking-wider text-slate-400">Автосбавка за отсутствующие требования</div>
+                <div class="mt-1 grid grid-cols-3 gap-1 text-center font-mono text-xs tabular-nums">
+                    <div class="rounded-md bg-cyan-950/60 px-1 py-1"><div class="text-[9px] text-cyan-200">S · 2</div><div x-text="'-' + blockPenalty('dance').toFixed(2)"></div></div>
+                    <div class="rounded-md bg-amber-950/60 px-1 py-1"><div class="text-[9px] text-amber-200">Дин./эфф. · {{ $groupProgram ? '4' : '2' }}</div><div x-text="'-' + blockPenalty('dynamic').toFixed(2)"></div></div>
+                    <div class="rounded-md bg-indigo-950/60 px-1 py-1"><div class="text-[9px] text-indigo-200">Итого</div><div x-text="'-' + comboPenalty().toFixed(2)"></div></div>
                 </div>
             </div>
 
-            <button type="button" @click="submit()" :disabled="busy"
-                class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
-                ОТПРАВИТЬ
-            </button>
+            <button type="button" @click="submit()" :disabled="busy" class="judge-submit-button shrink-0 rounded-2xl border py-3 text-lg font-bold text-white disabled:cursor-wait disabled:opacity-50 active:scale-[0.99]">ОТПРАВИТЬ</button>
         </div>
 
-        <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-            <button type="button"
-                @click="add(0.3, 'dance')"
-                :disabled="!can('dance')"
-                :class="can('dance') ? 'hover:brightness-110 active:scale-[0.98]' : 'cursor-not-allowed'"
-                style="background-color: #0e3d4a"
-                class="flex-1 min-h-0 rounded-2xl border border-cyan-700/40 px-3 py-2 text-left text-white shadow-md relative overflow-hidden transition flex flex-col justify-center">
-                {{-- Визуальное заполнение: каждое нажатие закрашивает часть кнопки --}}
-                <div class="absolute inset-y-0 left-0 bg-slate-500/55 transition-all duration-150 pointer-events-none"
-                     :style="'width:' + (cat.dance / catMax.dance * 100) + '%'"></div>
-                <div class="absolute top-2 right-2 z-10 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
-                     :class="cat.dance >= catMax.dance ? 'bg-emerald-600 text-white' : 'bg-black/40 text-slate-200'"
-                     x-text="cat.dance + '/' + catMax.dance"></div>
-                <div class="relative z-10">
-                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">0.3</div>
-                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Танцевальные шаги</div>
-                    <div class="mt-0.5 text-[10px] opacity-80" x-text="'Сбавка блока: −' + blockPenalty('dance').toFixed(1)"></div>
-                </div>
-            </button>
-
-            <button x-show="groupProgram" type="button"
-                @click="add(0.3, 'contact')"
-                :disabled="!can('contact')"
-                :class="can('contact') ? 'hover:brightness-110 active:scale-[0.98]' : 'cursor-not-allowed'"
-                style="background-color: #1b4d3e"
-                class="flex-1 min-h-0 rounded-2xl border border-emerald-700/40 px-3 py-2 text-left text-white shadow-md relative overflow-hidden transition flex flex-col justify-center">
-                <div class="absolute inset-y-0 left-0 bg-slate-500/55 transition-all duration-150 pointer-events-none"
-                     :style="'width:' + (cat.contact / catMax.contact * 100) + '%'"></div>
-                <div class="absolute top-2 right-2 z-10 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
-                     :class="cat.contact >= catMax.contact ? 'bg-emerald-600 text-white' : 'bg-black/40 text-slate-200'"
-                     x-text="cat.contact + '/' + catMax.contact"></div>
-                <div class="relative z-10">
-                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">0.3</div>
-                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Контакт</div>
-                    <div class="mt-0.5 text-[10px] opacity-80" x-text="'Сбавка за отсутствие: −' + blockPenalty('contact').toFixed(1)"></div>
-                </div>
-            </button>
-
-            <button type="button"
-                @click="add(0.3, 'dynamic')"
-                :disabled="!can('dynamic')"
-                :class="can('dynamic') ? 'hover:brightness-110 active:scale-[0.98]' : 'cursor-not-allowed'"
-                style="background-color: #7a4a1f"
-                class="flex-1 min-h-0 rounded-2xl border border-amber-700/40 px-3 py-2 text-left text-white shadow-md relative overflow-hidden transition flex flex-col justify-center">
-                <div class="absolute inset-y-0 left-0 bg-slate-500/55 transition-all duration-150 pointer-events-none"
-                     :style="'width:' + (cat.dynamic / catMax.dynamic * 100) + '%'"></div>
-                <div class="absolute top-2 right-2 z-10 text-[11px] font-bold rounded px-2 py-0.5 tabular-nums"
-                     :class="cat.dynamic >= catMax.dynamic ? 'bg-emerald-600 text-white' : 'bg-black/40 text-slate-200'"
-                     x-text="cat.dynamic + '/' + catMax.dynamic"></div>
-                <div class="relative z-10">
-                    <div class="text-3xl xl:text-4xl font-extrabold tabular-nums leading-none">0.3</div>
-                    <div class="mt-1 text-xs xl:text-sm uppercase tracking-wide opacity-90">Динамические изменения и эффекты</div>
-                    <div class="mt-0.5 text-[10px] opacity-80" x-text="'Сбавка блока: −' + blockPenalty('dynamic').toFixed(1)"></div>
-                </div>
-            </button>
+        <div class="col-span-4 min-h-0 flex flex-col gap-2">
+            <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-cyan-700/40 bg-[#0e3d4a] p-2 text-white">
+                <button type="button" @click="add(0.3, 'dance')" :disabled="!can('dance')" :class="can('dance') ? 'hover:brightness-110' : 'cursor-not-allowed opacity-50'" class="flex-1 min-h-0 p-1 text-left active:scale-[0.98]">
+                    <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">S выполнена</span><span class="rounded bg-black/30 px-2 py-1 font-mono" x-text="cat.dance + '/' + catMax.dance"></span></div>
+                    <div class="mt-2 text-sm text-cyan-100/80">За каждую выполненную комбинацию танцевальных шагов</div>
+                    <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dance').toFixed(2)"></div>
+                </button>
+                <button type="button" @click="decrementCombo('dance')" :disabled="cat.dance <= 0" class="mt-1 rounded-lg bg-black/25 py-1 text-xs font-semibold disabled:opacity-30">Убрать одну выполненную S</button>
+            </div>
+            <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-amber-700/40 bg-[#7a4a1f] p-2 text-white">
+                <button type="button" @click="add(0.3, 'dynamic')" :disabled="!can('dynamic')" :class="can('dynamic') ? 'hover:brightness-110' : 'cursor-not-allowed opacity-50'" class="flex-1 min-h-0 p-1 text-left active:scale-[0.98]">
+                    <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">Дин./эффект выполнен</span><span class="rounded bg-black/30 px-2 py-1 font-mono" x-text="cat.dynamic + '/' + catMax.dynamic"></span></div>
+                    <div class="mt-2 text-sm text-amber-100/80">За каждое выполненное динамическое изменение или эффект</div>
+                    <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dynamic').toFixed(2)"></div>
+                </button>
+                <button type="button" @click="decrementCombo('dynamic')" :disabled="cat.dynamic <= 0" class="mt-1 rounded-lg bg-black/25 py-1 text-xs font-semibold disabled:opacity-30">Убрать один выполненный дин./эффект</button>
+            </div>
         </div>
     </div>
 </template>
 
-{{-- ====== Страница 2 ====== --}}
+{{-- ====== Страница 2: общая оценка и событийные штрафы ====== --}}
 <template x-if="page === 2">
     <div class="col-span-12 h-full min-h-0 flex flex-col gap-2">
         <div class="flex-1 min-h-0 grid grid-cols-12 gap-2">
-
-            <div class="col-span-4 grid grid-cols-2 gap-2 h-full min-h-0">
-                <div class="flex flex-col gap-2 h-full min-h-0">
-                    <button type="button" @click="add(0.3, 'character')" class="flex-1 min-h-0 rounded-xl bg-[#1f78c4] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−0.3</button>
-                    <button type="button" @click="add(0.6, 'character')" class="flex-1 min-h-0 rounded-xl bg-[#0e6a7a] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−0.6</button>
-                    <button type="button" @click="add(1.0, 'character')" class="flex-1 min-h-0 rounded-xl bg-[#962638] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−1.0</button>
-                    <div class="shrink-0 text-[10px] uppercase tracking-wider text-slate-400 text-center">Характер</div>
+            <div class="col-span-4 min-h-0 flex flex-col gap-2">
+                <div class="rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                    <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Идея / характер · выбрать одно</div>
+                    <div class="grid grid-cols-4 gap-1">
+                        @foreach ([0, 0.3, 0.6, 1.0] as $value)
+                            <button type="button" @click="selectPenalty('character', {{ $value }})"
+                                :class="categoryPenalty('character') === {{ $value }} ? 'border-emerald-500 bg-emerald-800 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
+                                class="rounded-lg border py-2 font-mono text-sm font-bold active:scale-[0.98]">{{ number_format($value, 1) }}</button>
+                        @endforeach
+                    </div>
                 </div>
-                <div class="flex flex-col gap-2 h-full min-h-0">
-                    <button type="button" @click="add(0.3, 'bodyExpr')" class="flex-1 min-h-0 rounded-xl bg-[#1f78c4] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−0.3</button>
-                    <button type="button" @click="add(0.6, 'bodyExpr')" class="flex-1 min-h-0 rounded-xl bg-[#0e6a7a] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−0.6</button>
-                    <button type="button" @click="add(1.0, 'bodyExpr')" class="flex-1 min-h-0 rounded-xl bg-[#962638] hover:brightness-110 text-3xl xl:text-4xl font-extrabold text-white tabular-nums shadow-md active:scale-[0.98]">−1.0</button>
-                    <div class="shrink-0 text-[10px] uppercase tracking-wider text-slate-400 text-center">Экспрессия тела</div>
+                <div class="rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                    <div class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Экспрессия тела · выбрать одно</div>
+                    <div class="grid grid-cols-3 gap-1">
+                        @foreach ([0, 0.3, 0.6] as $value)
+                            <button type="button" @click="selectPenalty('bodyExpr', {{ $value }})"
+                                :class="categoryPenalty('bodyExpr') === {{ $value }} ? 'border-emerald-500 bg-emerald-800 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
+                                class="rounded-lg border py-2 font-mono text-sm font-bold active:scale-[0.98]">{{ number_format($value, 1) }}</button>
+                        @endforeach
+                    </div>
                 </div>
+                <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
+                    :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
+                    class="rounded-xl border px-3 py-2 text-left text-sm font-semibold active:scale-[0.98]"><span class="font-mono font-bold">−0.30</span> · Недостаточная экспрессия лица</button>
+                <label class="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Личные заметки судьи</span>
+                    <textarea x-model="personalNotes" maxlength="2000" placeholder="Наблюдения для конференции судей…"
+                        class="mt-1 flex-1 min-h-16 resize-none rounded-lg border border-slate-700 bg-slate-950/70 p-2 text-xs text-slate-100 focus:border-cyan-500 focus:ring-cyan-500"></textarea>
+                    <span class="mt-1 text-right text-[9px] text-slate-500" x-text="personalNotes.length + '/2000'"></span>
+                </label>
             </div>
 
-            <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-                <div class="shrink-0 flex items-stretch gap-2">
-                    <button type="button" @click="page = 1"
-                        class="flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-3 text-base font-bold text-white active:scale-[0.98]">
-                        ← Предыдущая стр.
-                    </button>
-                    <button type="button" @click="cancel()"
-                        class="shrink-0 rounded-lg bg-[#6f1d2e] hover:bg-[#8a2638] border border-rose-800/60 px-3 py-2 text-xs font-semibold text-white">
-                        ОТМЕНА
-                    </button>
+            <div class="col-span-4 min-h-0 flex flex-col gap-2">
+                <div class="shrink-0 flex gap-2">
+                    <button type="button" @click="page = 1" class="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-bold text-white active:scale-[0.98]">← Считаемые штрафы</button>
+                    <button type="button" @click="cancel()" class="rounded-lg border border-rose-800/60 bg-[#6f1d2e] px-3 py-2 text-xs font-semibold text-white active:scale-[0.98]">ОТМЕНА</button>
                 </div>
-
                 <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                     <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
-                    <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="workingTotal().toFixed(2)"></div>
-
-                    <div class="flex items-center gap-2 w-full justify-center">
-                        <div class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1 text-sm font-mono tabular-nums text-emerald-200 min-w-[90px] text-center">
-                            {{ $slot }} (оценка)
-                        </div>
-                        <button type="button" @click="openNumpad()"
-                            class="rounded-lg bg-[#5547a5] hover:bg-[#6657c2] border border-indigo-700/60 px-3 py-1.5 text-xs font-semibold text-white">
-                            Вставить
-                        </button>
-                    </div>
-                    <div class="mt-1 text-[10px] text-slate-500">{{ $slot }}: финал A = 10.00 − сбавка → <span class="text-emerald-300 font-mono" x-text="finalScore().toFixed(2)"></span></div>
+                    <div class="my-1 text-6xl font-extrabold tabular-nums text-white" x-text="workingTotal().toFixed(2)"></div>
+                    <div class="text-sm font-mono text-emerald-200">{{ $slot }}: <span x-text="finalScore().toFixed(2)"></span></div>
+                    <div class="mt-1 text-[10px] text-slate-500">{{ number_format((float) $base, 2, '.', '') }} − сбавка · максимум 10.00</div>
                 </div>
-
-                <button type="button" @click="submit()" :disabled="busy"
-                    class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
-                    ОТПРАВИТЬ
-                </button>
+                <button type="button" @click="submit()" :disabled="busy" class="judge-submit-button shrink-0 rounded-2xl border py-3 text-lg font-bold text-white disabled:cursor-wait disabled:opacity-50 active:scale-[0.99]">ОТПРАВИТЬ</button>
             </div>
 
-            <div class="col-span-4 grid grid-cols-2 gap-2 h-full min-h-0">
-                @php
-                    $catRight2 = [
-                        ['v' => 0.3, 'label' => 'Экспрессия лица',           'cat' => 'faceExpr',   'color' => '#0e3d4a'],
-                        ['v' => 0.3, 'label' => 'Использование площадки',    'cat' => 'space',      'color' => '#1f78c4'],
-                        ['v' => 0.3, 'label' => 'Соответствие муз.характеру','cat' => 'musicChar',  'color' => '#0e6a7a'],
-                        ['v' => 0.3, 'label' => 'Музыкальное вступление',    'cat' => 'musicIntro', 'color' => '#7a4a1f'],
-                        ['v' => 0.3, 'label' => 'Музыкальная динамика',      'cat' => 'musicDyn',   'color' => '#5547a5'],
-                        ['v' => 0.3, 'label' => 'Связь упражнения',          'cat' => 'link',       'color' => '#1e6a85'],
-                    ];
-                @endphp
-                @foreach ($catRight2 as $c)
-                    <button type="button" @click="add({{ $c['v'] }}, '{{ $c['cat'] }}')"
-                        style="background-color: {{ $c['color'] }}"
-                        class="min-h-0 rounded-xl border border-slate-700/40 hover:brightness-110 px-2 py-2 text-left text-white shadow-md active:scale-[0.98] flex flex-col justify-center">
-                        <div class="text-xl xl:text-2xl font-bold tabular-nums leading-none">−{{ number_format($c['v'], 1) }}</div>
-                        <div class="mt-1 text-[10px] uppercase tracking-wide opacity-90 leading-tight">{{ $c['label'] }}</div>
+            <div class="col-span-4 min-h-0 grid grid-cols-2 gap-1.5 content-stretch">
+                @foreach($eventPenalties as $item)
+                    <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
+                        :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
+                        class="min-h-0 rounded-xl border px-2 py-2 text-left text-[11px] font-semibold leading-tight active:scale-[0.98]">
+                        <span class="block font-mono text-lg font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
                     </button>
                 @endforeach
+                @if($groupProgram)
+                    <div class="min-h-0 flex flex-col rounded-xl border border-amber-700/60 bg-amber-900/60 p-1.5 text-white">
+                        <button type="button" @click="add(0.6, 'bodyConstruction')" class="flex-1 text-left text-[11px] font-semibold leading-tight active:scale-[0.98]">
+                            <span class="block font-mono text-lg font-extrabold">−0.60</span>Конструкция / поднятое положение · за каждый элемент
+                            <span class="mt-1 block text-[9px] text-amber-200" x-text="'Сумма: −' + categoryPenalty('bodyConstruction').toFixed(2)"></span>
+                        </button>
+                        <button type="button" @click="decrementPenalty(0.6, 'bodyConstruction')" :disabled="categoryPenalty('bodyConstruction') <= 0" class="rounded-md bg-black/25 py-1 text-[9px] font-semibold disabled:opacity-30">Убрать один элемент</button>
+                    </div>
+                @endif
             </div>
         </div>
 
-        {{-- Лента истории сбавок: цветной фон по категории, значение и подпись --}}
         <div class="shrink-0 rounded-xl border border-slate-800 bg-[#0c1429] p-1.5">
-            <div class="text-[9px] uppercase tracking-wider text-slate-400 mb-1">История сбавок</div>
-            <div class="grid grid-cols-12 gap-1">
-                <template x-for="(a, i) in actions.slice(0, 12).slice().reverse()" :key="i">
-                    <div class="rounded-md border text-[10px] py-0.5 px-1 text-center"
-                         :class="a.cat === 'dance' ? 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50'
-                                : a.cat === 'dynamic' ? 'bg-amber-900/40 border-amber-800/40 text-amber-50'
-                                : 'bg-slate-800/60 border-slate-700 text-slate-100'">
-                        <div class="font-mono tabular-nums" x-text="(a.combo ? '+' : '-') + Number(a.v).toFixed(2)"></div>
-                        <div class="text-[9px] opacity-75 truncate" x-text="a.label || '—'"></div>
+            <div class="mb-1 flex items-center justify-between text-[9px] uppercase tracking-wider text-slate-400"><span>Полная история сбавок</span><span x-text="actions.length + ' действий'"></span></div>
+            <div class="flex gap-1 overflow-x-auto pb-1">
+                <template x-for="(a, i) in actions.slice().reverse()" :key="i">
+                    <div class="shrink-0 max-w-44 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-[10px] text-slate-100">
+                        <span class="font-mono font-bold" x-text="(a.combo ? '+' : '−') + Number(a.v).toFixed(2)"></span><span class="ml-1 text-slate-400" x-text="a.label || 'Без категории'"></span>
                     </div>
                 </template>
-                <div x-show="actions.length === 0" class="col-span-12 text-center text-[10px] text-slate-600 py-1">Сбавок пока нет</div>
+                <div x-show="actions.length === 0" class="text-[10px] text-slate-600">Сбавок пока нет</div>
             </div>
         </div>
     </div>

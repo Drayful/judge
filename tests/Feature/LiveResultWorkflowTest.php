@@ -244,10 +244,16 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($aJudge)
             ->get(route('judge.tournament.tablet', $tournament))
             ->assertOk()
-            ->assertSee('Синхронизация')
-            ->assertSee('Контраст')
-            ->assertSee('Каноническая')
-            ->assertSee('Хоровая')
+            ->assertSee('Нет синхронизации')
+            ->assertSee('Нет контраста')
+            ->assertSee('Нет быстрой последовательности / канона')
+            ->assertSee('Нет хоровой работы')
+            ->assertSee('Построения: недостаточно рисунков')
+            ->assertSee('Построения: недостаточно амплитуды')
+            ->assertSee('Гимнастка без предмета 5+ сек.')
+            ->assertSee('Нет контакта с предметом в начале/конце')
+            ->assertSee('Конструкция / поднятое положение')
+            ->assertSee("comboCats: ['dance', 'dynamic']", false)
             ->assertSee('dynamic: opts.groupProgram ? 4 : 2', false)
             ->assertSee('const base = this.round3(this.comboStep * (this.catMax[cat] || 0))', false)
             ->assertSee('sum += this.blockPenalty(c)', false);
@@ -259,6 +265,115 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('Риски всегда в зачёте')
             ->assertSee('junior: { elements: 6, dbMax: 3, deMax: 3, dbMin: 0, deMin: 3 }', false)
             ->assertSee('senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4 }', false);
+    }
+
+    public function test_a_and_e_tablets_limit_scores_and_deductions_to_ten_points(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+
+        foreach ([['judge_a', 'A1'], ['judge_e', 'E1']] as [$role, $slot]) {
+            $judge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+
+            $this->actingAs($judge)
+                ->get(route('judge.tournament.tablet', $tournament))
+                ->assertOk()
+                ->assertSee('deductionLimit: 10', false)
+                ->assertSee('projectedDeduction > this.deductionLimit', false)
+                ->assertSee("Math.min(this.deductionLimit, total)", false);
+
+            $this->actingAs($judge)
+                ->postJson(route('judge.submit-score'), [
+                    'tournament_id' => $tournament->id,
+                    'score' => 10.001,
+                ])
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'Оценка бригад A и E должна быть в диапазоне от 0 до 10 баллов.');
+
+            $this->assertDatabaseMissing('judge_scores', [
+                'performance_id' => $performance->id,
+                'judge_id' => $judge->id,
+            ]);
+        }
+    }
+
+    public function test_individual_a_tablet_contains_every_fig_artistry_penalty(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        $this->actingAs($judge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('Соединения')
+            ->assertSee('Ритм')
+            ->assertSee('Недостаточное использование площадки')
+            ->assertSee('Прерывание непрерывности 4+ сек.')
+            ->assertSee('Музыкальное вступление 4+ сек.')
+            ->assertSee('Музыка не соответствует нормам')
+            ->assertSee('Окончание не совпадает с музыкой')
+            ->assertSee('Личные заметки судьи')
+            ->assertSee("selectPenalty('bodyExpr', 0.6)", false)
+            ->assertDontSee("selectPenalty('bodyExpr', 1", false)
+            ->assertDontSee('Соответствие муз.характеру')
+            ->assertDontSee('Музыкальная динамика')
+            ->assertDontSee('Связь упражнения');
+    }
+
+    public function test_a_tablet_saves_long_notes_and_full_categorized_history(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        $entries = collect(range(1, 65))->map(fn (int $index) => [
+            'v' => 0.1,
+            'cat' => $index <= 20 ? 'connections' : 'rhythm',
+            'label' => $index <= 20 ? 'Соединения' : 'Ритм',
+            'counted' => true,
+        ])->all();
+        $notes = str_repeat('Подробная заметка судьи. ', 30);
+
+        $this->actingAs($judge)
+            ->postJson(route('judge.submit-score'), [
+                'tournament_id' => $tournament->id,
+                'score' => 6.0,
+                'entries' => json_encode($entries, JSON_UNESCAPED_UNICODE),
+                'notes' => $notes,
+            ])
+            ->assertOk();
+
+        $saved = JudgeScore::query()->where('performance_id', $performance->id)->where('judge_id', $judge->id)->firstOrFail();
+        $this->assertSame($notes, $saved->notes);
+        $this->assertCount(65, $saved->entries);
+        $this->assertSame('connections', $saved->entries[0]['cat']);
+    }
+
+    public function test_returned_a_score_without_history_is_restored_as_a_deduction(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $judge->id,
+            'panel' => 'a',
+            'score' => 8.2,
+            'entries' => null,
+            'submitted_at' => null,
+        ]);
+
+        $this->actingAs($judge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('hasInitial: true', false)
+            ->assertSee('this.base - opts.initial', false)
+            ->assertSee('initial: 8.2', false);
     }
 
     public function test_db_and_da_averages_are_persisted_when_scores_arrive(): void

@@ -204,6 +204,7 @@
                     :base="$panelBase"
                     :saved="$saved"
                     :entries="$myScore?->entries ?? []"
+                    :notes="$myScore?->notes ?? ''"
                     :age-group="$myScore?->age_group ?? 'junior'"
                     :group-program="$isGroupProgram"
                     :tournament="$tournament"
@@ -222,6 +223,7 @@
                 // Конфиг панели
                 mode: opts.mode,             // 'add' | 'subtract' | 'penalty'
                 base: opts.base,             // 10.0 для A/E
+                deductionLimit: 10,          // A/E: суммарная сбавка не может быть больше 10.0
                 panel: opts.panel,
                 subpanel: opts.subpanel,
                 penaltyType: opts.penaltyType,
@@ -240,6 +242,7 @@
                 page: 1,
                 draft: 0,
                 actions: [],                 // [{v, cat, label}] или [{v, symbol, label, notDone}]
+                personalNotes: opts.initialNotes || '',
                 busy: false,
                 error: null,
                 timerBusy: false,
@@ -278,28 +281,35 @@
                 },
 
                 // Лимиты по категориям (A1: dance, dynamic — макс. 2)
-                cat: { dance: 0, dynamic: 0, contact: 0 },
-                catMax: { dance: 2, dynamic: opts.groupProgram ? 4 : 2, contact: opts.groupProgram ? 1 : 0 },
+                cat: { dance: 0, dynamic: 0 },
+                catMax: { dance: 2, dynamic: opts.groupProgram ? 4 : 2 },
                 // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
                 // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
                 hasCombo: opts.panel === 'a',
                 comboStep: 0.3,
-                comboCats: opts.groupProgram ? ['dance', 'dynamic', 'contact'] : ['dance', 'dynamic'],
+                comboCats: ['dance', 'dynamic'],
                 catLabel: {
                     dance: 'Танц. шаги',
                     dynamic: 'Дин./эфф.',
-                    contact: 'Контакт',
                     rhythm: 'Ритм',
-                    union: 'Соединение',
+                    connections: 'Соединения',
                     interrupt: 'Прерывание',
                     character: 'Характер',
                     bodyExpr: 'Экспр. тела',
                     faceExpr: 'Экспр. лица',
-                    space: 'Площадка',
-                    musicChar: 'Муз. характер',
+                    floorArea: 'Площадка',
+                    musicNorms: 'Нормы музыки',
                     musicIntro: 'Муз. вступл.',
-                    musicDyn: 'Муз. динамика',
-                    link: 'Связь',
+                    musicEnd: 'Финал не с музыкой',
+                    collectiveSync: 'Нет синхронизации',
+                    collectiveContrast: 'Нет контраста',
+                    collectiveCanon: 'Нет быстрой последовательности/канона',
+                    collectiveChoral: 'Нет хоровой работы',
+                    formationDesign: 'Построения: рисунок',
+                    formationAmplitude: 'Построения: амплитуда',
+                    groupContactDuration: 'Без предмета 5+ секунд',
+                    groupContactPose: 'Нет контакта в начале/конце',
+                    bodyConstruction: 'Конструкция/поднятое положение',
                 },
 
                 init() {
@@ -309,9 +319,16 @@
                     }
                     if (opts.initialEntries && opts.initialEntries.length > 0) {
                         this.restoreFromEntries(opts.initialEntries);
-                    } else if (opts.initial && opts.initial !== 0) {
-                        this.draft = opts.initial;
-                        this.actions = [{ v: opts.initial, cat: null, label: '' }];
+                    } else if (opts.hasInitial) {
+                        // В БД A/E хранится финальная оценка, а планшет редактирует сбавку.
+                        // Это важно для старых оценок без сохранённой истории нажатий.
+                        const restored = this.mode === 'subtract'
+                            ? Math.max(0, Math.min(this.deductionLimit, this.base - opts.initial))
+                            : Math.max(0, opts.initial);
+                        this.draft = this.round3(restored);
+                        this.actions = this.draft === 0
+                            ? []
+                            : [{ v: this.draft, cat: null, label: '', inTotal: true }];
                     }
 
                     this.$watch('actions', () => this.publishLiveAction('Изменён черновик оценки'));
@@ -454,6 +471,22 @@
 
                 catFromLabel(label) {
                     if (! label) return null;
+                    const legacy = {
+                        'Соединение': 'connections',
+                        'Использование площадки': 'floorArea',
+                        'Синхронизация': 'collectiveSync',
+                        'Контраст': 'collectiveContrast',
+                        'Каноническая': 'collectiveCanon',
+                        'Хоровая': 'collectiveChoral',
+                        'synchronization': 'collectiveSync',
+                        'contrast': 'collectiveContrast',
+                        'canonical': 'collectiveCanon',
+                        'choral': 'collectiveChoral',
+                        'Муз. характер': 'legacyMusicCharacter',
+                        'Муз. динамика': 'legacyMusicDynamics',
+                        'Связь': 'legacyLink',
+                    };
+                    if (legacy[label]) return legacy[label];
                     for (const [k, v] of Object.entries(this.catLabel)) {
                         if (v === label) return k;
                     }
@@ -491,6 +524,71 @@
 
                 round3(v) { return Math.round(v * 1000) / 1000; },
 
+                categoryPenalty(cat) {
+                    return this.round3(this.actions
+                        .filter(a => a.cat === cat && a.inTotal !== false && ! a.combo)
+                        .reduce((sum, a) => sum + Number(a.v || 0), 0));
+                },
+
+                hasPenalty(cat) { return this.actions.some(a => a.cat === cat && a.inTotal !== false); },
+
+                recalculateDraft() {
+                    this.draft = this.round3(this.actions
+                        .filter(a => a.inTotal !== false && ! a.combo)
+                        .reduce((sum, a) => sum + Number(a.v || 0), 0));
+                },
+
+                clearCategory(cat) {
+                    this.actions = this.actions.filter(a => a.cat !== cat);
+                    this.recalculateDraft();
+                },
+
+                /** Выбрать один взаимоисключающий итоговый штраф (включая 0). */
+                selectPenalty(cat, value) {
+                    if (this.mode === 'subtract') {
+                        const withoutCurrent = this.round3(this.draft - this.categoryPenalty(cat));
+                        const projected = this.round3(withoutCurrent + value + this.comboPenalty());
+                        if (projected > this.deductionLimit) {
+                            this.flashHint('Максимальная сбавка A/E — 10.00');
+                            return;
+                        }
+                    }
+                    this.clearCategory(cat);
+                    if (value > 0) this.add(value, cat);
+                },
+
+                /** Однократный штраф: повторное нажатие снимает его. */
+                togglePenalty(value, cat) {
+                    if (this.hasPenalty(cat)) {
+                        this.clearCategory(cat);
+                        return;
+                    }
+                    this.add(value, cat);
+                },
+
+                /** Счётчик с шагом и официальным максимумом категории. */
+                incrementPenalty(value, cat, maximum) {
+                    if (this.round3(this.categoryPenalty(cat) + value) > maximum) {
+                        this.flashHint('Максимум для «' + (this.catLabel[cat] || cat) + '» — ' + maximum.toFixed(2));
+                        return;
+                    }
+                    this.add(value, cat);
+                },
+
+                decrementPenalty(value, cat) {
+                    const index = this.actions.findIndex(a => a.cat === cat && a.inTotal !== false && ! a.combo);
+                    if (index === -1) return;
+                    this.actions.splice(index, 1);
+                    this.recalculateDraft();
+                },
+
+                decrementCombo(cat) {
+                    const index = this.actions.findIndex(a => a.cat === cat && a.combo);
+                    if (index === -1) return;
+                    this.actions.splice(index, 1);
+                    this.cat[cat] = Math.max(0, (this.cat[cat] || 0) - 1);
+                },
+
                 /** Добавить значение (всегда положительное; mode определяет, прибавлять или вычитать на итог). */
                 add(v, cat) {
                     cat = cat || null;
@@ -507,7 +605,6 @@
                             combo: true,
                             inTotal: false,
                         });
-                        if (this.actions.length > 40) this.actions.pop();
                         return;
                     }
 
@@ -517,6 +614,13 @@
                     }
                     const next = this.round3(this.draft + v);
                     if (next < 0 || next > 99.999) return;
+                    if (this.mode === 'subtract') {
+                        const projectedDeduction = this.round3(next + this.comboPenalty());
+                        if (projectedDeduction > this.deductionLimit) {
+                            this.flashHint('Максимальная сбавка A/E — 10.00');
+                            return;
+                        }
+                    }
                     this.draft = next;
                     this.actions.unshift({
                         v: v,
@@ -524,14 +628,16 @@
                         label: cat ? (this.catLabel[cat] || cat) : '',
                         inTotal: true,
                     });
-                    if (this.actions.length > 40) this.actions.pop();
                 },
                 // alias на старое название «press» (используется в партиалах)
                 press(v, cat) { return this.add(v, cat); },
 
                 set(v) {
-                    this.draft = this.round3(v);
-                    this.actions = v === 0 ? [] : [{ v: v, cat: null, label: '', inTotal: true }];
+                    const bounded = this.mode === 'subtract'
+                        ? Math.min(this.deductionLimit, Math.max(0, v))
+                        : v;
+                    this.draft = this.round3(bounded);
+                    this.actions = bounded === 0 ? [] : [{ v: bounded, cat: null, label: '', inTotal: true }];
                     this.resetCats();
                 },
 
@@ -545,7 +651,6 @@
                         label: type === 'line_ball' ? 'Мяч за линию' : 'Гимнастка за линию',
                         inTotal: true,
                     });
-                    if (this.actions.length > 40) this.actions.pop();
                 },
 
                 // ====== DB-бригада: символ → значение / «не выполнен» ======
@@ -599,7 +704,6 @@
                         notDone: true,
                         inTotal: false,
                     });
-                    if (this.actions.length > 40) this.actions.pop();
                     this.pendingSymbol = null;
                 },
 
@@ -635,7 +739,6 @@
                         notDone: true,
                         label: 'Акробатика',
                     });
-                    if (this.actions.length > 40) this.actions.pop();
                 },
                 /** «Х» (DA группа) — сотрудничество не выполнено: занимает слот DC, 0 баллов. */
                 markDcNotDone() {
@@ -649,7 +752,6 @@
                         label: this.pendingDc.label,
                         notDone: true,
                     });
-                    if (this.actions.length > 40) this.actions.pop();
                     this.pendingDc = null;
                 },
 
@@ -670,7 +772,6 @@
                             exchange: this.pendingSymbol.symbol === 'R' ? null : (this.pendingSymbol.exchange || 'db'),
                             notDone: false,
                         });
-                        if (this.actions.length > 40) this.actions.pop();
                         this.pendingSymbol = null;
                         return;
                     }
@@ -687,7 +788,6 @@
                             label: this.pendingDc.label,
                             notDone: false,
                         });
-                        if (this.actions.length > 40) this.actions.pop();
                         this.pendingDc = null;
                         return;
                     }
@@ -700,7 +800,6 @@
                         label: this.acroPending ? 'Акробатика' : '',
                     });
                     this.acroPending = false;
-                    if (this.actions.length > 40) this.actions.pop();
                 },
 
                 // ====== Возрастная группа и зачёт элементов (DB/DA) ======
@@ -983,7 +1082,10 @@
                     return this.round3(sum);
                 },
                 /** Итоговая сбавка = ручные сбавки + авто-сбавка блоков. */
-                totalDeduction() { return this.round3(this.draft + this.comboPenalty()); },
+                totalDeduction() {
+                    const total = this.round3(this.draft + this.comboPenalty());
+                    return this.mode === 'subtract' ? Math.min(this.deductionLimit, total) : total;
+                },
 
                 workingTotal() { return this.totalDeduction(); },
                 finalScore() {
@@ -1023,6 +1125,7 @@
                         const a = this.actions[i];
                         list.push({
                             v: a.v,
+                            cat: a.cat || null,
                             label: a.label || null,
                             symbol: a.symbol || null,
                             exchange: a.exchange || null,
@@ -1049,6 +1152,7 @@
                     if (this.penaltyType) body.append('penalty_type', this.penaltyType);
                     body.append('score', this.submitValue());
                     body.append('entries', JSON.stringify(this.historyForSubmit()));
+                    body.append('notes', this.personalNotes || '');
                     body.append('age_group', this.ageGroup);
                     try {
                         const r = await fetch(this.submitUrl, {

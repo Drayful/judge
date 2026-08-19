@@ -31,7 +31,7 @@
             </button>
         </div>
 
-        <div class="mt-1 text-[10px] text-slate-500">{{ $slot }}: финал E = 10.00 − сбавка → <span class="text-emerald-300 font-mono" x-text="finalScore().toFixed(2)"></span></div>
+        <div class="mt-1 text-[10px] text-slate-500">{{ $slot }}: финал E = {{ number_format((float) $base, 2, '.', '') }} − сбавка → <span class="text-emerald-300 font-mono" x-text="finalScore().toFixed(2)"></span></div>
 
         <div class="mt-2 w-full grid grid-cols-6 gap-1">
             <template x-for="(a, i) in actions.slice(0, 12)" :key="i">

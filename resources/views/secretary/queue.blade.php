@@ -997,9 +997,11 @@
             : '';
         const sym = dcSym || (e.symbol ? `<span class="font-black">${esc(e.symbol)}</span> ` : (e.acro ? '<span class="font-black text-indigo-300">A</span> ' : ''));
         const label = e.label ? `<span class="text-slate-400">${esc(e.label)}</span>${exTag} ` : '';
-        const val = e.notDone ? '<span class="text-rose-300">Х · 0 (не выполнен)</span>' : `<span class="font-mono tabular-nums">${Number(e.v).toFixed(1)}</span>`;
-        const counted = e.notDone ? '' : (e.counted === false ? ' <span class="text-[10px] text-rose-300">не в зачёте</span>' : '');
-        return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
+        const val = e.combo
+            ? '<span class="text-emerald-300">выполнено</span>'
+            : (e.notDone ? '<span class="text-rose-300">Х · 0 (не выполнен)</span>' : `<span class="font-mono tabular-nums">${Number(e.v).toFixed(1)}</span>`);
+        const counted = (e.notDone || e.combo) ? '' : (e.counted === false ? ' <span class="text-[10px] text-rose-300">не в зачёте</span>' : '');
+        return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone && !e.combo ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
     };
 
     const slotBlock = (performanceHistory, slot, withActions = false) => {
@@ -1010,6 +1012,9 @@
         const entries = Array.isArray(h.entries) && h.entries.length
             ? `<ul class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">${h.entries.map(entryLine).join('')}</ul>`
             : '<div class="mt-2 text-xs text-slate-500">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
+        const notes = h.notes
+            ? `<div class="mt-2 rounded-md border border-cyan-900/60 bg-cyan-950/30 px-2 py-1.5 text-xs text-cyan-100"><span class="font-semibold">Заметки судьи:</span> ${esc(h.notes)}</div>`
+            : '';
         const actions = withActions ? slotActions(performanceHistory, slot, h.score) : '';
         return `
             <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
@@ -1018,6 +1023,7 @@
                     <div class="text-[11px] text-slate-500">${meta}</div>
                 </div>
                 ${entries}
+                ${notes}
                 ${actions}
             </div>`;
     };
