@@ -6,8 +6,8 @@
         ? [
             ['v' => 0.3, 'cat' => 'formationDesign',     'label' => 'Рисунки построений'],
             ['v' => 0.3, 'cat' => 'formationAmplitude',  'label' => 'Амплитуда построений'],
-            ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Нет гимнастки без предмета 5+ сек.'],
-            ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Есть контакт с предметом в начале/конце'],
+            ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Гимнастка без предмета 5+ сек.'],
+            ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Нет контакта с предметом в начале/конце'],
             ['v' => 0.3, 'cat' => 'musicIntro',          'label' => 'Музыкальное вступление'],
             ['v' => 0.3, 'cat' => 'musicNorms',          'label' => 'Музыка'],
             ['v' => 0.3, 'cat' => 'musicEnd',            'label' => 'Конец'],
@@ -15,15 +15,15 @@
         : [
             ['v' => 0.3, 'cat' => 'floorArea',  'label' => 'Площадка'],
             ['v' => 0.3, 'cat' => 'musicIntro', 'label' => 'Музыкальное вступление'],
-            ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыка'],
+            ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыкальные нормы'],
             ['v' => 0.3, 'cat' => 'musicEnd',   'label' => 'Конец'],
         ];
 
     $collectivePenalties = [
         ['cat' => 'collectiveSync',     'label' => 'Синхронизация'],
         ['cat' => 'collectiveContrast', 'label' => 'Контраст'],
-        ['cat' => 'collectiveCanon',    'label' => 'Быстрая последовательность / канон'],
-        ['cat' => 'collectiveChoral',   'label' => 'Хоровая работа'],
+        ['cat' => 'collectiveCanon',    'label' => 'Канонадная'],
+        ['cat' => 'collectiveChoral',   'label' => 'Хорал'],
     ];
 @endphp
 
@@ -142,19 +142,9 @@
                         @endforeach
                     </div>
                 </div>
-                @if($groupProgram)
-                    <button type="button" @click="add(0.3, 'faceExpr')" :disabled="!can('faceExpr')"
-                        :class="cat.faceExpr > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
-                        class="flex-1 rounded-xl border px-3 py-2 text-center text-xs font-semibold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
-                        <span x-show="cat.faceExpr > 0" class="block text-2xl leading-none text-emerald-200">✓</span>
-                        <span x-show="cat.faceExpr === 0" class="block font-mono text-base font-bold text-rose-300">−0.30</span>
-                        Экспрессия лица
-                    </button>
-                @else
-                    <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
-                        :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                        class="flex-1 rounded-xl border px-3 py-2 text-center text-sm font-semibold leading-tight active:scale-[0.98]"><span class="block font-mono text-lg font-bold">−0.30</span>Экспрессия лица</button>
-                @endif
+                <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
+                    :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
+                    class="flex-1 rounded-xl border px-3 py-2 text-center text-sm font-semibold leading-tight active:scale-[0.98]"><span class="block font-mono text-lg font-bold">−0.30</span>Экспрессия лица</button>
             </div>
 
             <div class="col-span-4 min-h-0 flex flex-col gap-2">
@@ -176,20 +166,11 @@
 
             <div class="col-span-5 min-h-0 grid grid-cols-3 gap-1 content-stretch">
                 @foreach($eventPenalties as $item)
-                    @if($groupProgram)
-                        <button type="button" @click="add({{ $item['v'] }}, '{{ $item['cat'] }}')" :disabled="!can('{{ $item['cat'] }}')"
-                            :class="cat.{{ $item['cat'] }} > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
-                            class="min-h-0 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
-                            <span x-show="cat.{{ $item['cat'] }} > 0" class="block text-2xl leading-none text-emerald-200">✓</span>
-                            <span x-show="cat.{{ $item['cat'] }} === 0" class="block font-mono text-base font-extrabold text-rose-300">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
-                        </button>
-                    @else
-                        <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
-                            :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                            class="min-h-0 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold leading-tight active:scale-[0.98]">
-                            <span class="block font-mono text-base font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
-                        </button>
-                    @endif
+                    <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
+                        :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
+                        class="min-h-0 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold leading-tight active:scale-[0.98]">
+                        <span class="block font-mono text-base font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
+                    </button>
                 @endforeach
                 @if($groupProgram)
                     <div class="min-h-0 flex flex-col rounded-xl border border-amber-700/60 bg-amber-900/60 p-1.5 text-white">

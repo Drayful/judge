@@ -305,26 +305,16 @@
                     collectiveContrast: opts.groupProgram ? 1 : 0,
                     collectiveCanon: opts.groupProgram ? 1 : 0,
                     collectiveChoral: opts.groupProgram ? 1 : 0,
-                    ...(opts.groupProgram ? {
-                        faceExpr: 1,
-                        formationDesign: 1,
-                        formationAmplitude: 1,
-                        groupContactDuration: 1,
-                        groupContactPose: 1,
-                        musicIntro: 1,
-                        musicNorms: 1,
-                        musicEnd: 1,
-                    } : {}),
                 },
                 // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
                 // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
                 hasCombo: opts.panel === 'a',
                 comboStep: 0.3,
                 comboCats: opts.groupProgram
-                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral']
                     : ['dance', 'dynamic'],
                 oneTimeCreditCats: opts.groupProgram
-                    ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral']
                     : [],
                 creditValues: {
                     interrupt: 0.6,
@@ -345,12 +335,12 @@
                     musicEnd: 'Конец',
                     collectiveSync: 'Синхронизация выполнена',
                     collectiveContrast: 'Контраст выполнен',
-                    collectiveCanon: 'Последовательность/канон выполнены',
-                    collectiveChoral: 'Хоровая работа выполнена',
+                    collectiveCanon: 'Канонадная',
+                    collectiveChoral: 'Хорал',
                     formationDesign: 'Рисунки построений',
                     formationAmplitude: 'Амплитуда построений',
-                    groupContactDuration: 'Нет гимнастки без предмета 5+ сек.',
-                    groupContactPose: 'Есть контакт в начале/конце',
+                    groupContactDuration: 'Гимнастка без предмета 5+ сек.',
+                    groupContactPose: 'Нет контакта в начале/конце',
                     bodyConstruction: 'Конструкция/поднятое положение',
                 },
 
