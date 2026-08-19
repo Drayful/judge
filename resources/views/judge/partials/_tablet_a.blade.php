@@ -4,21 +4,21 @@
 @php
     $eventPenalties = $groupProgram
         ? [
-            ['v' => 0.3, 'cat' => 'formationDesign',     'label' => 'Построения: недостаточно рисунков'],
-            ['v' => 0.3, 'cat' => 'formationAmplitude',  'label' => 'Построения: недостаточно амплитуды'],
-            ['v' => 0.6, 'cat' => 'interrupt',           'label' => 'Прерывание непрерывности 4+ сек.'],
-            ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Гимнастка без предмета 5+ сек.'],
-            ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Нет контакта с предметом в начале/конце'],
-            ['v' => 0.3, 'cat' => 'musicIntro',          'label' => 'Музыкальное вступление 4+ сек.'],
-            ['v' => 0.3, 'cat' => 'musicNorms',          'label' => 'Музыка не соответствует нормам'],
-            ['v' => 0.3, 'cat' => 'musicEnd',            'label' => 'Окончание не совпадает с музыкой'],
+            ['v' => 0.3, 'cat' => 'formationDesign',     'label' => 'Достаточно рисунков построений'],
+            ['v' => 0.3, 'cat' => 'formationAmplitude',  'label' => 'Достаточная амплитуда построений'],
+            ['v' => 0.6, 'cat' => 'interrupt',           'label' => 'Нет прерывания непрерывности 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Нет гимнастки без предмета 5+ сек.'],
+            ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Есть контакт с предметом в начале/конце'],
+            ['v' => 0.3, 'cat' => 'musicIntro',          'label' => 'Музыкальное вступление короче 4 сек.'],
+            ['v' => 0.3, 'cat' => 'musicNorms',          'label' => 'Музыка соответствует нормам'],
+            ['v' => 0.3, 'cat' => 'musicEnd',            'label' => 'Окончание совпадает с музыкой'],
         ]
         : [
-            ['v' => 0.3, 'cat' => 'floorArea',  'label' => 'Недостаточное использование площадки'],
-            ['v' => 0.6, 'cat' => 'interrupt',  'label' => 'Прерывание непрерывности 4+ сек.'],
-            ['v' => 0.3, 'cat' => 'musicIntro', 'label' => 'Музыкальное вступление 4+ сек.'],
-            ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыка не соответствует нормам'],
-            ['v' => 0.3, 'cat' => 'musicEnd',   'label' => 'Окончание не совпадает с музыкой'],
+            ['v' => 0.3, 'cat' => 'floorArea',  'label' => 'Площадка использована достаточно'],
+            ['v' => 0.6, 'cat' => 'interrupt',  'label' => 'Нет прерывания непрерывности 4+ сек.'],
+            ['v' => 0.3, 'cat' => 'musicIntro', 'label' => 'Музыкальное вступление короче 4 сек.'],
+            ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыка соответствует нормам'],
+            ['v' => 0.3, 'cat' => 'musicEnd',   'label' => 'Окончание совпадает с музыкой'],
         ];
 
     $collectivePenalties = [
@@ -140,9 +140,13 @@
                         @endforeach
                     </div>
                 </div>
-                <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
-                    :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                    class="flex-1 rounded-xl border px-3 py-2 text-left text-xs font-semibold leading-tight active:scale-[0.98]"><span class="block font-mono text-base font-bold">−0.30</span>Недостаточная экспрессия лица</button>
+                <button type="button" @click="add(0.3, 'faceExpr')" :disabled="!can('faceExpr')"
+                    :class="cat.faceExpr > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
+                    class="flex-1 rounded-xl border px-3 py-2 text-center text-xs font-semibold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
+                    <span x-show="cat.faceExpr > 0" class="block text-2xl leading-none text-emerald-200">✓</span>
+                    <span x-show="cat.faceExpr === 0" class="block font-mono text-base font-bold text-rose-300">−0.30</span>
+                    Экспрессия лица достаточная
+                </button>
             </div>
 
             <div class="col-span-4 min-h-0 flex flex-col gap-2">
@@ -164,10 +168,11 @@
 
             <div class="col-span-5 min-h-0 grid grid-cols-3 gap-1 content-stretch">
                 @foreach($eventPenalties as $item)
-                    <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
-                        :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                        class="min-h-0 rounded-xl border px-2 py-1.5 text-left text-[10px] font-semibold leading-tight active:scale-[0.98]">
-                        <span class="block font-mono text-base font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
+                    <button type="button" @click="add({{ $item['v'] }}, '{{ $item['cat'] }}')" :disabled="!can('{{ $item['cat'] }}')"
+                        :class="cat.{{ $item['cat'] }} > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
+                        class="min-h-0 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
+                        <span x-show="cat.{{ $item['cat'] }} > 0" class="block text-2xl leading-none text-emerald-200">✓</span>
+                        <span x-show="cat.{{ $item['cat'] }} === 0" class="block font-mono text-base font-extrabold text-rose-300">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
                     </button>
                 @endforeach
                 @if($groupProgram)

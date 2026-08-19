@@ -287,6 +287,16 @@
                     collectiveContrast: 0,
                     collectiveCanon: 0,
                     collectiveChoral: 0,
+                    faceExpr: 0,
+                    floorArea: 0,
+                    formationDesign: 0,
+                    formationAmplitude: 0,
+                    interrupt: 0,
+                    groupContactDuration: 0,
+                    groupContactPose: 0,
+                    musicIntro: 0,
+                    musicNorms: 0,
+                    musicEnd: 0,
                 },
                 catMax: {
                     dance: 2,
@@ -295,35 +305,52 @@
                     collectiveContrast: opts.groupProgram ? 1 : 0,
                     collectiveCanon: opts.groupProgram ? 1 : 0,
                     collectiveChoral: opts.groupProgram ? 1 : 0,
+                    faceExpr: 1,
+                    floorArea: opts.groupProgram ? 0 : 1,
+                    formationDesign: opts.groupProgram ? 1 : 0,
+                    formationAmplitude: opts.groupProgram ? 1 : 0,
+                    interrupt: 1,
+                    groupContactDuration: opts.groupProgram ? 1 : 0,
+                    groupContactPose: opts.groupProgram ? 1 : 0,
+                    musicIntro: 1,
+                    musicNorms: 1,
+                    musicEnd: 1,
                 },
                 // Блок A: авто-сбавка равна количеству обязательных повторов × 0.3.
                 // Нажатие на 0.3 подтверждает один выполненный повтор и уменьшает сбавку блока.
                 hasCombo: opts.panel === 'a',
                 comboStep: 0.3,
                 comboCats: opts.groupProgram
-                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral']
-                    : ['dance', 'dynamic'],
+                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    : ['dance', 'dynamic', 'faceExpr', 'floorArea', 'interrupt', 'musicIntro', 'musicNorms', 'musicEnd'],
+                oneTimeCreditCats: opts.groupProgram
+                    ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    : ['faceExpr', 'floorArea', 'interrupt', 'musicIntro', 'musicNorms', 'musicEnd'],
+                creditValues: {
+                    interrupt: 0.6,
+                    groupContactPose: 0.6,
+                },
                 catLabel: {
                     dance: 'Танц. шаги',
                     dynamic: 'Дин./эфф.',
                     rhythm: 'Ритм',
                     connections: 'Соединения',
-                    interrupt: 'Прерывание',
+                    interrupt: 'Нет прерывания 4+ сек.',
                     character: 'Характер',
                     bodyExpr: 'Экспр. тела',
-                    faceExpr: 'Экспр. лица',
-                    floorArea: 'Площадка',
-                    musicNorms: 'Нормы музыки',
-                    musicIntro: 'Муз. вступл.',
-                    musicEnd: 'Финал не с музыкой',
+                    faceExpr: 'Экспрессия лица достаточная',
+                    floorArea: 'Площадка использована достаточно',
+                    musicNorms: 'Музыка соответствует нормам',
+                    musicIntro: 'Вступление короче 4 сек.',
+                    musicEnd: 'Окончание совпадает с музыкой',
                     collectiveSync: 'Синхронизация выполнена',
                     collectiveContrast: 'Контраст выполнен',
                     collectiveCanon: 'Последовательность/канон выполнены',
                     collectiveChoral: 'Хоровая работа выполнена',
-                    formationDesign: 'Построения: рисунок',
-                    formationAmplitude: 'Построения: амплитуда',
-                    groupContactDuration: 'Без предмета 5+ секунд',
-                    groupContactPose: 'Нет контакта в начале/конце',
+                    formationDesign: 'Достаточно рисунков построений',
+                    formationAmplitude: 'Достаточная амплитуда построений',
+                    groupContactDuration: 'Нет гимнастки без предмета 5+ сек.',
+                    groupContactPose: 'Есть контакт в начале/конце',
                     bodyConstruction: 'Конструкция/поднятое положение',
                 },
 
@@ -518,16 +545,16 @@
                 restoreFromEntries(entries) {
                     this.actions = [];
                     this.resetCats();
+                    const reverseLogicV2 = entries.some(e => Number(e.logicVersion || 0) >= 2);
+                    const legacyOneTimePenalties = new Set();
                     for (const e of entries) {
                         const cat = e.cat || this.catFromLabel(e.label);
-                        // До обратной логики коллективные кнопки сохранялись как штрафы.
-                        // Теперь тот же штраф создаётся автоматически, поэтому старую запись
-                        // пропускаем: кнопка останется неотмеченной, а итог не удвоится.
-                        const legacyCollectivePenalty = this.panel === 'a'
-                            && this.groupProgram
-                            && ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral'].includes(cat)
-                            && ! e.combo;
-                        if (legacyCollectivePenalty) continue;
+                        // Раньше бинарная кнопка добавляла штраф. Теперь этот штраф уже
+                        // существует по умолчанию, поэтому старую запись не дублируем.
+                        if (this.panel === 'a' && this.oneTimeCreditCats.includes(cat) && ! e.combo) {
+                            legacyOneTimePenalties.add(cat);
+                            continue;
+                        }
                         const action = {
                             v: e.v ?? 0,
                             cat: cat,
@@ -544,6 +571,21 @@
                             this.cat[cat] += 1;
                         }
                     }
+                    // В старой истории отсутствие записи означало отсутствие штрафа.
+                    // Новая история помечается logicVersion и сохраняет только реальные галочки.
+                    if (this.panel === 'a' && ! reverseLogicV2) {
+                        for (const cat of this.oneTimeCreditCats) {
+                            if (legacyOneTimePenalties.has(cat) || this.cat[cat] > 0) continue;
+                            this.cat[cat] = 1;
+                            this.actions.unshift({
+                                v: this.creditValue(cat),
+                                cat: cat,
+                                label: this.catLabel[cat] || cat,
+                                combo: true,
+                                inTotal: false,
+                            });
+                        }
+                    }
                     if (this.mode === 'subtract' || this.mode === 'penalty') {
                         this.draft = this.round3(
                             this.actions.filter(a => a.inTotal !== false && ! a.combo).reduce((s, a) => s + a.v, 0)
@@ -558,8 +600,6 @@
                         .filter(a => a.cat === cat && a.inTotal !== false && ! a.combo)
                         .reduce((sum, a) => sum + Number(a.v || 0), 0));
                 },
-
-                hasPenalty(cat) { return this.actions.some(a => a.cat === cat && a.inTotal !== false); },
 
                 recalculateDraft() {
                     this.draft = this.round3(this.actions
@@ -586,15 +626,6 @@
                     if (value > 0) this.add(value, cat);
                 },
 
-                /** Однократный штраф: повторное нажатие снимает его. */
-                togglePenalty(value, cat) {
-                    if (this.hasPenalty(cat)) {
-                        this.clearCategory(cat);
-                        return;
-                    }
-                    this.add(value, cat);
-                },
-
                 /** Счётчик с шагом и официальным максимумом категории. */
                 incrementPenalty(value, cat, maximum) {
                     if (this.round3(this.categoryPenalty(cat) + value) > maximum) {
@@ -614,7 +645,7 @@
                         if (this.cat[cat] >= this.catMax[cat]) return;
                         this.cat[cat] += 1;
                         this.actions.unshift({
-                            v: this.comboStep,
+                            v: this.creditValue(cat),
                             cat: cat,
                             label: this.catLabel[cat] || cat,
                             combo: true,
@@ -1082,10 +1113,12 @@
                 },
                 resetCats() { Object.keys(this.cat).forEach(k => { this.cat[k] = 0; }); },
 
-                /** Авто-сбавка одного блока с учётом «кредитов» (нажатий). */
+                /** Авто-сбавка одного блока с учётом подтверждений (нажатий). */
+                creditValue(cat) { return this.creditValues[cat] || this.comboStep; },
                 blockPenalty(cat) {
-                    const base = this.round3(this.comboStep * (this.catMax[cat] || 0));
-                    return this.round3(Math.max(0, base - this.comboStep * (this.cat[cat] || 0)));
+                    const step = this.creditValue(cat);
+                    const base = this.round3(step * (this.catMax[cat] || 0));
+                    return this.round3(Math.max(0, base - step * (this.cat[cat] || 0)));
                 },
                 /** Суммарная авто-сбавка блоков (танц. шаги + дин. изменения). */
                 comboPenalty() {
@@ -1148,6 +1181,7 @@
                             combo: !! a.combo,
                             notDone: !! a.notDone,
                             counted: this.panel === 'd' ? this.isCounted(i) : (a.inTotal !== false && ! a.combo),
+                            logicVersion: 2,
                         });
                     }
                     return list;
