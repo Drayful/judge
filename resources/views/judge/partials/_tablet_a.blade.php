@@ -40,7 +40,7 @@
             @foreach ([['connections', 'Соединения'], ['rhythm', 'Ритм']] as [$cat, $label])
                 <button type="button" @click="incrementPenalty(0.1, '{{ $cat }}', 2.0)"
                     :disabled="categoryPenalty('{{ $cat }}') >= 2"
-                    class="judge-score-stage {{ $groupProgram ? 'shrink-0 min-h-28' : 'flex-1 min-h-0' }} w-full rounded-2xl border p-3 text-left active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
+                    class="judge-score-stage flex-1 min-h-0 w-full rounded-2xl border p-3 text-left active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50">
                     <div class="flex items-center justify-between gap-2">
                         <div>
                             <div class="text-xs font-bold uppercase tracking-wide text-slate-200">{{ $label }}</div>
@@ -53,7 +53,7 @@
             @endforeach
 
             @if($groupProgram)
-                <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
+                <div class="flex-[2] min-h-0 flex flex-col rounded-2xl border border-slate-800 bg-[#0c1429] p-2">
                     <div class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Типы коллективной работы · не отмечено = −0.30</div>
                     <div class="flex-1 min-h-0 grid grid-cols-2 gap-2">
                         @foreach($collectivePenalties as $item)
