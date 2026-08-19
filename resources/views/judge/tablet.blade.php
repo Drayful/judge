@@ -309,7 +309,6 @@
                         faceExpr: 1,
                         formationDesign: 1,
                         formationAmplitude: 1,
-                        interrupt: 1,
                         groupContactDuration: 1,
                         groupContactPose: 1,
                         musicIntro: 1,
@@ -322,10 +321,10 @@
                 hasCombo: opts.panel === 'a',
                 comboStep: 0.3,
                 comboCats: opts.groupProgram
-                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    ? ['dance', 'dynamic', 'collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
                     : ['dance', 'dynamic'],
                 oneTimeCreditCats: opts.groupProgram
-                    ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'interrupt', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
+                    ? ['collectiveSync', 'collectiveContrast', 'collectiveCanon', 'collectiveChoral', 'faceExpr', 'formationDesign', 'formationAmplitude', 'groupContactDuration', 'groupContactPose', 'musicIntro', 'musicNorms', 'musicEnd']
                     : [],
                 creditValues: {
                     interrupt: 0.6,
@@ -336,7 +335,7 @@
                     dynamic: 'Дин./эфф.',
                     rhythm: 'Ритм',
                     connections: 'Соединения',
-                    interrupt: 'Нет прерывания 4+ сек.',
+                    interrupt: 'Прерывание непрерывности 4+ сек.',
                     character: 'Характер',
                     bodyExpr: 'Экспр. тела',
                     faceExpr: 'Экспрессия лица',

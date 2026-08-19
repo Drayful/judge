@@ -255,6 +255,7 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('Амплитуда построений')
             ->assertSee('Нет гимнастки без предмета 5+ сек.')
             ->assertSee('Есть контакт с предметом в начале/конце')
+            ->assertSee("togglePenalty(0.6, 'interrupt')", false)
             ->assertSee('Конструкция / поднятое положение')
             ->assertSee("oneTimeCreditCats: opts.groupProgram", false)
             ->assertSee('dynamic: opts.groupProgram ? 4 : 2', false)

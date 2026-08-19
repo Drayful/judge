@@ -6,7 +6,6 @@
         ? [
             ['v' => 0.3, 'cat' => 'formationDesign',     'label' => 'Рисунки построений'],
             ['v' => 0.3, 'cat' => 'formationAmplitude',  'label' => 'Амплитуда построений'],
-            ['v' => 0.6, 'cat' => 'interrupt',           'label' => 'Нет прерывания непрерывности 4+ сек.'],
             ['v' => 0.3, 'cat' => 'groupContactDuration','label' => 'Нет гимнастки без предмета 5+ сек.'],
             ['v' => 0.6, 'cat' => 'groupContactPose',    'label' => 'Есть контакт с предметом в начале/конце'],
             ['v' => 0.3, 'cat' => 'musicIntro',          'label' => 'Музыкальное вступление'],
@@ -15,7 +14,6 @@
         ]
         : [
             ['v' => 0.3, 'cat' => 'floorArea',  'label' => 'Площадка'],
-            ['v' => 0.6, 'cat' => 'interrupt',  'label' => 'Прерывание непрерывности 4+ сек.'],
             ['v' => 0.3, 'cat' => 'musicIntro', 'label' => 'Музыкальное вступление'],
             ['v' => 0.3, 'cat' => 'musicNorms', 'label' => 'Музыка'],
             ['v' => 0.3, 'cat' => 'musicEnd',   'label' => 'Конец'],
@@ -71,6 +69,12 @@
                 <button type="button" @click="cancel()" class="rounded-lg border border-rose-800/60 bg-[#6f1d2e] px-3 py-2 text-xs font-semibold text-white active:scale-[0.98]">ОТМЕНА</button>
                 <button type="button" @click="page = 2" class="flex-1 rounded-lg border border-emerald-700/40 bg-[#0e5a3f] px-4 py-2 text-sm font-bold text-emerald-50 active:scale-[0.98]">Общие и событийные штрафы →</button>
             </div>
+
+            <button type="button" @click="togglePenalty(0.6, 'interrupt')"
+                :class="hasPenalty('interrupt') ? 'border-rose-400 bg-rose-900/80 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
+                class="shrink-0 min-h-16 rounded-2xl border px-4 py-3 text-center text-sm font-bold active:scale-[0.98]">
+                <span class="mr-2 font-mono text-xl font-extrabold">−0.60</span>Прерывание непрерывности 4+ сек.
+            </button>
 
             <div class="judge-score-stage flex-1 min-h-0 rounded-3xl border p-3 flex flex-col items-center justify-center text-center">
                 <div class="text-[10px] uppercase tracking-widest text-slate-400">Итоговая сбавка</div>
