@@ -1035,6 +1035,101 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertEqualsWithDelta(3.333, (float) JudgeScore::query()->where('performance_id', $first->id)->value('score'), 0.0005);
     }
 
+    public function test_secretary_can_select_a_scheduled_participant_for_live_without_reordering_queue(): void
+    {
+        $first = $this->performance();
+        $category = $first->category;
+        $first->update([
+            'status' => 'scheduled',
+            'start_number' => 11,
+            'order_index' => 1,
+        ]);
+        $secondAthlete = Athlete::create(['last_name' => 'Петрова', 'first_name' => 'Елена']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'scheduled',
+            'start_number' => 12,
+            'order_index' => 2,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->assertRedirect()
+            ->assertSessionHas('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
+
+        $this->assertSame('scheduled', $first->fresh()->status);
+        $this->assertSame('performing', $second->fresh()->status);
+        $this->assertSame(1, $first->fresh()->order_index);
+        $this->assertSame(2, $second->fresh()->order_index);
+        $this->assertSame(11, $first->fresh()->start_number);
+        $this->assertSame(12, $second->fresh()->start_number);
+    }
+
+    public function test_live_selection_replaces_an_untouched_current_performance_without_reordering(): void
+    {
+        $first = $this->performance();
+        $first->update(['started_at' => now(), 'order_index' => 1]);
+        $category = $first->category;
+        $secondAthlete = Athlete::create(['last_name' => 'Сидорова', 'first_name' => 'Мария']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'scheduled',
+            'order_index' => 2,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->assertRedirect();
+
+        $this->assertSame('scheduled', $first->fresh()->status);
+        $this->assertNull($first->fresh()->started_at);
+        $this->assertSame('performing', $second->fresh()->status);
+        $this->assertSame(1, $first->fresh()->order_index);
+        $this->assertSame(2, $second->fresh()->order_index);
+    }
+
+    public function test_live_selection_is_blocked_after_the_current_performance_has_activity(): void
+    {
+        $first = $this->performance();
+        $first->update(['timer_started_at' => now()]);
+        $category = $first->category;
+        $secondAthlete = Athlete::create(['last_name' => 'Орлова', 'first_name' => 'Ирина']);
+        $second = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'scheduled',
+            'order_index' => 2,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->assertRedirect()
+            ->assertSessionHasErrors('select_live');
+
+        $this->assertSame('performing', $first->fresh()->status);
+        $this->assertSame('scheduled', $second->fresh()->status);
+        $this->assertSame(1, $first->fresh()->order_index);
+        $this->assertSame(2, $second->fresh()->order_index);
+    }
+
+    public function test_live_queue_renders_participant_selection_controls(): void
+    {
+        $performance = $this->performance();
+        $performance->update(['status' => 'scheduled']);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $performance->category))
+            ->assertOk()
+            ->assertSee('В Live')
+            ->assertSee(route('secretary.performance.selectLive', [$performance->category, $performance]), false);
+    }
+
     public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void
     {
         $jury = User::factory()->create(['role' => 'superior_jury']);

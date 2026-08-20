@@ -2479,6 +2479,98 @@ class SecretaryController extends Controller
         return back();
     }
 
+    /**
+     * Выбрать ожидающее выступление прямо из списка Live, не меняя его место
+     * в очереди. Ошибочно открытое выступление можно заменить, пока судьи и
+     * хронометрист ещё не начали работу.
+     */
+    public function selectLivePerformance(Request $request, Category $category, Performance $performance): RedirectResponse
+    {
+        $data = $request->validate([
+            'stream_session_id' => ['nullable', 'integer'],
+        ]);
+        $sessionId = isset($data['stream_session_id']) ? (int) $data['stream_session_id'] : null;
+        $error = null;
+
+        DB::transaction(function () use ($category, $performance, $sessionId, &$error): void {
+            $target = Performance::query()->lockForUpdate()->findOrFail($performance->id);
+            abort_unless((int) $target->category_id === (int) $category->id, 404);
+            abort_unless(
+                ($target->stream_session_id === null ? null : (int) $target->stream_session_id) === $sessionId,
+                404,
+            );
+
+            if ($target->status === 'performing') {
+                return;
+            }
+
+            if (! in_array($target->status, ['scheduled', 'on_deck'], true) || $target->isWithdrawn()) {
+                $error = 'Выбрать для Live можно только ожидающее выступление.';
+
+                return;
+            }
+
+            $current = Performance::query()
+                ->where('category_id', $category->id)
+                ->when(
+                    $sessionId !== null,
+                    fn ($query) => $query->where('stream_session_id', $sessionId),
+                    fn ($query) => $query->whereNull('stream_session_id'),
+                )
+                ->where('status', 'performing')
+                ->whereKeyNot($target->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($current !== null) {
+                $hasJudgingActivity = $current->timer_started_at !== null
+                    || $current->timer_ended_at !== null
+                    || $current->actual_duration_seconds !== null
+                    || $current->finalized_at !== null
+                    || $current->approved_at !== null
+                    || $current->published_at !== null
+                    || $current->scores_overridden
+                    || $current->judgeScores()->exists()
+                    || $current->judgeScoreActions()->exists();
+
+                if ($hasJudgingActivity) {
+                    $error = 'Нельзя переключить участницу: по текущему выступлению уже запущен таймер или началось судейство. Сначала завершите его.';
+
+                    return;
+                }
+
+                $current->status = 'scheduled';
+                $current->called_at = null;
+                $current->started_at = null;
+                $current->ended_at = null;
+                $current->save();
+            }
+
+            $target->status = 'performing';
+            $target->called_at = now();
+            $target->started_at = now();
+            $target->timer_started_at = null;
+            $target->timer_ended_at = null;
+            $target->timer_revision_requested_at = null;
+            $target->ended_at = null;
+            $target->actual_duration_seconds = null;
+            $target->time_penalty = 0;
+            $target->save();
+        });
+
+        if ($error !== null) {
+            return back()->withErrors(['select_live' => $error]);
+        }
+
+        $category->loadMissing('tournament');
+        $category->tournament?->update([
+            'active_category_id' => $category->id,
+            'active_stream_session_id' => $sessionId,
+        ]);
+
+        return back()->with('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
+    }
+
     public function setAutoAdvance(Request $request, Category $category): RedirectResponse
     {
         $category->auto_advance = true;
