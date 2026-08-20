@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Group;
 use App\Models\Performance;
+use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Models\User;
 use App\Services\StreamBuilderService;
@@ -107,6 +108,194 @@ class GroupStreamBuilderTest extends TestCase
             ->assertOk()
             ->assertSee('Пул участниц')
             ->assertSee('2018 г.р.');
+    }
+
+    public function test_adding_session_applies_it_to_every_stream_and_keeps_group_panel_open(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $group = Group::create([
+            'tournament_id' => $tournament->id,
+            'program' => 'individual',
+            'birth_year' => 2018,
+            'division' => 'A',
+            'name' => '2018 г.р., A',
+            'apparatus' => ['Мяч', 'Обруч'],
+        ]);
+        $categories = collect([1, 2])->map(fn (int $streamNo) => Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $group->id,
+            'name' => '2018 г.р., A — Поток '.$streamNo,
+            'program' => 'individual',
+            'birth_year' => 2018,
+            'division' => 'A',
+            'stream_no' => $streamNo,
+        ]));
+
+        $performances = $categories->map(function (Category $category, int $index) {
+            $athlete = Athlete::create(['first_name' => 'Имя'.$index, 'last_name' => 'Фамилия'.$index]);
+
+            return Performance::create([
+                'category_id' => $category->id,
+                'athlete_id' => $athlete->id,
+                'apparatus' => 'Мяч',
+                'order_index' => 1,
+                'status' => 'scheduled',
+            ]);
+        });
+
+        $category = $categories->first();
+
+        $pageUrl = route('secretary.tournament.groups', [
+            'tournament' => $tournament,
+            'open_group_sessions' => $group->id,
+        ]);
+        $returnUrl = $pageUrl.'#group-sessions-'.$group->id;
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.categories.sessions.store', [$tournament, $category]), [
+                'scheduled_on' => '2026-08-20',
+                'starts_at' => '09:00',
+                'ends_at' => '10:00',
+                'apparatus' => ['Мяч'],
+            ])
+            ->assertRedirect($returnUrl);
+
+        $this->assertSame(2, StreamSession::query()->whereIn('category_id', $categories->pluck('id'))->count());
+        foreach ($categories as $streamCategory) {
+            $this->assertDatabaseHas('stream_sessions', [
+                'category_id' => $streamCategory->id,
+                'session_no' => 1,
+                'scheduled_on' => '2026-08-20',
+            ]);
+        }
+        foreach ($performances as $performance) {
+            $this->assertNotNull($performance->fresh()->stream_session_id);
+        }
+
+        $response = $this->actingAs($this->secretary())
+            ->get($pageUrl)
+            ->assertOk();
+
+        $this->assertMatchesRegularExpression(
+            '/<details id="group-sessions-'.$group->id.'"\s+open\s+class=/',
+            $response->getContent(),
+        );
+        $response->assertSee('применяются сразу ко всем 2 потокам', false);
+    }
+
+    public function test_updating_and_deleting_group_session_syncs_every_stream(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $group = Group::create([
+            'tournament_id' => $tournament->id,
+            'program' => 'individual',
+            'birth_year' => 2018,
+            'division' => 'A',
+            'name' => '2018 г.р., A',
+            'apparatus' => ['Мяч', 'Обруч'],
+        ]);
+        $categories = collect([1, 2])->map(fn (int $streamNo) => Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $group->id,
+            'name' => 'Поток '.$streamNo,
+            'program' => 'individual',
+            'stream_no' => $streamNo,
+        ]));
+        $sessions = $categories->map(fn (Category $category) => StreamSession::create([
+            'category_id' => $category->id,
+            'session_no' => 1,
+            'scheduled_on' => '2026-08-20',
+            'apparatus' => ['Мяч'],
+        ]));
+
+        $source = $sessions->first();
+        $this->actingAs($this->secretary())
+            ->patch(route('secretary.tournament.categories.sessions.update', [$tournament, $categories->first(), $source]), [
+                'scheduled_on' => '2026-08-21',
+                'starts_at' => '10:00',
+                'ends_at' => '11:00',
+                'title' => 'Второй день',
+                'apparatus' => ['Обруч'],
+            ])
+            ->assertRedirect(route('secretary.tournament.groups', [
+                'tournament' => $tournament,
+                'open_group_sessions' => $group->id,
+            ]).'#group-sessions-'.$group->id);
+
+        foreach ($sessions as $session) {
+            $session->refresh();
+            $this->assertSame('2026-08-21', $session->scheduled_on->format('Y-m-d'));
+            $this->assertSame('Второй день', $session->title);
+            $this->assertSame(['Обруч'], $session->apparatus);
+        }
+
+        $startedAthlete = Athlete::create(['first_name' => 'Начала', 'last_name' => 'Спортсменка']);
+        $started = Performance::create([
+            'category_id' => $categories->last()->id,
+            'stream_session_id' => $sessions->last()->id,
+            'athlete_id' => $startedAthlete->id,
+            'apparatus' => 'Обруч',
+            'order_index' => 1,
+            'status' => 'performing',
+        ]);
+
+        $this->actingAs($this->secretary())
+            ->delete(route('secretary.tournament.categories.sessions.destroy', [$tournament, $categories->first(), $source]))
+            ->assertSessionHasErrors('session');
+
+        $this->assertSame(2, StreamSession::query()->whereIn('category_id', $categories->pluck('id'))->count());
+
+        $started->update(['status' => 'scheduled']);
+        $this->actingAs($this->secretary())
+            ->delete(route('secretary.tournament.categories.sessions.destroy', [$tournament, $categories->first(), $source]))
+            ->assertRedirect();
+
+        $this->assertSame(0, StreamSession::query()->whereIn('category_id', $categories->pluck('id'))->count());
+    }
+
+    public function test_new_stream_inherits_existing_group_schedule(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $this->seedPool($tournament, 3, 2018, 'A');
+        $group = Group::create([
+            'tournament_id' => $tournament->id,
+            'program' => 'individual',
+            'birth_year' => 2018,
+            'division' => 'A',
+            'name' => '2018 г.р., A',
+            'apparatus' => ['Мяч', 'Обруч'],
+            'number_mode' => 'per_stream',
+        ]);
+        Entry::query()->where('tournament_id', $tournament->id)->update(['group_id' => $group->id]);
+
+        $builder = app(StreamBuilderService::class);
+        $builder->generateStreams($group, 3);
+        $first = $group->categories()->where('stream_no', 1)->firstOrFail();
+        StreamSession::create([
+            'category_id' => $first->id,
+            'session_no' => 1,
+            'title' => 'Первый день',
+            'scheduled_on' => '2026-08-20',
+            'starts_at' => '09:00',
+            'ends_at' => '12:00',
+            'apparatus' => ['Мяч'],
+        ]);
+
+        $builder->generateStreams($group, 2);
+
+        $second = $group->categories()->where('stream_no', 2)->firstOrFail();
+        $copied = $second->sessions()->firstOrFail();
+        $this->assertSame(1, $copied->session_no);
+        $this->assertSame('Первый день', $copied->title);
+        $this->assertSame('2026-08-20', $copied->scheduled_on->format('Y-m-d'));
+        $this->assertSame(['Мяч'], $copied->apparatus);
+        $this->assertGreaterThan(
+            0,
+            Performance::query()
+                ->where('category_id', $second->id)
+                ->where('stream_session_id', $copied->id)
+                ->count(),
+        );
     }
 
     public function test_unassigned_athlete_can_be_moved_between_existing_pools_one_at_a_time(): void

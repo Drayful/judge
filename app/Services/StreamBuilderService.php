@@ -23,6 +23,7 @@ class StreamBuilderService
 {
     public function __construct(
         private readonly StreamScheduleService $schedule,
+        private readonly GroupStreamSessionService $groupSessions,
     ) {}
 
     /**
@@ -341,6 +342,10 @@ class StreamBuilderService
         }
 
         $category->save();
+
+        if ($isNew) {
+            $this->groupSessions->copyGroupScheduleToNewCategory($category);
+        }
 
         return $category;
     }

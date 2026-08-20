@@ -14,6 +14,7 @@ use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Services\FinalProtocolExporter;
 use App\Services\FinalProtocolService;
+use App\Services\GroupStreamSessionService;
 use App\Services\MusicTrackUploadService;
 use App\Services\StartProtocolExporter;
 use App\Services\StartProtocolImportService;
@@ -1487,53 +1488,50 @@ class SecretaryController extends Controller
         return view('secretary.queue', $this->queueViewData($category, $session));
     }
 
-    public function storeStreamSession(Request $request, Tournament $tournament, Category $category): RedirectResponse
+    public function storeStreamSession(Request $request, Tournament $tournament, Category $category, GroupStreamSessionService $sessions): RedirectResponse
     {
         $this->ensureCategoryInTournament($category, $tournament);
         $data = $this->validateStreamSession($request);
-        $this->ensureSessionApparatusAvailable($category, $data['apparatus']);
 
-        $session = StreamSession::query()->create([
-            ...$data,
-            'category_id' => $category->id,
-            'session_no' => ((int) $category->sessions()->max('session_no')) + 1,
-        ]);
+        try {
+            $sessions->create($category, $data);
+        } catch (DomainException $e) {
+            return back()->withErrors(['session' => $e->getMessage()])->withInput();
+        }
 
-        $this->syncSessionPerformances($category, $session);
-
-        return back()->with('status', 'Сессия потока добавлена. Выступления по выбранным предметам распределены автоматически.');
+        return redirect()->to($this->groupSessionsReturnUrl($tournament, $category))
+            ->with('status', 'Сессия добавлена во все потоки группы. Выступления по выбранным предметам распределены автоматически.');
     }
 
-    public function updateStreamSession(Request $request, Tournament $tournament, Category $category, StreamSession $session): RedirectResponse
+    public function updateStreamSession(Request $request, Tournament $tournament, Category $category, StreamSession $session, GroupStreamSessionService $sessions): RedirectResponse
+    {
+        $this->ensureCategoryInTournament($category, $tournament);
+        abort_unless($session->category_id === $category->id, 404);
+        $data = $this->validateStreamSession($request);
+
+        try {
+            $sessions->update($category, $session, $data);
+        } catch (DomainException $e) {
+            return back()->withErrors(['session' => $e->getMessage()])->withInput();
+        }
+
+        return redirect()->to($this->groupSessionsReturnUrl($tournament, $category))
+            ->with('status', 'Расписание сессии обновлено во всех потоках группы.');
+    }
+
+    public function destroyStreamSession(Tournament $tournament, Category $category, StreamSession $session, GroupStreamSessionService $sessions): RedirectResponse
     {
         $this->ensureCategoryInTournament($category, $tournament);
         abort_unless($session->category_id === $category->id, 404);
 
-        if ($session->performances()->where('status', '!=', 'scheduled')->exists()) {
-            return back()->withErrors(['session' => 'Нельзя изменить сессию, в которой уже начались выступления.']);
+        try {
+            $sessions->delete($category, $session);
+        } catch (DomainException $e) {
+            return back()->withErrors(['session' => $e->getMessage()]);
         }
 
-        $data = $this->validateStreamSession($request);
-        $this->ensureSessionApparatusAvailable($category, $data['apparatus'], $session);
-        $session->update($data);
-        $this->syncSessionPerformances($category, $session);
-
-        return back()->with('status', 'Расписание сессии обновлено.');
-    }
-
-    public function destroyStreamSession(Tournament $tournament, Category $category, StreamSession $session): RedirectResponse
-    {
-        $this->ensureCategoryInTournament($category, $tournament);
-        abort_unless($session->category_id === $category->id, 404);
-
-        if ($session->performances()->where('status', '!=', 'scheduled')->exists()) {
-            return back()->withErrors(['session' => 'Нельзя удалить сессию, в которой уже начались выступления.']);
-        }
-
-        $session->performances()->where('status', 'scheduled')->update(['stream_session_id' => null]);
-        $session->delete();
-
-        return back()->with('status', 'Сессия удалена. Её выступления остались в потоке без даты.');
+        return redirect()->to($this->groupSessionsReturnUrl($tournament, $category))
+            ->with('status', 'Сессия удалена из всех потоков группы. Её выступления остались без даты.');
     }
 
     /** @return array<string, mixed> */
@@ -1553,38 +1551,14 @@ class SecretaryController extends Controller
         return $data;
     }
 
-    /** @param array<int, string> $apparatus */
-    private function ensureSessionApparatusAvailable(Category $category, array $apparatus, ?StreamSession $except = null): void
+    private function groupSessionsReturnUrl(Tournament $tournament, Category $category): string
     {
-        $conflicts = $category->sessions()
-            ->when($except, fn ($q) => $q->whereKeyNot($except->id))
-            ->get()
-            ->filter(fn (StreamSession $other) => array_intersect($other->apparatus ?? [], $apparatus) !== []);
+        $panelId = $category->group_id ?? $category->id;
 
-        if ($conflicts->isNotEmpty()) {
-            abort(422, 'Один предмет нельзя назначить в несколько сессий одного потока.');
-        }
-    }
-
-    private function syncSessionPerformances(Category $category, StreamSession $session): void
-    {
-        $sessionApparatus = array_map(
-            fn (string $apparatus) => PerformanceApparatus::sessionKey($apparatus),
-            $session->apparatus ?? [],
-        );
-
-        Performance::query()
-            ->where('category_id', $category->id)
-            ->where('stream_session_id', $session->id)
-            ->where('status', 'scheduled')
-            ->update(['stream_session_id' => null]);
-
-        Performance::query()
-            ->where('category_id', $category->id)
-            ->where('status', 'scheduled')
-            ->get(['id', 'apparatus'])
-            ->filter(fn (Performance $performance) => in_array(PerformanceApparatus::sessionKey($performance->apparatus), $sessionApparatus, true))
-            ->each(fn (Performance $performance) => $performance->update(['stream_session_id' => $session->id]));
+        return route('secretary.tournament.groups', [
+            'tournament' => $tournament,
+            'open_group_sessions' => $panelId,
+        ]).'#group-sessions-'.$panelId;
     }
 
     private function requestedStreamSession(Request $request, Category $category): ?StreamSession

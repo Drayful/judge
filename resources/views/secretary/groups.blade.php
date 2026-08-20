@@ -531,72 +531,88 @@
                                             Очередь →
                                         </a>
                                     </div>
-                                    <details class="rounded-lg border border-slate-800 bg-slate-950/30 px-3 py-2 sm:col-span-2">
-                                        <summary class="cursor-pointer text-xs font-medium text-sky-300 hover:text-sky-200">
-                                            Расписание по дням ({{ $cat->sessions->count() }})
-                                        </summary>
-                                        <div class="mt-3 space-y-2">
-                                            @foreach($cat->sessions as $session)
-                                                <div class="rounded-lg border border-slate-700/80 bg-slate-900/60 p-3">
-                                                    <div class="flex flex-wrap items-center justify-between gap-2">
-                                                        <div class="text-sm font-medium text-slate-100">
-                                                            Сессия {{ $session->session_no }} · {{ $session->scheduled_on?->format('d.m.Y') }}
-                                                            @if($session->starts_at)<span class="ml-1 text-slate-400">{{ substr($session->starts_at, 0, 5) }}@if($session->ends_at)–{{ substr($session->ends_at, 0, 5) }}@endif</span>@endif
-                                                            @if($session->title)<span class="ml-1 text-slate-400">· {{ $session->title }}</span>@endif
-                                                        </div>
-                                                        <a href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $cat->id }}&session={{ $session->id }}" class="text-xs font-semibold text-emerald-300 hover:text-emerald-200">Открыть Live →</a>
-                                                    </div>
-                                                    <div class="mt-2 flex flex-wrap gap-1">
-                                                        @foreach($session->apparatus ?? [] as $apparatus)
-                                                            <span class="rounded-full border border-sky-700/60 bg-sky-950/40 px-2 py-0.5 text-[11px] text-sky-100">{{ $apparatus }}</span>
-                                                        @endforeach
-                                                    </div>
-                                                    <details class="mt-3">
-                                                        <summary class="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Изменить сессию</summary>
-                                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.update', [$tournament, $cat, $session]) }}" class="mt-2 space-y-2">
-                                                            @csrf
-                                                            @method('PATCH')
-                                                            <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                                                <input name="scheduled_on" type="date" value="{{ $session->scheduled_on?->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                                <input name="starts_at" type="time" value="{{ $session->starts_at ? substr($session->starts_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                                <input name="ends_at" type="time" value="{{ $session->ends_at ? substr($session->ends_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                            </div>
-                                                            <input name="title" value="{{ $session->title }}" placeholder="Название, например: Финалы" class="w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                            <div class="flex flex-wrap gap-x-3 gap-y-1">
-                                                                @foreach($apparatusOptions as $apparatus)
-                                                                    <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" @checked(in_array($apparatus, $session->apparatus ?? [], true)) class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
-                                                                @endforeach
-                                                            </div>
-                                                            <button class="text-xs text-sky-300 hover:text-sky-200">Сохранить</button>
-                                                        </form>
-                                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.destroy', [$tournament, $cat, $session]) }}" class="mt-2" onsubmit="return confirm('Удалить сессию? Выступления останутся в потоке без даты.');">
-                                                            @csrf
-                                                            @method('DELETE')
-                                                            <button class="text-xs text-rose-300 hover:text-rose-200">Удалить сессию</button>
-                                                        </form>
-                                                    </details>
-                                                </div>
-                                            @endforeach
-                                        </div>
-                                        <form method="POST" action="{{ route('secretary.tournament.categories.sessions.store', [$tournament, $cat]) }}" class="mt-3 rounded-lg border border-dashed border-slate-700 p-3">
-                                            @csrf
-                                            <div class="text-xs font-semibold text-slate-200">Добавить день / сессию</div>
-                                            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                                <input name="scheduled_on" type="date" value="{{ now()->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                <input name="starts_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                                <input name="ends_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                            </div>
-                                            <input name="title" placeholder="Название (необязательно)" class="mt-2 w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
-                                            <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-                                                @foreach($apparatusOptions as $apparatus)
-                                                    <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
-                                                @endforeach
-                                            </div>
-                                            <button class="mt-3 text-xs font-semibold text-emerald-300 hover:text-emerald-200">+ Добавить сессию</button>
-                                        </form>
-                                    </details>
                                 @endforeach
                             </div>
+                            <?php
+                                $scheduleCategory = $group->categories->first();
+                            ?>
+                            <details id="group-sessions-{{ $group->id }}" @if((int) request()->query('open_group_sessions') === (int) $group->id) open @endif class="mt-2 rounded-lg border border-sky-900/70 bg-slate-950/30 px-3 py-2">
+                                <summary class="cursor-pointer text-xs font-medium text-sky-300 hover:text-sky-200">
+                                    Расписание группы по дням ({{ $scheduleCategory->sessions->count() }})
+                                </summary>
+                                <p class="mt-2 text-xs text-slate-400">
+                                    Даты, время и предметы применяются сразу ко всем {{ $group->categories->count() }} потокам этой группы.
+                                </p>
+                                @error('session') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                                <div class="mt-3 space-y-2">
+                                    @foreach($scheduleCategory->sessions as $session)
+                                        <div class="rounded-lg border border-slate-700/80 bg-slate-900/60 p-3">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <div class="text-sm font-medium text-slate-100">
+                                                    Сессия {{ $session->session_no }} · {{ $session->scheduled_on?->format('d.m.Y') }}
+                                                    @if($session->starts_at)<span class="ml-1 text-slate-400">{{ substr($session->starts_at, 0, 5) }}@if($session->ends_at)–{{ substr($session->ends_at, 0, 5) }}@endif</span>@endif
+                                                    @if($session->title)<span class="ml-1 text-slate-400">· {{ $session->title }}</span>@endif
+                                                </div>
+                                                <div class="flex flex-wrap items-center justify-end gap-2">
+                                                    @foreach($group->categories as $streamCategory)
+                                                        <?php
+                                                            $streamSession = $streamCategory->sessions->firstWhere('session_no', $session->session_no);
+                                                        ?>
+                                                        @if($streamSession)
+                                                            <a href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $streamCategory->id }}&session={{ $streamSession->id }}" class="text-xs font-semibold text-emerald-300 hover:text-emerald-200">Live: поток {{ $streamCategory->stream_no }} →</a>
+                                                        @endif
+                                                    @endforeach
+                                                </div>
+                                            </div>
+                                            <div class="mt-2 flex flex-wrap gap-1">
+                                                @foreach($session->apparatus ?? [] as $apparatus)
+                                                    <span class="rounded-full border border-sky-700/60 bg-sky-950/40 px-2 py-0.5 text-[11px] text-sky-100">{{ $apparatus }}</span>
+                                                @endforeach
+                                            </div>
+                                            <details class="mt-3">
+                                                <summary class="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Изменить для всех потоков</summary>
+                                                <form method="POST" action="{{ route('secretary.tournament.categories.sessions.update', [$tournament, $scheduleCategory, $session]) }}" class="mt-2 space-y-2">
+                                                    @csrf
+                                                    @method('PATCH')
+                                                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                                        <input name="scheduled_on" type="date" value="{{ $session->scheduled_on?->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                        <input name="starts_at" type="time" value="{{ $session->starts_at ? substr($session->starts_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                        <input name="ends_at" type="time" value="{{ $session->ends_at ? substr($session->ends_at, 0, 5) : '' }}" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                    </div>
+                                                    <input name="title" value="{{ $session->title }}" placeholder="Название, например: Финалы" class="w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                                    <div class="flex flex-wrap gap-x-3 gap-y-1">
+                                                        @foreach($apparatusOptions as $apparatus)
+                                                            <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" @checked(in_array($apparatus, $session->apparatus ?? [], true)) class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
+                                                        @endforeach
+                                                    </div>
+                                                    <button class="text-xs text-sky-300 hover:text-sky-200">Сохранить во всех потоках</button>
+                                                </form>
+                                                <form method="POST" action="{{ route('secretary.tournament.categories.sessions.destroy', [$tournament, $scheduleCategory, $session]) }}" class="mt-2" onsubmit="return confirm('Удалить эту сессию из всех потоков группы? Выступления останутся без даты.');">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button class="text-xs text-rose-300 hover:text-rose-200">Удалить из всех потоков</button>
+                                                </form>
+                                            </details>
+                                        </div>
+                                    @endforeach
+                                </div>
+                                <form method="POST" action="{{ route('secretary.tournament.categories.sessions.store', [$tournament, $scheduleCategory]) }}" class="mt-3 rounded-lg border border-dashed border-slate-700 p-3">
+                                    @csrf
+                                    <div class="text-xs font-semibold text-slate-200">Добавить день / сессию во все потоки</div>
+                                    <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                        <input name="scheduled_on" type="date" value="{{ now()->format('Y-m-d') }}" required class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                        <input name="starts_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                        <input name="ends_at" type="time" class="rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                    </div>
+                                    <input name="title" placeholder="Название (необязательно)" class="mt-2 w-full rounded-md border-slate-700 bg-slate-950 text-sm text-slate-100">
+                                    <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                                        @foreach($apparatusOptions as $apparatus)
+                                            <label class="inline-flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" name="apparatus[]" value="{{ $apparatus }}" class="rounded border-slate-600 bg-slate-950 text-emerald-500">{{ $apparatus }}</label>
+                                        @endforeach
+                                    </div>
+                                    <button class="mt-3 text-xs font-semibold text-emerald-300 hover:text-emerald-200">+ Добавить во все потоки</button>
+                                </form>
+                            </details>
                             <div class="mt-3 flex flex-wrap items-center gap-4">
                                 <form method="POST" action="{{ route('secretary.tournament.groups.shuffle', [$tournament, $group]) }}" class="inline-block"
                                       onsubmit="return confirm('Перемешать порядок участниц в потоках (жеребьёвка)? Состав потоков сохранится, изменится порядок и номера внутри.');">
