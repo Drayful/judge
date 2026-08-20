@@ -664,77 +664,92 @@
                     Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}: {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
                 </span>
             </div>
-            <div class="overflow-x-auto rounded-xl border border-slate-800">
-                <table class="w-full min-w-[2260px] text-sm">
-                    <thead>
-                        <tr class="border-b border-slate-800 bg-slate-900/90 text-left text-xs uppercase tracking-wide text-slate-400">
-                            <th class="px-3 py-3">#</th>
-                            <th class="px-3 py-3">Гимнастка</th>
-                            <th class="px-3 py-3">Предмет</th>
+            <div class="space-y-3" data-stream-history-layout="responsive">
+                @forelse($orderedPerformances as $p)
+                    @php($isCurrentHistoryPerformance = $currentPerformance && $currentPerformance->id === $p->id)
+                    <article class="rounded-xl border p-3 sm:p-4 {{ $isCurrentHistoryPerformance ? 'border-orange-600/70 bg-orange-950/30 ring-1 ring-orange-500/20' : 'border-slate-800 bg-slate-950/45' }}">
+                        <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                            <div class="flex min-w-0 items-start gap-3">
+                                <span class="shrink-0 rounded-lg border {{ $isCurrentHistoryPerformance ? 'border-orange-700/70 bg-orange-950/50 text-orange-200' : 'border-slate-700 bg-slate-900 text-slate-400' }} px-2.5 py-1.5 font-mono text-xs font-semibold">
+                                    #{{ $loop->iteration }}
+                                </span>
+                                <div class="min-w-0">
+                                    <div class="break-words text-sm font-semibold text-slate-100">
+                                        {{ $p->athlete->last_name }} {{ $p->athlete->first_name }}
+                                    </div>
+                                    <div class="mt-0.5 text-xs text-slate-400">
+                                        Предмет: <span class="text-slate-200">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</span>
+                                        @if($isCurrentHistoryPerformance)<span class="ml-2 font-semibold text-orange-300">• сейчас выступает</span>@endif
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
+                                <div class="grid min-w-0 flex-1 grid-cols-5 gap-1.5 xl:min-w-[430px] xl:flex-none">
+                                    @foreach([
+                                        ['label' => 'D', 'value' => $p->d_score, 'class' => 'text-slate-100'],
+                                        ['label' => 'A', 'value' => $p->a_score, 'class' => 'text-slate-100'],
+                                        ['label' => 'E', 'value' => $p->e_score, 'class' => 'text-slate-100'],
+                                        ['label' => 'Сбавка', 'value' => $p->penalty, 'class' => 'text-rose-200'],
+                                        ['label' => 'Итого', 'value' => $p->total, 'class' => 'text-teal-200'],
+                                    ] as $historyTotal)
+                                        <div class="min-w-0 rounded-lg border border-slate-800 bg-slate-900/70 px-1.5 py-2 text-center">
+                                            <div class="truncate text-[9px] font-semibold uppercase tracking-wide text-slate-500">{{ $historyTotal['label'] }}</div>
+                                            <div class="mt-0.5 truncate font-mono text-xs font-semibold sm:text-sm {{ $historyTotal['class'] }}">
+                                                {{ \App\Support\SecretaryLiveUi::formatScore($historyTotal['value'] !== null ? (float) $historyTotal['value'] : null) }}
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+
+                                @if(! $p->isWithdrawn())
+                                    <button
+                                        type="button"
+                                        data-manual-score
+                                        data-action="{{ route('secretary.performance.setFinalScore', $p) }}"
+                                        data-athlete="{{ trim($p->athlete->last_name.' '.$p->athlete->first_name) }}"
+                                        data-apparatus="{{ $p->apparatus ?? $category->apparatus ?? '—' }}"
+                                        data-d-score="{{ $p->d_score }}"
+                                        data-a-score="{{ $p->a_score }}"
+                                        data-e-score="{{ $p->e_score }}"
+                                        data-penalty="{{ $p->penalty }}"
+                                        data-will-unpublish="{{ $p->approved_at !== null || $p->published_at !== null || $p->scoreboard_accepted_at !== null ? '1' : '0' }}"
+                                        class="w-full shrink-0 rounded-lg border border-orange-600/70 bg-orange-900/35 px-3 py-2 text-xs font-semibold text-orange-100 hover:bg-orange-800/50 sm:w-auto"
+                                    >
+                                        {{ $p->scores_overridden ? 'Изменить вручную' : 'Выставить вручную' }}
+                                    </button>
+                                @else
+                                    <span class="shrink-0 text-center text-xs text-slate-600 sm:px-3">Недоступно</span>
+                                @endif
+                            </div>
+                        </div>
+
+                        <div class="mt-3 grid grid-cols-4 gap-1.5 border-t border-slate-800/80 pt-3 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                             @foreach($historyJudgeColumns as $judgeColumn)
-                                <th class="px-2 py-3 text-right font-mono text-[11px]">{{ $judgeColumn }}</th>
-                            @endforeach
-                            <th class="px-3 py-3 text-right">D</th>
-                            <th class="px-3 py-3 text-right">A</th>
-                            <th class="px-3 py-3 text-right">E</th>
-                            <th class="px-3 py-3 text-right text-rose-200">Pen.</th>
-                            <th class="px-3 py-3 text-right text-teal-200">Итого</th>
-                            <th class="px-3 py-3 text-right">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800">
-                        @foreach($orderedPerformances as $p)
-                            <tr class="hover:bg-slate-900/50 {{ $currentPerformance && $currentPerformance->id === $p->id ? 'bg-orange-950/40' : '' }}">
-                                <td class="px-3 py-2.5 font-mono text-slate-500">{{ $loop->iteration }}</td>
-                                <td class="px-3 py-2.5 text-slate-100">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</td>
-                                <td class="px-3 py-2.5 text-slate-400">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</td>
-                                @foreach($historyJudgeColumns as $judgeColumn)
-                                    @php($judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null)
-                                    <td class="px-2 py-2.5 text-right font-mono">
-                                        @if($judgeHistory)
-                                            <button type="button"
-                                                data-stream-history-score
-                                                data-performance-id="{{ $p->id }}"
-                                                data-slot="{{ $judgeColumn }}"
-                                                class="rounded px-1.5 py-1 text-emerald-200 underline decoration-emerald-700/60 underline-offset-2 hover:bg-emerald-950/60 hover:text-white"
-                                                title="Нажмите, чтобы посмотреть и исправить оценку {{ $judgeColumn }}">
-                                                {{ $judgeHistory['score'] }}
-                                            </button>
-                                        @else
-                                            <span class="text-slate-600">—</span>
-                                        @endif
-                                    </td>
-                                @endforeach
-                                <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->d_score !== null ? (float) $p->d_score : null) }}</td>
-                                <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->a_score !== null ? (float) $p->a_score : null) }}</td>
-                                <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->e_score !== null ? (float) $p->e_score : null) }}</td>
-                                <td class="px-3 py-2.5 text-right font-mono text-rose-200/90">{{ \App\Support\SecretaryLiveUi::formatScore($p->penalty !== null ? (float) $p->penalty : null) }}</td>
-                                <td class="px-3 py-2.5 text-right font-mono text-teal-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->total !== null ? (float) $p->total : null) }}</td>
-                                <td class="px-3 py-2.5 text-right">
-                                    @if(! $p->isWithdrawn())
-                                        <button
-                                            type="button"
-                                            data-manual-score
-                                            data-action="{{ route('secretary.performance.setFinalScore', $p) }}"
-                                            data-athlete="{{ trim($p->athlete->last_name.' '.$p->athlete->first_name) }}"
-                                            data-apparatus="{{ $p->apparatus ?? $category->apparatus ?? '—' }}"
-                                            data-d-score="{{ $p->d_score }}"
-                                            data-a-score="{{ $p->a_score }}"
-                                            data-e-score="{{ $p->e_score }}"
-                                            data-penalty="{{ $p->penalty }}"
-                                            data-will-unpublish="{{ $p->approved_at !== null || $p->published_at !== null || $p->scoreboard_accepted_at !== null ? '1' : '0' }}"
-                                            class="whitespace-nowrap rounded-md border border-orange-600/70 bg-orange-900/35 px-2.5 py-1.5 text-xs font-semibold text-orange-100 hover:bg-orange-800/50"
-                                        >
-                                            {{ $p->scores_overridden ? 'Изменить вручную' : 'Выставить вручную' }}
+                                @php($judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null)
+                                <div class="min-w-0 rounded-lg border {{ $judgeHistory ? 'border-emerald-900/70 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/45' }} px-1 py-1.5 text-center">
+                                    <div class="truncate font-mono text-[9px] font-semibold uppercase tracking-wide {{ $judgeHistory ? 'text-emerald-400/80' : 'text-slate-500' }}">{{ $judgeColumn }}</div>
+                                    @if($judgeHistory)
+                                        <button type="button"
+                                            data-stream-history-score
+                                            data-performance-id="{{ $p->id }}"
+                                            data-slot="{{ $judgeColumn }}"
+                                            class="mt-0.5 block w-full truncate rounded px-0.5 py-0.5 font-mono text-xs font-semibold text-emerald-200 underline decoration-emerald-700/60 underline-offset-2 hover:bg-emerald-950/60 hover:text-white sm:text-sm"
+                                            title="Нажмите, чтобы посмотреть и исправить оценку {{ $judgeColumn }}">
+                                            {{ $judgeHistory['score'] }}
                                         </button>
                                     @else
-                                        <span class="text-xs text-slate-600">Недоступно</span>
+                                        <div class="mt-0.5 font-mono text-xs text-slate-600 sm:text-sm">—</div>
                                     @endif
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                                </div>
+                            @endforeach
+                        </div>
+                    </article>
+                @empty
+                    <div class="rounded-xl border border-dashed border-slate-800 px-4 py-8 text-center text-sm text-slate-500">
+                        В этом потоке пока нет гимнасток.
+                    </div>
+                @endforelse
             </div>
         </div>
 

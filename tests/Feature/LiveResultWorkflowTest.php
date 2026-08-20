@@ -1018,6 +1018,9 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('3.125')
             ->assertSee('8.375')
             ->assertSee('data-stream-history-score', false)
+            ->assertSee('data-stream-history-layout="responsive"', false)
+            ->assertSee('grid-cols-4', false)
+            ->assertDontSee('min-w-[2260px]', false)
             ->assertSee('data-performance-id="'.$first->id.'"', false)
             ->assertSee('data-performance-id="'.$second->id.'"', false);
         $this->assertMatchesRegularExpression(
