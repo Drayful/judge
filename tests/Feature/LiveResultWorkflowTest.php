@@ -1035,12 +1035,11 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertEqualsWithDelta(3.333, (float) JudgeScore::query()->where('performance_id', $first->id)->value('score'), 0.0005);
     }
 
-    public function test_secretary_can_select_a_scheduled_participant_for_live_without_reordering_queue(): void
+    public function test_secretary_can_return_to_previous_participant_without_reordering_queue(): void
     {
         $first = $this->performance();
         $category = $first->category;
         $first->update([
-            'status' => 'scheduled',
             'start_number' => 11,
             'order_index' => 1,
         ]);
@@ -1054,48 +1053,28 @@ class LiveResultWorkflowTest extends TestCase
         ]);
         $secretary = User::factory()->create(['role' => 'secretary']);
 
-        $this->actingAs($secretary)
-            ->post(route('secretary.start', $second))
-            ->assertRedirect()
-            ->assertSessionHas('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
+        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($category));
 
-        $this->assertSame('scheduled', $first->fresh()->status);
-        $this->assertSame('performing', $second->fresh()->status);
+        $this->actingAs($secretary)
+            ->post(route('secretary.start', $first), ['return_previous' => 1])
+            ->assertRedirect()
+            ->assertSessionHas('status', 'Возвращена предыдущая гимнастка. Порядок выступления не изменён.');
+
+        $this->assertSame('performing', $first->fresh()->status);
+        $this->assertNull($first->fresh()->ended_at);
+        $this->assertSame('scheduled', $second->fresh()->status);
+        $this->assertNull($second->fresh()->called_at);
+        $this->assertNull($second->fresh()->started_at);
         $this->assertSame(1, $first->fresh()->order_index);
         $this->assertSame(2, $second->fresh()->order_index);
         $this->assertSame(11, $first->fresh()->start_number);
         $this->assertSame(12, $second->fresh()->start_number);
     }
 
-    public function test_live_selection_replaces_an_untouched_current_performance_without_reordering(): void
+    public function test_return_to_previous_is_blocked_after_the_new_current_participant_has_activity(): void
     {
         $first = $this->performance();
-        $first->update(['started_at' => now(), 'order_index' => 1]);
-        $category = $first->category;
-        $secondAthlete = Athlete::create(['last_name' => 'Сидорова', 'first_name' => 'Мария']);
-        $second = Performance::create([
-            'category_id' => $category->id,
-            'athlete_id' => $secondAthlete->id,
-            'status' => 'scheduled',
-            'order_index' => 2,
-        ]);
-        $secretary = User::factory()->create(['role' => 'secretary']);
-
-        $this->actingAs($secretary)
-            ->post(route('secretary.start', $second))
-            ->assertRedirect();
-
-        $this->assertSame('scheduled', $first->fresh()->status);
-        $this->assertNull($first->fresh()->started_at);
-        $this->assertSame('performing', $second->fresh()->status);
-        $this->assertSame(1, $first->fresh()->order_index);
-        $this->assertSame(2, $second->fresh()->order_index);
-    }
-
-    public function test_live_selection_is_blocked_after_the_current_performance_has_activity(): void
-    {
-        $first = $this->performance();
-        $first->update(['timer_started_at' => now()]);
+        $first->update(['order_index' => 1]);
         $category = $first->category;
         $secondAthlete = Athlete::create(['last_name' => 'Орлова', 'first_name' => 'Ирина']);
         $second = Performance::create([
@@ -1106,28 +1085,43 @@ class LiveResultWorkflowTest extends TestCase
         ]);
         $secretary = User::factory()->create(['role' => 'secretary']);
 
+        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($category));
+        $second->update(['timer_started_at' => now()]);
+
         $this->actingAs($secretary)
-            ->post(route('secretary.start', $second))
+            ->post(route('secretary.start', $first), ['return_previous' => 1])
             ->assertRedirect()
             ->assertSessionHasErrors('start');
 
-        $this->assertSame('performing', $first->fresh()->status);
-        $this->assertSame('scheduled', $second->fresh()->status);
+        $this->assertSame('done', $first->fresh()->status);
+        $this->assertSame('performing', $second->fresh()->status);
         $this->assertSame(1, $first->fresh()->order_index);
         $this->assertSame(2, $second->fresh()->order_index);
     }
 
-    public function test_live_queue_renders_participant_selection_controls(): void
+    public function test_live_queue_renders_previous_participant_button_after_advancing(): void
     {
-        $performance = $this->performance();
-        $performance->update(['status' => 'scheduled']);
+        $first = $this->performance();
+        $first->update(['order_index' => 1]);
+        $category = $first->category;
+        $secondAthlete = Athlete::create(['last_name' => 'Сидорова', 'first_name' => 'Мария']);
+        Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'scheduled',
+            'order_index' => 2,
+        ]);
         $secretary = User::factory()->create(['role' => 'secretary']);
 
+        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($category));
+
         $this->actingAs($secretary)
-            ->get(route('secretary.queue', $performance->category))
+            ->get(route('secretary.queue', $category))
             ->assertOk()
-            ->assertSee('В Live')
-            ->assertSee(route('secretary.start', $performance), false);
+            ->assertSee('Предыдущая гимнастка')
+            ->assertSee('name="return_previous" value="1"', false)
+            ->assertSee(route('secretary.start', $first), false)
+            ->assertDontSee('В Live');
     }
 
     public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void

@@ -2543,22 +2543,14 @@ class SecretaryController extends Controller
         return back()->with('status', $message);
     }
 
-    /**
-     * Запустить выбранное выступление. Если другое выступление было открыто
-     * ошибочно, его можно заменить до первого действия судьи/хронометриста.
-     * Позиции и стартовые номера при этом не меняются.
-     */
     public function start(Request $request, Performance $performance): RedirectResponse
     {
-        $error = null;
-        $categoryId = (int) $performance->category_id;
-        $sessionId = $performance->stream_session_id === null ? null : (int) $performance->stream_session_id;
-
-        if ($request->filled('stream_session_id') && $request->integer('stream_session_id') !== $sessionId) {
-            abort(404);
+        if ($request->boolean('return_previous')) {
+            return $this->returnToPreviousPerformance($request, $performance);
         }
 
-        DB::transaction(function () use ($performance, $categoryId, $sessionId, &$error) {
+        $error = null;
+        DB::transaction(function () use ($performance, &$error) {
             $locked = Performance::query()->lockForUpdate()->findOrFail($performance->id);
             if (! in_array($locked->status, ['scheduled', 'on_deck'], true)) {
                 $error = 'Запустить можно только ожидающее или вызванное выступление.';
@@ -2567,42 +2559,19 @@ class SecretaryController extends Controller
             }
 
             $alreadyPerforming = Performance::query()
-                ->where('category_id', $categoryId)
-                ->when(
-                    $sessionId !== null,
-                    fn ($query) => $query->where('stream_session_id', $sessionId),
-                    fn ($query) => $query->whereNull('stream_session_id'),
-                )
+                ->where('category_id', $locked->category_id)
+                ->where('stream_session_id', $locked->stream_session_id)
                 ->where('status', 'performing')
                 ->whereKeyNot($locked->id)
                 ->lockForUpdate()
-                ->first();
-            if ($alreadyPerforming !== null) {
-                $hasJudgingActivity = $alreadyPerforming->timer_started_at !== null
-                    || $alreadyPerforming->timer_ended_at !== null
-                    || $alreadyPerforming->actual_duration_seconds !== null
-                    || $alreadyPerforming->finalized_at !== null
-                    || $alreadyPerforming->approved_at !== null
-                    || $alreadyPerforming->published_at !== null
-                    || $alreadyPerforming->scores_overridden
-                    || $alreadyPerforming->judgeScores()->exists()
-                    || $alreadyPerforming->judgeScoreActions()->exists();
+                ->exists();
+            if ($alreadyPerforming) {
+                $error = 'В этой сессии уже идёт другое выступление.';
 
-                if ($hasJudgingActivity) {
-                    $error = 'Нельзя переключить участницу: по текущему выступлению уже запущен таймер или началось судейство. Сначала завершите его.';
-
-                    return;
-                }
-
-                $alreadyPerforming->status = 'scheduled';
-                $alreadyPerforming->called_at = null;
-                $alreadyPerforming->started_at = null;
-                $alreadyPerforming->ended_at = null;
-                $alreadyPerforming->save();
+                return;
             }
 
             $locked->status = 'performing';
-            $locked->called_at = now();
             $locked->started_at = now();
             $locked->timer_started_at = null;
             $locked->timer_ended_at = null;
@@ -2617,13 +2586,105 @@ class SecretaryController extends Controller
             return back()->withErrors(['start' => $error]);
         }
 
+        return back();
+    }
+
+    private function returnToPreviousPerformance(Request $request, Performance $performance): RedirectResponse
+    {
+        $categoryId = (int) $performance->category_id;
+        $sessionId = $performance->stream_session_id === null ? null : (int) $performance->stream_session_id;
+        if ($request->filled('stream_session_id') && $request->integer('stream_session_id') !== $sessionId) {
+            abort(404);
+        }
+
+        $error = null;
+        DB::transaction(function () use ($performance, $categoryId, $sessionId, &$error): void {
+            $previous = Performance::query()->lockForUpdate()->findOrFail($performance->id);
+            if ($previous->status !== 'done') {
+                $error = 'Вернуть можно только последнее завершённое выступление.';
+
+                return;
+            }
+
+            $current = Performance::query()
+                ->where('category_id', $categoryId)
+                ->when(
+                    $sessionId !== null,
+                    fn ($query) => $query->where('stream_session_id', $sessionId),
+                    fn ($query) => $query->whereNull('stream_session_id'),
+                )
+                ->where('status', 'performing')
+                ->lockForUpdate()
+                ->first();
+
+            if ($current === null) {
+                $error = 'Нет текущей гимнастки, переход к которой можно отменить.';
+
+                return;
+            }
+
+            $latestCompleted = Performance::query()
+                ->where('category_id', $categoryId)
+                ->when(
+                    $sessionId !== null,
+                    fn ($query) => $query->where('stream_session_id', $sessionId),
+                    fn ($query) => $query->whereNull('stream_session_id'),
+                )
+                ->where('status', 'done')
+                ->orderByDesc('ended_at')
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($latestCompleted === null || $latestCompleted->id !== $previous->id) {
+                $error = 'Вернуться можно только к предыдущей гимнастке.';
+
+                return;
+            }
+
+            $currentHasActivity = $current->timer_started_at !== null
+                || $current->timer_ended_at !== null
+                || $current->actual_duration_seconds !== null
+                || $current->finalized_at !== null
+                || $current->approved_at !== null
+                || $current->published_at !== null
+                || $current->scores_overridden
+                || $current->judgeScores()->exists()
+                || $current->judgeScoreActions()->exists();
+
+            if ($currentHasActivity) {
+                $error = 'Нельзя вернуться назад: по текущей гимнастке уже запущен таймер или началось судейство.';
+
+                return;
+            }
+
+            $current->status = 'scheduled';
+            $current->called_at = null;
+            $current->started_at = null;
+            $current->timer_started_at = null;
+            $current->timer_ended_at = null;
+            $current->timer_revision_requested_at = null;
+            $current->ended_at = null;
+            $current->actual_duration_seconds = null;
+            $current->time_penalty = 0;
+            $current->save();
+
+            $previous->status = 'performing';
+            $previous->ended_at = null;
+            $previous->save();
+        });
+
+        if ($error !== null) {
+            return back()->withErrors(['start' => $error]);
+        }
+
         $performance->loadMissing('category.tournament');
         $performance->category?->tournament?->update([
             'active_category_id' => $categoryId,
             'active_stream_session_id' => $sessionId,
         ]);
 
-        return back()->with('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
+        return back()->with('status', 'Возвращена предыдущая гимнастка. Порядок выступления не изменён.');
     }
 
     public function finish(Performance $performance): RedirectResponse

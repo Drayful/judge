@@ -195,6 +195,16 @@
                             {{ $currentPerformance ? 'Следующая гимнастка' : 'Начать поток' }}
                         </button>
                     </form>
+                    @if($currentPerformance?->status === 'performing' && $lastCompletedPerformance)
+                        <form method="POST" action="{{ route('secretary.start', $lastCompletedPerformance) }}">
+                            @csrf
+                            <input type="hidden" name="return_previous" value="1">
+                            @if($streamSession)<input type="hidden" name="stream_session_id" value="{{ $streamSession->id }}">@endif
+                            <button type="submit" class="rounded-xl border border-sky-700/70 bg-sky-950/40 px-4 py-2.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60" title="Отменить переход и вернуть предыдущую участницу в Live">
+                                ← Предыдущая гимнастка
+                            </button>
+                        </form>
+                    @endif
                     @if($currentPerformance)
                         <form method="POST" action="{{ route('secretary.finish', $currentPerformance) }}" onsubmit="return confirm('Завершить выступление без следующей?');">
                             @csrf
@@ -219,29 +229,17 @@
             {{-- Порядок выступления --}}
             <div class="live-panel p-5">
                 <h2 class="text-base font-semibold text-white">Порядок выступления потока</h2>
-                <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Нажмите на ожидающую участницу, чтобы сделать её текущей в Live — порядок и стартовые номера не изменятся.</p>
+                <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Текущая — подсвечена.</p>
                 <ul class="mt-4 max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
                     <?php $queuePosition = 0; foreach ($orderedPerformances as $p): $queuePosition++; ?>
                         <?php
                             $isCurrent = $currentPerformance && $currentPerformance->id === $p->id;
                             $isWithdrawn = $p->isWithdrawn();
-                            $isSelectableForLive = ! $isWithdrawn && in_array($p->status, ['scheduled', 'on_deck'], true);
                             $tag = $p->apparatus ?? $category->apparatus ?? '—';
                         ?>
                         <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-orange-900/60 ring-2 ring-orange-400/80 shadow-md shadow-orange-950/30' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
                             <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $queuePosition }}</span>
-                            @if($isSelectableForLive)
-                                <form method="POST" action="{{ route('secretary.start', $p) }}" class="min-w-0 flex-1">
-                                    @csrf
-                                    @if($streamSession)<input type="hidden" name="stream_session_id" value="{{ $streamSession->id }}">@endif
-                                    <button type="submit" class="group flex w-full min-w-0 items-center gap-2 text-left" title="Выбрать эту участницу для Live без изменения очереди">
-                                        <span class="min-w-0 flex-1 truncate text-slate-100 group-hover:text-emerald-200 group-focus:text-emerald-200">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
-                                        <span class="shrink-0 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 opacity-70 transition group-hover:opacity-100 group-focus:opacity-100">В Live</span>
-                                    </button>
-                                </form>
-                            @else
-                                <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
-                            @endif
+                            <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
                             <?php if ($isWithdrawn): ?>
                                 <span class="shrink-0 rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">снята</span>
                                 <form method="POST" action="{{ route('secretary.performance.restore', $p) }}" class="shrink-0">
