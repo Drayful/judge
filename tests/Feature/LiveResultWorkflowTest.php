@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\JudgeScore;
+use App\Models\JudgeScoreAction;
 use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
@@ -960,9 +961,21 @@ class LiveResultWorkflowTest extends TestCase
         ]);
         $penaltyRevision = $this->actingAs($secretary)->getJson($pingUrl)->json('rev');
 
+        JudgeScoreAction::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $dbJudge->id,
+            'slot' => 'DB1',
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'action' => 'add',
+            'draft_score' => 7.6,
+        ]);
+        $liveActionRevision = $this->actingAs($secretary)->getJson($pingUrl)->json('rev');
+
         $this->assertNotSame($initialRevision, $scoreRevision);
         $this->assertNotSame($scoreRevision, $averageRevision);
         $this->assertNotSame($averageRevision, $penaltyRevision);
+        $this->assertNotSame($penaltyRevision, $liveActionRevision);
     }
 
     public function test_stream_history_lists_every_judge_score_and_keeps_controls_inside_async_page(): void

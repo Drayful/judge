@@ -149,7 +149,7 @@
                             </div>
                         @endif
                     </div>
-                    <div class="mt-4 rounded-xl border {{ $isGroupProgram ? 'border-amber-700/60 bg-amber-950/15' : 'border-slate-700/80 bg-slate-950/60' }} p-4">
+                    <div class="mt-4 rounded-xl border border-orange-500/80 bg-orange-950/45 p-4 ring-1 ring-orange-500/50 shadow-lg shadow-orange-950/30">
                         <div class="flex items-center justify-between gap-2">
                             <div class="text-xs uppercase tracking-wider text-slate-500">{{ $isGroupProgram ? 'Текущая команда' : 'Текущая гимнастка' }}</div>
                             @if($isGroupProgram)
@@ -227,7 +227,7 @@
                             $isWithdrawn = $p->isWithdrawn();
                             $tag = $p->apparatus ?? $category->apparatus ?? '—';
                         ?>
-                        <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-emerald-950/50 ring-1 ring-emerald-700/40' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
+                        <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-orange-900/60 ring-2 ring-orange-400/80 shadow-md shadow-orange-950/30' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
                             <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $queuePosition }}</span>
                             <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
                             <?php if ($isWithdrawn): ?>
@@ -239,7 +239,7 @@
                             <?php else: ?>
                                 <span class="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-300">{{ $tag }}</span>
                                 <?php if ($isCurrent): ?>
-                                    <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]"></span>
+                                    <span class="h-2 w-2 shrink-0 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.8)]"></span>
                                 <?php endif; ?>
                             <?php endif; ?>
                         </li>
@@ -673,7 +673,7 @@
                     </thead>
                     <tbody class="divide-y divide-slate-800">
                         @foreach($orderedPerformances as $p)
-                            <tr class="hover:bg-slate-900/50 {{ $currentPerformance && $currentPerformance->id === $p->id ? 'bg-emerald-950/20' : '' }}">
+                            <tr class="hover:bg-slate-900/50 {{ $currentPerformance && $currentPerformance->id === $p->id ? 'bg-orange-950/40' : '' }}">
                                 <td class="px-3 py-2.5 font-mono text-slate-500">{{ $loop->iteration }}</td>
                                 <td class="px-3 py-2.5 text-slate-100">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</td>
                                 <td class="px-3 py-2.5 text-slate-400">{{ $p->apparatus ?? $category->apparatus ?? '—' }}</td>
@@ -1288,20 +1288,24 @@
     let lastRev = @json($queueRev);
     let requestInFlight = false;
     let failedRefreshes = 0;
-    const intervalMs = 1500;
+    const intervalMs = 1000;
+    const requestTimeoutMs = 5000;
     const checkForUpdates = async function () {
         if (pageRoot && ! pageRoot.isConnected) {
-            clearInterval(pingInterval);
+            stopPolling();
             return;
         }
         if (requestInFlight) return;
 
         requestInFlight = true;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
         try {
             const r = await fetch(pingUrl, {
                 headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin',
                 cache: 'no-store',
+                signal: controller.signal,
             });
             if (!r.ok) return;
             const j = await r.json();
@@ -1328,10 +1332,22 @@
         } catch (e) {
             // A short network interruption must not stop the next polling attempt.
         } finally {
+            clearTimeout(timeout);
             requestInFlight = false;
         }
     };
     const pingInterval = setInterval(checkForUpdates, intervalMs);
+    const checkWhenVisible = () => {
+        if (!document.hidden) checkForUpdates();
+    };
+    const stopPolling = () => {
+        clearInterval(pingInterval);
+        document.removeEventListener('visibilitychange', checkWhenVisible);
+        window.removeEventListener('focus', checkWhenVisible);
+    };
+    document.addEventListener('visibilitychange', checkWhenVisible);
+    window.addEventListener('focus', checkWhenVisible);
+    window.addEventListener('judge:before-page-update', stopPolling, { once: true });
     checkForUpdates();
 })();
 </script>

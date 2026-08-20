@@ -116,6 +116,8 @@ const asyncPage = {
     async refresh(url = window.location.href, options = {}) {
         if (this.busy && !options.force) return false;
         this.busy = true;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8000);
         try {
             const response = await fetch(url, {
                 headers: {
@@ -125,13 +127,18 @@ const asyncPage = {
                 },
                 credentials: 'same-origin',
                 cache: 'no-store',
+                signal: controller.signal,
             });
             if (!response.ok) throw new Error(`Ошибка ${response.status}`);
             return await this.replaceFromHtml(await response.text(), response.url || url, options);
         } catch (error) {
-            this.showStatus(error?.message || 'Не удалось обновить страницу', 'error');
+            this.showStatus(
+                error?.name === 'AbortError' ? 'Обновление заняло слишком много времени' : (error?.message || 'Не удалось обновить страницу'),
+                'error',
+            );
             return false;
         } finally {
+            clearTimeout(timeout);
             this.busy = false;
         }
     },
