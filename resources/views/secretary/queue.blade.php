@@ -655,7 +655,7 @@
                 </span>
             </div>
             <div class="overflow-x-auto rounded-xl border border-slate-800">
-                <table class="w-full min-w-[2100px] text-sm">
+                <table class="w-full min-w-[2260px] text-sm">
                     <thead>
                         <tr class="border-b border-slate-800 bg-slate-900/90 text-left text-xs uppercase tracking-wide text-slate-400">
                             <th class="px-3 py-3">#</th>
@@ -669,6 +669,7 @@
                             <th class="px-3 py-3 text-right">E</th>
                             <th class="px-3 py-3 text-right text-rose-200">Pen.</th>
                             <th class="px-3 py-3 text-right text-teal-200">Итого</th>
+                            <th class="px-3 py-3 text-right">Действия</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-800">
@@ -699,6 +700,27 @@
                                 <td class="px-3 py-2.5 text-right font-mono text-slate-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->e_score !== null ? (float) $p->e_score : null) }}</td>
                                 <td class="px-3 py-2.5 text-right font-mono text-rose-200/90">{{ \App\Support\SecretaryLiveUi::formatScore($p->penalty !== null ? (float) $p->penalty : null) }}</td>
                                 <td class="px-3 py-2.5 text-right font-mono text-teal-200">{{ \App\Support\SecretaryLiveUi::formatScore($p->total !== null ? (float) $p->total : null) }}</td>
+                                <td class="px-3 py-2.5 text-right">
+                                    @if(! $p->isWithdrawn())
+                                        <button
+                                            type="button"
+                                            data-manual-score
+                                            data-action="{{ route('secretary.performance.setFinalScore', $p) }}"
+                                            data-athlete="{{ trim($p->athlete->last_name.' '.$p->athlete->first_name) }}"
+                                            data-apparatus="{{ $p->apparatus ?? $category->apparatus ?? '—' }}"
+                                            data-d-score="{{ $p->d_score }}"
+                                            data-a-score="{{ $p->a_score }}"
+                                            data-e-score="{{ $p->e_score }}"
+                                            data-penalty="{{ $p->penalty }}"
+                                            data-will-unpublish="{{ $p->approved_at !== null || $p->published_at !== null || $p->scoreboard_accepted_at !== null ? '1' : '0' }}"
+                                            class="whitespace-nowrap rounded-md border border-orange-600/70 bg-orange-900/35 px-2.5 py-1.5 text-xs font-semibold text-orange-100 hover:bg-orange-800/50"
+                                        >
+                                            {{ $p->scores_overridden ? 'Изменить вручную' : 'Выставить вручную' }}
+                                        </button>
+                                    @else
+                                        <span class="text-xs text-slate-600">Недоступно</span>
+                                    @endif
+                                </td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -933,6 +955,61 @@
             </div>
         </details>
     </div>
+{{-- ===== Модалка: ручная оценка выбранной гимнастки ===== --}}
+<div id="manual-score-modal" data-pause-live-refresh="1" class="hidden fixed inset-0 z-[60]">
+    <div class="absolute inset-0 bg-black/70" data-manual-score-close></div>
+    <div class="relative mx-auto mt-12 w-[min(94vw,720px)] max-h-[82vh] overflow-y-auto rounded-2xl border border-orange-600/70 bg-slate-950 p-5 shadow-2xl shadow-orange-950/40">
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-orange-300">Ручная финальная оценка</div>
+                <h3 id="manual-score-athlete" class="mt-1 text-lg font-semibold text-white">Гимнастка</h3>
+                <p id="manual-score-apparatus" class="mt-0.5 text-sm text-slate-400"></p>
+            </div>
+            <button type="button" data-manual-score-close class="rounded-lg border border-slate-700 px-2.5 py-1 text-sm text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+
+        <div id="manual-score-unpublish-warning" class="mt-4 hidden rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-100">
+            Результат уже был утверждён или опубликован. Сохранение ручной оценки снимет утверждение и публикацию — результат потребуется проверить повторно.
+        </div>
+
+        <form id="manual-score-form" method="POST" class="mt-5" onsubmit="return confirm('Сохранить ручной итог для выбранной гимнастки?');">
+            @csrf
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                    <label for="manual-score-d" class="block text-[10px] uppercase tracking-wider text-slate-400">D</label>
+                    <input id="manual-score-d" name="d_score" type="number" step="0.001" min="0" max="99.999" required
+                           class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-white focus:border-orange-500 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label for="manual-score-a" class="block text-[10px] uppercase tracking-wider text-slate-400">A</label>
+                    <input id="manual-score-a" name="a_score" type="number" step="0.001" min="0" max="99.999" required
+                           class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-white focus:border-orange-500 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label for="manual-score-e" class="block text-[10px] uppercase tracking-wider text-slate-400">E</label>
+                    <input id="manual-score-e" name="e_score" type="number" step="0.001" min="0" max="99.999" required
+                           class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-white focus:border-orange-500 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label for="manual-score-penalty" class="block text-[10px] uppercase tracking-wider text-rose-300">Штраф</label>
+                    <input id="manual-score-penalty" name="penalty" type="number" step="0.001" min="0" max="99.999"
+                           class="mt-1 w-full rounded-lg border border-rose-900/70 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-rose-100 focus:border-orange-500 focus:ring-orange-500">
+                </div>
+            </div>
+
+            <div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
+                <div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">Предварительный итог</div>
+                    <div id="manual-score-total" class="font-mono text-3xl font-bold tabular-nums text-orange-200">—</div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" data-manual-score-close class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button>
+                    <button type="submit" class="rounded-lg bg-orange-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-orange-950/40 hover:bg-orange-500">Сохранить итог</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
 {{-- ===== Модалка: история выставления оценки ===== --}}
 <div id="score-history-modal" class="hidden fixed inset-0 z-50">
     <div class="absolute inset-0 bg-black/60" data-history-close></div>
@@ -946,6 +1023,61 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(() => {
+    const modal = document.getElementById('manual-score-modal');
+    const form = document.getElementById('manual-score-form');
+    if (!modal || !form) return;
+
+    const athlete = document.getElementById('manual-score-athlete');
+    const apparatus = document.getElementById('manual-score-apparatus');
+    const warning = document.getElementById('manual-score-unpublish-warning');
+    const total = document.getElementById('manual-score-total');
+    const fields = {
+        d: document.getElementById('manual-score-d'),
+        a: document.getElementById('manual-score-a'),
+        e: document.getElementById('manual-score-e'),
+        penalty: document.getElementById('manual-score-penalty'),
+    };
+
+    const formatInput = (value, fallback = '') => {
+        if (value === undefined || value === null || value === '') return fallback;
+        const number = Number(value);
+        return Number.isFinite(number) ? number.toFixed(3) : fallback;
+    };
+    const updateTotal = () => {
+        const d = Number(fields.d.value);
+        const a = Number(fields.a.value);
+        const e = Number(fields.e.value);
+        const penalty = fields.penalty.value === '' ? 0 : Number(fields.penalty.value);
+        total.textContent = [d, a, e, penalty].every(Number.isFinite)
+            ? (d + a + e - penalty).toFixed(3)
+            : '—';
+    };
+    const close = () => modal.classList.add('hidden');
+
+    document.querySelectorAll('[data-manual-score]').forEach((button) => {
+        button.addEventListener('click', () => {
+            form.action = button.dataset.action || '';
+            athlete.textContent = button.dataset.athlete || 'Гимнастка';
+            apparatus.textContent = 'Предмет: ' + (button.dataset.apparatus || '—');
+            fields.d.value = formatInput(button.dataset.dScore);
+            fields.a.value = formatInput(button.dataset.aScore);
+            fields.e.value = formatInput(button.dataset.eScore);
+            fields.penalty.value = formatInput(button.dataset.penalty, '0.000');
+            warning.classList.toggle('hidden', button.dataset.willUnpublish !== '1');
+            updateTotal();
+            modal.classList.remove('hidden');
+            fields.d.focus();
+        });
+    });
+    Object.values(fields).forEach((field) => field.addEventListener('input', updateTotal));
+    modal.querySelectorAll('[data-manual-score-close]').forEach((element) => element.addEventListener('click', close));
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !modal.classList.contains('hidden')) close();
+    });
+})();
+</script>
 <script>
 (() => {
     const histories = @json($scoreHistoryByPerformance ?? []);
@@ -1295,6 +1427,7 @@
             stopPolling();
             return;
         }
+        if (document.querySelector('[data-pause-live-refresh="1"]:not(.hidden)')) return;
         if (requestInFlight) return;
 
         requestInFlight = true;

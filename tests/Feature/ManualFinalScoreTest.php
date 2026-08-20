@@ -147,6 +147,51 @@ class ManualFinalScoreTest extends TestCase
         $this->assertNotNull($perf->fresh()->approved_at);
     }
 
+    public function test_secretary_can_score_a_completed_performance_without_switching_the_active_athlete(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $completed = $this->performance();
+        $category = $completed->category;
+        $tournament = $category->tournament;
+        $completed->update(['status' => 'done']);
+        $currentAthlete = Athlete::create(['first_name' => 'Текущая', 'last_name' => 'Гимнастка']);
+        $current = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $currentAthlete->id,
+            'start_number' => 2,
+            'order_index' => 2,
+            'status' => 'performing',
+            'apparatus' => 'Обруч',
+        ]);
+        $tournament->update(['active_category_id' => $category->id]);
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $category))
+            ->assertOk()
+            ->assertSee('data-manual-score', false)
+            ->assertSee(route('secretary.performance.setFinalScore', $completed), false);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.setFinalScore', $completed), [
+                'd_score' => 5.5,
+                'a_score' => 8.2,
+                'e_score' => 7.1,
+                'penalty' => 0.3,
+            ])
+            ->assertRedirect();
+
+        $this->assertSame('done', $completed->fresh()->status);
+        $this->assertTrue($completed->fresh()->scores_overridden);
+        $this->assertEqualsWithDelta(20.5, (float) $completed->fresh()->total, 0.0001);
+        $this->assertSame('performing', $current->fresh()->status);
+        $this->assertSame($category->id, $tournament->fresh()->active_category_id);
+        $this->actingAs($judge)
+            ->getJson(route('judge.tournament.tablet.ping', $tournament))
+            ->assertOk()
+            ->assertJsonPath('performance_id', $current->id);
+    }
+
     public function test_clear_override_recomputes_from_judges(): void
     {
         $secretary = User::factory()->create(['role' => 'secretary']);
