@@ -1055,7 +1055,7 @@ class LiveResultWorkflowTest extends TestCase
         $secretary = User::factory()->create(['role' => 'secretary']);
 
         $this->actingAs($secretary)
-            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->post(route('secretary.start', $second))
             ->assertRedirect()
             ->assertSessionHas('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
 
@@ -1082,7 +1082,7 @@ class LiveResultWorkflowTest extends TestCase
         $secretary = User::factory()->create(['role' => 'secretary']);
 
         $this->actingAs($secretary)
-            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->post(route('secretary.start', $second))
             ->assertRedirect();
 
         $this->assertSame('scheduled', $first->fresh()->status);
@@ -1107,9 +1107,9 @@ class LiveResultWorkflowTest extends TestCase
         $secretary = User::factory()->create(['role' => 'secretary']);
 
         $this->actingAs($secretary)
-            ->post(route('secretary.performance.selectLive', [$category, $second]))
+            ->post(route('secretary.start', $second))
             ->assertRedirect()
-            ->assertSessionHasErrors('select_live');
+            ->assertSessionHasErrors('start');
 
         $this->assertSame('performing', $first->fresh()->status);
         $this->assertSame('scheduled', $second->fresh()->status);
@@ -1127,7 +1127,7 @@ class LiveResultWorkflowTest extends TestCase
             ->get(route('secretary.queue', $performance->category))
             ->assertOk()
             ->assertSee('В Live')
-            ->assertSee(route('secretary.performance.selectLive', [$performance->category, $performance]), false);
+            ->assertSee(route('secretary.start', $performance), false);
     }
 
     public function test_superior_jury_is_not_treated_as_a_tablet_judge(): void

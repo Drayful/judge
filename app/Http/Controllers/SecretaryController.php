@@ -2479,98 +2479,6 @@ class SecretaryController extends Controller
         return back();
     }
 
-    /**
-     * Выбрать ожидающее выступление прямо из списка Live, не меняя его место
-     * в очереди. Ошибочно открытое выступление можно заменить, пока судьи и
-     * хронометрист ещё не начали работу.
-     */
-    public function selectLivePerformance(Request $request, Category $category, Performance $performance): RedirectResponse
-    {
-        $data = $request->validate([
-            'stream_session_id' => ['nullable', 'integer'],
-        ]);
-        $sessionId = isset($data['stream_session_id']) ? (int) $data['stream_session_id'] : null;
-        $error = null;
-
-        DB::transaction(function () use ($category, $performance, $sessionId, &$error): void {
-            $target = Performance::query()->lockForUpdate()->findOrFail($performance->id);
-            abort_unless((int) $target->category_id === (int) $category->id, 404);
-            abort_unless(
-                ($target->stream_session_id === null ? null : (int) $target->stream_session_id) === $sessionId,
-                404,
-            );
-
-            if ($target->status === 'performing') {
-                return;
-            }
-
-            if (! in_array($target->status, ['scheduled', 'on_deck'], true) || $target->isWithdrawn()) {
-                $error = 'Выбрать для Live можно только ожидающее выступление.';
-
-                return;
-            }
-
-            $current = Performance::query()
-                ->where('category_id', $category->id)
-                ->when(
-                    $sessionId !== null,
-                    fn ($query) => $query->where('stream_session_id', $sessionId),
-                    fn ($query) => $query->whereNull('stream_session_id'),
-                )
-                ->where('status', 'performing')
-                ->whereKeyNot($target->id)
-                ->lockForUpdate()
-                ->first();
-
-            if ($current !== null) {
-                $hasJudgingActivity = $current->timer_started_at !== null
-                    || $current->timer_ended_at !== null
-                    || $current->actual_duration_seconds !== null
-                    || $current->finalized_at !== null
-                    || $current->approved_at !== null
-                    || $current->published_at !== null
-                    || $current->scores_overridden
-                    || $current->judgeScores()->exists()
-                    || $current->judgeScoreActions()->exists();
-
-                if ($hasJudgingActivity) {
-                    $error = 'Нельзя переключить участницу: по текущему выступлению уже запущен таймер или началось судейство. Сначала завершите его.';
-
-                    return;
-                }
-
-                $current->status = 'scheduled';
-                $current->called_at = null;
-                $current->started_at = null;
-                $current->ended_at = null;
-                $current->save();
-            }
-
-            $target->status = 'performing';
-            $target->called_at = now();
-            $target->started_at = now();
-            $target->timer_started_at = null;
-            $target->timer_ended_at = null;
-            $target->timer_revision_requested_at = null;
-            $target->ended_at = null;
-            $target->actual_duration_seconds = null;
-            $target->time_penalty = 0;
-            $target->save();
-        });
-
-        if ($error !== null) {
-            return back()->withErrors(['select_live' => $error]);
-        }
-
-        $category->loadMissing('tournament');
-        $category->tournament?->update([
-            'active_category_id' => $category->id,
-            'active_stream_session_id' => $sessionId,
-        ]);
-
-        return back()->with('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
-    }
-
     public function setAutoAdvance(Request $request, Category $category): RedirectResponse
     {
         $category->auto_advance = true;
@@ -2635,10 +2543,22 @@ class SecretaryController extends Controller
         return back()->with('status', $message);
     }
 
-    public function start(Performance $performance): RedirectResponse
+    /**
+     * Запустить выбранное выступление. Если другое выступление было открыто
+     * ошибочно, его можно заменить до первого действия судьи/хронометриста.
+     * Позиции и стартовые номера при этом не меняются.
+     */
+    public function start(Request $request, Performance $performance): RedirectResponse
     {
         $error = null;
-        DB::transaction(function () use ($performance, &$error) {
+        $categoryId = (int) $performance->category_id;
+        $sessionId = $performance->stream_session_id === null ? null : (int) $performance->stream_session_id;
+
+        if ($request->filled('stream_session_id') && $request->integer('stream_session_id') !== $sessionId) {
+            abort(404);
+        }
+
+        DB::transaction(function () use ($performance, $categoryId, $sessionId, &$error) {
             $locked = Performance::query()->lockForUpdate()->findOrFail($performance->id);
             if (! in_array($locked->status, ['scheduled', 'on_deck'], true)) {
                 $error = 'Запустить можно только ожидающее или вызванное выступление.';
@@ -2647,19 +2567,42 @@ class SecretaryController extends Controller
             }
 
             $alreadyPerforming = Performance::query()
-                ->where('category_id', $locked->category_id)
-                ->where('stream_session_id', $locked->stream_session_id)
+                ->where('category_id', $categoryId)
+                ->when(
+                    $sessionId !== null,
+                    fn ($query) => $query->where('stream_session_id', $sessionId),
+                    fn ($query) => $query->whereNull('stream_session_id'),
+                )
                 ->where('status', 'performing')
                 ->whereKeyNot($locked->id)
                 ->lockForUpdate()
-                ->exists();
-            if ($alreadyPerforming) {
-                $error = 'В этой сессии уже идёт другое выступление.';
+                ->first();
+            if ($alreadyPerforming !== null) {
+                $hasJudgingActivity = $alreadyPerforming->timer_started_at !== null
+                    || $alreadyPerforming->timer_ended_at !== null
+                    || $alreadyPerforming->actual_duration_seconds !== null
+                    || $alreadyPerforming->finalized_at !== null
+                    || $alreadyPerforming->approved_at !== null
+                    || $alreadyPerforming->published_at !== null
+                    || $alreadyPerforming->scores_overridden
+                    || $alreadyPerforming->judgeScores()->exists()
+                    || $alreadyPerforming->judgeScoreActions()->exists();
 
-                return;
+                if ($hasJudgingActivity) {
+                    $error = 'Нельзя переключить участницу: по текущему выступлению уже запущен таймер или началось судейство. Сначала завершите его.';
+
+                    return;
+                }
+
+                $alreadyPerforming->status = 'scheduled';
+                $alreadyPerforming->called_at = null;
+                $alreadyPerforming->started_at = null;
+                $alreadyPerforming->ended_at = null;
+                $alreadyPerforming->save();
             }
 
             $locked->status = 'performing';
+            $locked->called_at = now();
             $locked->started_at = now();
             $locked->timer_started_at = null;
             $locked->timer_ended_at = null;
@@ -2674,7 +2617,13 @@ class SecretaryController extends Controller
             return back()->withErrors(['start' => $error]);
         }
 
-        return back();
+        $performance->loadMissing('category.tournament');
+        $performance->category?->tournament?->update([
+            'active_category_id' => $categoryId,
+            'active_stream_session_id' => $sessionId,
+        ]);
+
+        return back()->with('status', 'Участница выбрана для Live. Порядок выступления не изменён.');
     }
 
     public function finish(Performance $performance): RedirectResponse

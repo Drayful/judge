@@ -173,9 +173,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/categories/{category}/call-next', [SecretaryController::class, 'callNext'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.callNext');
-    Route::post('/secretary/categories/{category}/performances/{performance}/select-live', [SecretaryController::class, 'selectLivePerformance'])
-        ->middleware('role:secretary,chief_judge,admin')
-        ->name('secretary.performance.selectLive');
     Route::post('/secretary/categories/{category}/auto-advance', [SecretaryController::class, 'setAutoAdvance'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.category.autoAdvance');

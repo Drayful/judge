@@ -231,7 +231,7 @@
                         <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-orange-900/60 ring-2 ring-orange-400/80 shadow-md shadow-orange-950/30' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
                             <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $queuePosition }}</span>
                             @if($isSelectableForLive)
-                                <form method="POST" action="{{ route('secretary.performance.selectLive', [$category, $p]) }}" class="min-w-0 flex-1">
+                                <form method="POST" action="{{ route('secretary.start', $p) }}" class="min-w-0 flex-1">
                                     @csrf
                                     @if($streamSession)<input type="hidden" name="stream_session_id" value="{{ $streamSession->id }}">@endif
                                     <button type="submit" class="group flex w-full min-w-0 items-center gap-2 text-left" title="Выбрать эту участницу для Live без изменения очереди">
