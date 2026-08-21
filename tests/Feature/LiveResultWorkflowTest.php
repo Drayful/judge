@@ -921,7 +921,7 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotSame($dbRevisionBefore, $dbRevisionAfter);
     }
 
-    public function test_secretary_queue_revision_changes_for_score_manual_average_and_penalty(): void
+    public function test_secretary_queue_revision_changes_for_scores_but_not_draft_actions(): void
     {
         $performance = $this->performance();
         $secretary = User::factory()->create(['role' => 'secretary']);
@@ -975,7 +975,7 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotSame($initialRevision, $scoreRevision);
         $this->assertNotSame($scoreRevision, $averageRevision);
         $this->assertNotSame($averageRevision, $penaltyRevision);
-        $this->assertNotSame($penaltyRevision, $liveActionRevision);
+        $this->assertSame($penaltyRevision, $liveActionRevision);
     }
 
     public function test_stream_history_lists_every_judge_score_and_keeps_controls_inside_async_page(): void

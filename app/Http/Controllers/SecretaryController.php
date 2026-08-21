@@ -1643,7 +1643,6 @@ class SecretaryController extends Controller
 
         $pids = $performances->pluck('id');
         $scoresDigest = '';
-        $actionsDigest = '';
         if ($pids->isNotEmpty()) {
             $scoresDigest = JudgeScore::query()
                 ->whereIn('performance_id', $pids)
@@ -1664,30 +1663,13 @@ class SecretaryController extends Controller
                     (string) ($s->updated_at?->getTimestamp() ?? 0),
                 ]))
                 ->implode(';');
-
-            if ($current !== null) {
-                // Live показывает журнал действий только текущего выступления. Не читаем
-                // на каждом ping постоянно растущую историю всего потока.
-                $actionsDigest = JudgeScoreAction::query()
-                    ->where('performance_id', $current->id)
-                    ->orderBy('id')
-                    ->get(['id', 'performance_id', 'judge_id', 'slot', 'action', 'draft_score', 'created_at'])
-                    ->map(fn (JudgeScoreAction $action) => implode(':', [
-                        (string) $action->id,
-                        (string) $action->performance_id,
-                        (string) $action->judge_id,
-                        (string) ($action->slot ?? ''),
-                        $action->action,
-                        (string) ($action->draft_score ?? ''),
-                        (string) ($action->created_at?->getTimestamp() ?? 0),
-                    ]))
-                    ->implode(';');
-            }
         }
 
         $catSig = $category->id.':'.($session?->id ?? 'all').':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
 
-        $rev = md5($perfSig."\n".$scoresDigest."\n".$actionsDigest."\n".$catSig);
+        // Промежуточные нажатия судей остаются в журнале, но не должны заменять
+        // всю Live-страницу. Журнал обновится при следующем значимом изменении.
+        $rev = md5($perfSig."\n".$scoresDigest."\n".$catSig);
 
         return response()->json([
             'rev' => $rev,
