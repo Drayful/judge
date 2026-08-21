@@ -82,32 +82,61 @@ const asyncPage = {
 
         const scrollX = window.scrollX;
         const scrollY = window.scrollY;
+        const htmlElement = document.documentElement;
+        const body = document.body;
+        const previousHtmlOverflowAnchor = htmlElement.style.overflowAnchor;
+        const previousBodyOverflowAnchor = body.style.overflowAnchor;
+        const previousScrollBehavior = htmlElement.style.scrollBehavior;
         const active = document.activeElement;
         const focusKey = active instanceof HTMLElement
             ? (active.id ? `#${CSS.escape(active.id)}` : (active.getAttribute('name') ? `[name="${CSS.escape(active.getAttribute('name'))}"]` : null))
             : null;
+        const restoreScroll = () => {
+            const maxScrollY = Math.max(0, htmlElement.scrollHeight - window.innerHeight);
+            window.scrollTo(scrollX, Math.min(scrollY, maxScrollY));
+        };
 
-        window.dispatchEvent(new CustomEvent('judge:before-page-update'));
-        current.replaceWith(document.importNode(incoming, true));
+        // Replacing the whole Live root makes browser scroll anchoring follow
+        // newly inserted score/history blocks before our saved position is restored.
+        // Freeze anchoring during the swap so background polling cannot move the screen.
+        htmlElement.style.overflowAnchor = 'none';
+        body.style.overflowAnchor = 'none';
+        htmlElement.style.scrollBehavior = 'auto';
 
-        const title = parsed.querySelector('title')?.textContent;
-        if (title) document.title = title;
-        const csrf = parsed.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-        if (csrf) document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrf);
+        try {
+            window.dispatchEvent(new CustomEvent('judge:before-page-update'));
+            current.replaceWith(document.importNode(incoming, true));
+            restoreScroll();
 
-        if (url && url !== window.location.href) history.replaceState({}, '', url);
+            const title = parsed.querySelector('title')?.textContent;
+            if (title) document.title = title;
+            const csrf = parsed.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+            if (csrf) document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrf);
 
-        const newRoot = this.pageRoot();
-        await this.executeScripts(newRoot);
-        window.dispatchEvent(new CustomEvent('judge:page-updated', { detail: { url } }));
+            if (url && url !== window.location.href) history.replaceState({}, '', url);
 
-        requestAnimationFrame(() => {
-            window.scrollTo(scrollX, Math.min(scrollY, Math.max(0, document.documentElement.scrollHeight - window.innerHeight)));
-            if (focusKey) {
-                const nextFocus = document.querySelector(focusKey);
-                if (nextFocus instanceof HTMLElement) nextFocus.focus({ preventScroll: true });
-            }
-        });
+            const newRoot = this.pageRoot();
+            await this.executeScripts(newRoot);
+            window.dispatchEvent(new CustomEvent('judge:page-updated', { detail: { url } }));
+
+            await new Promise((resolve) => {
+                requestAnimationFrame(() => {
+                    restoreScroll();
+                    if (focusKey) {
+                        const nextFocus = document.querySelector(focusKey);
+                        if (nextFocus instanceof HTMLElement) nextFocus.focus({ preventScroll: true });
+                    }
+                    requestAnimationFrame(() => {
+                        restoreScroll();
+                        resolve();
+                    });
+                });
+            });
+        } finally {
+            htmlElement.style.overflowAnchor = previousHtmlOverflowAnchor;
+            body.style.overflowAnchor = previousBodyOverflowAnchor;
+            htmlElement.style.scrollBehavior = previousScrollBehavior;
+        }
 
         if (!options.silent) this.showStatus('Интерфейс обновлён без перезагрузки', 'success');
         return true;
