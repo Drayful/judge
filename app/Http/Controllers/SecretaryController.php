@@ -1939,13 +1939,6 @@ class SecretaryController extends Controller
                     $returned = 1;
                     $label = $data['slot'];
 
-                    if (str_starts_with($data['slot'], 'DB') || str_starts_with($data['slot'], 'DA')) {
-                        $leaderSlot = str_starts_with($data['slot'], 'DB') ? 'DB1' : 'DA1';
-                        $leader = $rows[$leaderSlot] ?? null;
-                        if ($leader !== null && $leader->id !== $row->id) {
-                            $leader->update(['average_score' => null, 'average_submitted_at' => null]);
-                        }
-                    }
                 }
             } else {
                 $key = $data['panel'];
@@ -2034,14 +2027,6 @@ class SecretaryController extends Controller
 
             $row->score = (float) $data['score'];
             $row->save();
-
-            if (str_starts_with($data['slot'], 'DB') || str_starts_with($data['slot'], 'DA')) {
-                $leaderSlot = str_starts_with($data['slot'], 'DB') ? 'DB1' : 'DA1';
-                $leader = $rows[$leaderSlot] ?? null;
-                if ($leader !== null) {
-                    $leader->update(['average_score' => null, 'average_submitted_at' => null]);
-                }
-            }
 
             $performance->refresh();
             $performance->load(['judgeScores', 'category']);

@@ -617,16 +617,6 @@ class JudgeController extends Controller
             ],
         );
 
-        if ($panelKey === 'd' && in_array($subpanel, ['db', 'da'], true)) {
-            $performance->unsetRelation('judgeScores');
-            $performance->loadMissing(['judgeScores.judge', 'category']);
-            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
-            $leader = $rows[strtoupper($subpanel).'1'] ?? null;
-            if ($leader !== null) {
-                $leader->update(['average_score' => null, 'average_submitted_at' => null]);
-            }
-        }
-
         $performance->refresh();
         $performance->load(['judgeScores', 'category']);
         // DB1/DA1 и последующие оценки сразу пересчитывают и сохраняют средние.

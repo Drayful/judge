@@ -260,7 +260,7 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee("togglePenalty(0.3, 'faceExpr')", false)
             ->assertSee("togglePenalty(0.3, 'formationDesign')", false)
             ->assertSee('Конструкция / поднятое положение')
-            ->assertSee("oneTimeCreditCats: opts.groupProgram", false)
+            ->assertSee('oneTimeCreditCats: opts.groupProgram', false)
             ->assertSee('dynamic: opts.groupProgram ? 4 : 2', false)
             ->assertSee('collectiveSync: opts.groupProgram ? 1 : 0', false)
             ->assertSee('const step = this.creditValue(cat)', false)
@@ -289,7 +289,7 @@ class LiveResultWorkflowTest extends TestCase
                 ->assertOk()
                 ->assertSee('deductionLimit: 10', false)
                 ->assertSee('projectedDeduction > this.deductionLimit', false)
-                ->assertSee("Math.min(this.deductionLimit, total)", false);
+                ->assertSee('Math.min(this.deductionLimit, total)', false);
 
             $this->actingAs($judge)
                 ->postJson(route('judge.submit-score'), [
@@ -480,6 +480,56 @@ class LiveResultWorkflowTest extends TestCase
             ->assertOk()
             ->assertSee('Ручная средняя DB')
             ->assertSee('4.100');
+    }
+
+    public function test_db2_and_da2_scores_do_not_reset_submitted_manual_averages(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+
+        foreach ([
+            ['judge_d_db', 'DB1', 4.2, 4.1],
+            ['judge_d_da', 'DA1', 3.4, 3.3],
+        ] as [$role, $slot, $score, $average]) {
+            $leader = User::factory()->create(['role' => $role, 'slot' => $slot]);
+
+            $this->actingAs($leader)
+                ->postJson(route('judge.submit-score'), [
+                    'tournament_id' => $tournament->id,
+                    'score' => $score,
+                ])
+                ->assertOk();
+
+            $this->actingAs($leader)
+                ->postJson(route('judge.submit-average'), [
+                    'tournament_id' => $tournament->id,
+                    'average_score' => $average,
+                ])
+                ->assertOk();
+        }
+
+        foreach ([
+            ['judge_d_db', 'DB2', 4.4, 'DB1', 4.1],
+            ['judge_d_da', 'DA2', 3.6, 'DA1', 3.3],
+        ] as [$role, $slot, $score, $leaderSlot, $expectedAverage]) {
+            $secondJudge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+
+            $this->actingAs($secondJudge)
+                ->postJson(route('judge.submit-score'), [
+                    'tournament_id' => $tournament->id,
+                    'score' => $score,
+                ])
+                ->assertOk();
+
+            $leaderScore = SecretaryLiveUi::scoreRowsBySlot(
+                $performance->fresh()->load(['judgeScores.judge', 'category']),
+                $performance->category,
+            )[$leaderSlot];
+
+            $this->assertEqualsWithDelta($expectedAverage, (float) $leaderScore->average_score, 0.0005);
+            $this->assertNotNull($leaderScore->average_submitted_at);
+        }
     }
 
     public function test_manual_db_and_da_averages_are_official_and_required_for_auto_advance(): void
