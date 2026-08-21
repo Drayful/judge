@@ -563,17 +563,18 @@ class ScoringSystemTest extends TestCase
 
     public function test_panel_spread_violation_when_a_panel_exceeds_one(): void
     {
-        $category = $this->makeCategory();
+        $category = $this->makeCategory(['inactive_judge_slots' => ['LINE1', 'LINE2', 'TIME', 'RESP']]);
         $perf = $this->makePerformance($category);
         // A: 9.0 vs 7.5 -> spread 1.5 > 1.0
         $this->fillRequiredScores($perf, [9.0, 8.2, 8.0, 7.5], [7.0, 7.1, 7.2, 7.3]);
 
         $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertTrue($report['has_violation']);
         $this->assertTrue(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
-        $this->assertFalse(SecretaryLiveUi::readyToFinalize($perf, $category));
+        $this->assertTrue(SecretaryLiveUi::readyToFinalize($perf, $category), 'Расхождение предупреждает, но не блокирует автопереход');
         $this->assertContains('A1', $report['violating_slots']);
         $this->assertEqualsWithDelta(1.5, $report['violations'][0]['spread'], 0.001);
     }
@@ -635,7 +636,7 @@ class ScoringSystemTest extends TestCase
 
     public function test_body_only_spread_violation_across_four_d_judges(): void
     {
-        $category = $this->makeCategory();
+        $category = $this->makeCategory(['inactive_judge_slots' => ['LINE1', 'LINE2', 'TIME', 'RESP']]);
         $perf = $this->makePerformance($category, apparatus: 'б.п.');
         $this->fillBodyOnlyDScores($perf, [3.0, 4.0, 4.5, 5.5]);
         $this->fillAeScores($perf);
@@ -645,7 +646,7 @@ class ScoringSystemTest extends TestCase
         $report = SecretaryLiveUi::panelSpreadReport($perf, $category);
 
         $this->assertTrue($report['has_violation'], '3.0 vs 5.5 -> spread > 1.0 в объединённой D-панели БП');
-        $this->assertFalse(SecretaryLiveUi::readyToFinalize($perf, $category));
+        $this->assertTrue(SecretaryLiveUi::readyToFinalize($perf, $category), 'Расхождение БП не блокирует автопереход');
         $this->assertContains('DB1', $report['violating_slots']);
     }
 

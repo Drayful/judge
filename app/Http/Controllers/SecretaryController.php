@@ -1753,12 +1753,15 @@ class SecretaryController extends Controller
                 ];
             }
 
+            $spread = SecretaryLiveUi::panelSpreadReport($performance, $category);
+
             return [$performance->id => [
                 'performance_id' => $performance->id,
                 'athlete' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
                 'update_url' => route('secretary.performance.updateJudgeScore', $performance),
                 'return_url' => route('secretary.performance.returnScores', $performance),
                 'slots' => $slots,
+                'spread' => $spread,
             ]];
         })->all();
         $scoreHistory = $currentPerformance

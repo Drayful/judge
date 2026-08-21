@@ -635,7 +635,7 @@ class JudgeController extends Controller
             if (SecretaryLiveUi::hasPanelSpreadViolation($performance, $category)) {
                 $report = SecretaryLiveUi::panelSpreadReport($performance, $category);
                 $labels = collect($report['violations'])->pluck('label')->implode(', ');
-                $status .= ' Разброс > '.$report['max_spread'].' ('.$labels.'). Оценка принята — итог подтверждает секретарь или главный судья.';
+                $status .= ' Разброс > '.$report['max_spread'].' ('.$labels.'). Автопереход не блокируется; предупреждение сохранено для секретаря и главного судьи.';
             }
         }
 

@@ -457,7 +457,8 @@ class SecretaryLiveUi
     }
 
     /**
-     * Готовность к финализации / автопереходу: все слоты заполнены и нет нарушения разброса.
+     * Готовность к финализации / автопереходу: все обязательные вводы завершены.
+     * Расхождение панелей остаётся предупреждением для контроля и не задерживает очередь.
      */
     public static function readyToFinalize(?Performance $perf, ?Category $category = null): bool
     {
@@ -467,8 +468,7 @@ class SecretaryLiveUi
             // Если хронометрист уже запустил официальный отсчёт, автопереход
             // ждёт именно его «Стоп», чтобы не потерять фактическое время.
             && ($perf?->timer_started_at === null || $perf->timer_ended_at !== null)
-            && $perf?->total !== null
-            && ! self::hasPanelSpreadViolation($perf, $category);
+            && $perf?->total !== null;
     }
 
     /**

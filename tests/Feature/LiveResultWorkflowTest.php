@@ -592,6 +592,58 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertNotNull($dbScore->fresh()->average_submitted_at);
     }
 
+    public function test_panel_spread_warning_does_not_block_auto_advance(): void
+    {
+        $performance = $this->performance();
+        $category = $performance->category;
+        $category->update([
+            'inactive_judge_slots' => ['DB2', 'DA2', 'A3', 'A4', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+
+        foreach ([
+            ['judge_d_db', 'DB1', 'd', 'db', 4.2, 4.1],
+            ['judge_d_da', 'DA1', 'd', 'da', 3.4, 3.3],
+            ['judge_a', 'A1', 'a', null, 9.0, null],
+            ['judge_e', 'E1', 'e', null, 7.0, null],
+        ] as [$role, $slot, $panel, $subpanel, $score, $average]) {
+            $judge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+            JudgeScore::create([
+                'performance_id' => $performance->id,
+                'judge_id' => $judge->id,
+                'panel' => $panel,
+                'subpanel' => $subpanel,
+                'score' => $score,
+                'average_score' => $average,
+                'submitted_at' => now(),
+                'average_submitted_at' => $average !== null ? now() : null,
+            ]);
+        }
+
+        $nextAthlete = Athlete::create(['last_name' => 'Следующая', 'first_name' => 'Гимнастка']);
+        $next = Performance::create([
+            'category_id' => $category->id,
+            'athlete_id' => $nextAthlete->id,
+            'status' => 'scheduled',
+            'order_index' => 2,
+        ]);
+        $a2 = User::factory()->create(['role' => 'judge_a', 'slot' => 'A2']);
+
+        $this->actingAs($a2)
+            ->postJson(route('judge.submit-score'), [
+                'tournament_id' => $tournament->id,
+                'score' => 7.5,
+            ])
+            ->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('message', fn (string $message) => str_contains($message, 'Разброс > 1')
+                && str_contains($message, 'Автопереход: вызвана следующая гимнастка.'));
+
+        $this->assertSame('done', $performance->fresh()->status);
+        $this->assertSame('performing', $next->fresh()->status);
+    }
+
     public function test_zero_total_is_marked_not_performed_and_has_no_place(): void
     {
         $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
@@ -1101,6 +1153,34 @@ class LiveResultWorkflowTest extends TestCase
             ])
             ->assertRedirect();
         $this->assertEqualsWithDelta(3.333, (float) JudgeScore::query()->where('performance_id', $first->id)->value('score'), 0.0005);
+    }
+
+    public function test_stream_history_keeps_spread_warning_after_auto_advance_is_allowed(): void
+    {
+        $performance = $this->performance();
+        $category = $performance->category;
+        $category->update([
+            'inactive_judge_slots' => ['A3', 'A4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+
+        foreach ([['A1', 9.0], ['A2', 7.5]] as [$slot, $score]) {
+            $judge = User::factory()->create(['role' => 'judge_a', 'slot' => $slot]);
+            JudgeScore::create([
+                'performance_id' => $performance->id,
+                'judge_id' => $judge->id,
+                'panel' => 'a',
+                'score' => $score,
+                'submitted_at' => now(),
+            ]);
+        }
+
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $category))
+            ->assertOk()
+            ->assertSee('data-stream-history-spread-warning', false)
+            ->assertSee('автопереход выполнен, требуется контроль')
+            ->assertSee('A (артистизм)');
     }
 
     public function test_secretary_can_return_to_previous_participant_without_reordering_queue(): void

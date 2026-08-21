@@ -325,8 +325,8 @@
                 <div class="mt-4 rounded-xl border border-rose-700/60 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
                     <div class="font-semibold">Расхождение оценок — нужно решение секретаря / главного судьи</div>
                     <p class="mt-1 text-rose-100/90 text-xs">
-                        Разброс превышает {{ number_format($panelSpread['max_spread'], 1) }}. Оценки приняты, автопереход приостановлен.
-                        Исправьте или верните на доработку в блоке ниже, либо подтвердите итог как есть.
+                        Разброс превышает {{ number_format($panelSpread['max_spread'], 1) }}. Оценки приняты, автопереход не блокируется.
+                        Предупреждение сохранится в истории потока для проверки секретарём или главным судьёй.
                     </p>
                     <ul class="mt-2 space-y-1 text-xs font-mono">
                         @foreach($panelSpread['violations'] as $v)
@@ -667,6 +667,7 @@
             <div class="space-y-3" data-stream-history-layout="responsive">
                 @forelse($orderedPerformances as $p)
                     @php($isCurrentHistoryPerformance = $currentPerformance && $currentPerformance->id === $p->id)
+                    @php($historySpread = $scoreHistoryByPerformance[$p->id]['spread'] ?? null)
                     <article class="rounded-xl border p-3 sm:p-4 {{ $isCurrentHistoryPerformance ? 'border-orange-600/70 bg-orange-950/30 ring-1 ring-orange-500/20' : 'border-slate-800 bg-slate-950/45' }}">
                         <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                             <div class="flex min-w-0 items-start gap-3">
@@ -723,6 +724,17 @@
                                 @endif
                             </div>
                         </div>
+
+                        @if(($historySpread['has_violation'] ?? false) && !empty($historySpread['violations']))
+                            <div data-stream-history-spread-warning class="mt-3 rounded-lg border border-rose-700/60 bg-rose-950/35 px-3 py-2 text-xs text-rose-100">
+                                <div class="font-semibold">⚠ Расхождение оценок больше {{ number_format($historySpread['max_spread'], 1) }} — автопереход выполнен, требуется контроль.</div>
+                                <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-mono text-rose-200">
+                                    @foreach($historySpread['violations'] as $violation)
+                                        <span>{{ $violation['label'] }}: {{ number_format($violation['min'], 3) }}–{{ number_format($violation['max'], 3) }} (Δ {{ number_format($violation['spread'], 3) }})</span>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
 
                         <div class="mt-3 grid grid-cols-4 gap-1.5 border-t border-slate-800/80 pt-3 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                             @foreach($historyJudgeColumns as $judgeColumn)
