@@ -41,16 +41,16 @@
         <div class="judge-shell w-full max-w-[1600px] mx-auto px-2.5 py-2.5 flex-1 min-h-0 flex flex-col gap-2.5">
 
             {{-- ====== ШАПКА (одна строка) ====== --}}
-            <div class="judge-topbar shrink-0 flex items-center gap-2 h-14 px-2">
+            <div class="judge-topbar shrink-0 flex items-center gap-2 {{ $pKey === 'e' ? 'h-20' : 'h-14' }} px-2">
                 <a href="{{ route('judge.tournaments') }}" class="judge-back-button grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg text-slate-300 hover:text-white" aria-label="Назад к турнирам">←</a>
 
                 <div class="flex-1 min-w-0 px-2 py-1 flex items-center gap-3 h-full">
                     @if($athlete)
-                        <div class="min-w-0">
-                            <div class="text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live performance</div>
-                            <div class="flex min-w-0 items-baseline gap-3">
-                                <span class="text-lg font-bold tracking-tight text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
-                                <span class="text-[11px] text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
+                        <div class="min-w-0 {{ $pKey === 'e' ? 'w-full' : '' }}">
+                            <div class="{{ $pKey === 'e' ? 'text-[11px]' : 'text-[9px]' }} font-semibold uppercase tracking-[0.22em] text-slate-500">Live performance</div>
+                            <div class="flex min-w-0 {{ $pKey === 'e' ? 'flex-col items-start gap-0.5' : 'items-baseline gap-3' }}">
+                                <span @if($pKey === 'e') data-e-large-athlete-name @endif class="{{ $pKey === 'e' ? 'text-3xl md:text-4xl leading-none' : 'text-lg' }} max-w-full font-bold tracking-tight text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
+                                <span class="{{ $pKey === 'e' ? 'text-sm' : 'text-[11px]' }} max-w-full text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
                             </div>
                         </div>
                     @else

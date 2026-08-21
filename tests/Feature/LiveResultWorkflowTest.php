@@ -304,6 +304,21 @@ class LiveResultWorkflowTest extends TestCase
                 'judge_id' => $judge->id,
             ]);
         }
+
+        $eJudge = User::query()->where('role', 'judge_e')->firstOrFail();
+        $this->actingAs($eJudge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('data-e-large-athlete-name', false)
+            ->assertSee('data-e-large-controls', false)
+            ->assertSee('text-7xl md:text-8xl xl:text-9xl', false);
+
+        $aJudge = User::query()->where('role', 'judge_a')->firstOrFail();
+        $this->actingAs($aJudge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertDontSee('data-e-large-athlete-name', false)
+            ->assertDontSee('data-e-large-controls', false);
     }
 
     public function test_individual_a_tablet_contains_every_fig_artistry_penalty(): void
