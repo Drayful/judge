@@ -275,6 +275,26 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4 }', false);
     }
 
+    public function test_individual_db_risks_do_not_use_regular_element_slots(): void
+    {
+        $performance = $this->performance();
+        $performance->load('category.tournament');
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+
+        $dbJudge = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+
+        $this->actingAs($dbJudge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('junior: { elements: 6, risks: 3 }', false)
+            ->assertSee('senior: { elements: 8, risks: 4 }', false)
+            ->assertSee("if (risks >= lim.risks) continue;", false)
+            ->assertSee("} else if (used >= lim.elements) {", false)
+            ->assertSee("if (isRisk) {\n                            risks += 1;\n                        } else {\n                            used += 1;", false)
+            ->assertDontSee('if (used >= lim.elements) break;', false);
+    }
+
     public function test_a_and_e_tablets_limit_scores_and_deductions_to_ten_points(): void
     {
         $performance = $this->performance();

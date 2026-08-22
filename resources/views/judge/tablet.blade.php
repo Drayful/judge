@@ -916,12 +916,22 @@
                     const counted = new Set();
                     let risks = 0, used = 0, total = 0;
                     for (const x of items) {
-                        if (used >= lim.elements) break;
                         const isRisk = x.a.symbol === 'R';
-                        if (isRisk && risks >= lim.risks) continue;
+
+                        // Риски имеют собственный лимит и не занимают одно из
+                        // мест 6/8, отведённых для обычных элементов DB.
+                        if (isRisk) {
+                            if (risks >= lim.risks) continue;
+                        } else if (used >= lim.elements) {
+                            continue;
+                        }
+
                         counted.add(x.i);
-                        if (isRisk) risks += 1;
-                        used += 1;
+                        if (isRisk) {
+                            risks += 1;
+                        } else {
+                            used += 1;
+                        }
                         total += x.a.v;
                     }
 
