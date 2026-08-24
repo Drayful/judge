@@ -26,6 +26,49 @@
         <div class="w-full px-0 space-y-4">
             <x-flash />
 
+            @if($tournament->categories->isNotEmpty())
+                <x-card id="tournament-live-queue">
+                    <form method="POST" action="{{ route('secretary.tournament.liveQueue', $tournament) }}">
+                        @csrf
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <div class="font-semibold text-violet-100">Объединённая Live-очередь</div>
+                                <p class="mt-1 max-w-4xl text-xs text-violet-200/75">
+                                    Выберите любые потоки турнира, которые должны идти подряд в Live. Можно объединить только два потока, даже если они находятся в разных группах. Неотмеченные потоки останутся самостоятельными. Стартовый протокол, финальная выгрузка и места в табло не меняются.
+                                </p>
+                            </div>
+                            @if($tournament->hasCombinedLiveQueue())
+                                <span class="rounded-full border border-violet-600/70 bg-violet-900/40 px-2.5 py-1 text-xs font-semibold text-violet-100">Объединено: {{ count($tournament->combinedLiveCategoryIds()) }}</span>
+                            @else
+                                <span class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-400">Выключено</span>
+                            @endif
+                        </div>
+                        <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            @foreach($tournament->categories as $stream)
+                                <label class="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-sm transition {{ $tournament->isCategoryInCombinedLiveQueue($stream) ? 'border-violet-500 bg-violet-900/45 text-violet-50' : 'border-slate-700 bg-slate-950/60 text-slate-300 hover:border-violet-700' }}">
+                                    <input type="checkbox" name="category_ids[]" value="{{ $stream->id }}"
+                                           @checked($tournament->isCategoryInCombinedLiveQueue($stream))
+                                           class="mt-0.5 rounded border-slate-600 bg-slate-950 text-violet-500 focus:ring-violet-500">
+                                    <span class="min-w-0">
+                                        <span class="block font-semibold">Поток {{ $stream->stream_no ?? '#'.$stream->id }}</span>
+                                        <span class="block truncate text-xs text-slate-400">{{ $stream->name }}@if($stream->starts_at_label) · {{ $stream->starts_at_label }}@endif</span>
+                                    </span>
+                                </label>
+                            @endforeach
+                        </div>
+                        @error('combined_queue') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        <div class="mt-4 flex flex-wrap items-center gap-3">
+                            <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Сохранить выбранные потоки</button>
+                            @if($tournament->hasCombinedLiveQueue())
+                                <span class="text-xs text-slate-400">Чтобы отключить объединение — снимите все отметки и сохраните.</span>
+                            @else
+                                <span class="text-xs text-slate-500">Для объединения выберите минимум два потока.</span>
+                            @endif
+                        </div>
+                    </form>
+                </x-card>
+            @endif
+
             {{-- СБОРКА ТУРНИРА В ОДИН КЛИК --}}
             @if($pool->isNotEmpty())
                 <x-card>
@@ -526,9 +569,9 @@
                                                 <span class="text-slate-500">· {{ $cat->minutes_per_athlete }} мин/выход</span>
                                             @endif
                                         </div>
-                                        <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium"
-                                           href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $cat->id }}">
-                                            Очередь →
+                                        <a class="text-sky-300 hover:text-sky-200 hover:underline text-sm font-medium"
+                                           href="{{ route('secretary.queue.review', $cat) }}">
+                                            Просмотр →
                                         </a>
                                     </div>
                                 @endforeach
@@ -559,6 +602,7 @@
                                                             $streamSession = $streamCategory->sessions->firstWhere('session_no', $session->session_no);
                                                         ?>
                                                         @if($streamSession)
+                                                            <a href="{{ route('secretary.queue.review', ['category' => $streamCategory->id, 'session' => $streamSession->id]) }}" class="text-xs font-semibold text-sky-300 hover:text-sky-200">Просмотр: поток {{ $streamCategory->stream_no }} →</a>
                                                             <a href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $streamCategory->id }}&session={{ $streamSession->id }}" class="text-xs font-semibold text-emerald-300 hover:text-emerald-200">Live: поток {{ $streamCategory->stream_no }} →</a>
                                                         @endif
                                                     @endforeach

@@ -3,145 +3,138 @@
         $payload = $initialPayload;
         $perf = $payload['performance'] ?? null;
         $tournament = $category->tournament;
-        $tableUrl = route('scoreboard.table', $category);
+        $pollCategory = $pollCategory ?? $category;
     @endphp
 
     <div class="sb-screen" id="performanceRoot">
         <header class="sb-header scoreboard-chrome">
-            <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
                 <div class="min-w-0">
-                    <div class="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-cyan-400/90 font-medium">
+                    <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
                         <span class="h-2 w-2 rounded-full bg-cyan-400 live-pulse"></span>
-                        На ковре
+                        Табло выступления
                     </div>
                     @if($tournament)
-                        <p class="mt-1 text-sm text-slate-400 truncate">{{ $tournament->name }}</p>
+                        <p class="mt-1 truncate text-sm text-slate-400">{{ $tournament->name }}</p>
                     @endif
-                    <h1 class="mt-0.5 text-xl sm:text-2xl font-bold text-white truncate">{{ $category->name }}</h1>
+                    <h1 id="categoryName" class="mt-0.5 truncate text-xl font-bold text-white sm:text-2xl">{{ $perf['category_name'] ?? $category->name }}</h1>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 shrink-0">
-                    <a href="{{ $tableUrl }}" class="sb-btn sb-btn-ghost">Результаты</a>
-                    <a href="{{ route('scoreboard.index', ['category' => $category->id]) }}" class="sb-btn sb-btn-ghost">Все потоки</a>
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                    <a href="{{ route('scoreboard.table', $pollCategory) }}" class="sb-btn sb-btn-ghost">Результаты</a>
+                    <a href="{{ route('scoreboard.index', ['category' => $pollCategory->id]) }}" class="sb-btn sb-btn-ghost">Все потоки</a>
                     <button type="button" id="tvModeBtn" class="sb-btn sb-btn-cyan">На весь экран</button>
                 </div>
             </div>
         </header>
 
         <main class="sb-live-stage scoreboard-tv-stage">
-            <div class="w-full max-w-5xl" id="liveBoard">
-                <div id="emptyState" class="{{ $perf ? 'hidden' : '' }} text-center py-16">
-                    <div class="text-6xl mb-6 opacity-25">◎</div>
-                    <h2 class="text-2xl sm:text-3xl font-semibold text-white">Ожидание участницы</h2>
+            <div class="w-full max-w-7xl" id="liveBoard">
+                <div id="emptyState" class="{{ $perf ? 'hidden' : '' }} py-16 text-center">
+                    <div class="mb-6 text-6xl opacity-25">◎</div>
+                    <h2 class="text-2xl font-semibold text-white sm:text-3xl">Ожидание участницы</h2>
                     <p class="mt-2 text-slate-500">Выступление появится автоматически</p>
                 </div>
 
-                <div id="liveContent" class="{{ $perf ? '' : 'hidden' }} flex flex-col items-center gap-8 sm:gap-10">
-                    <div class="text-center w-full space-y-4">
-                        <div id="phaseBadge" class="inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-950/50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-200">
-                            <span class="h-2 w-2 rounded-full bg-cyan-400 live-pulse" id="phaseDot"></span>
+                <div id="liveContent" class="{{ $perf ? '' : 'hidden' }} flex flex-col items-center gap-6 sm:gap-8">
+                    <div class="w-full space-y-3 text-center">
+                        <div id="phaseBadge" class="inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-950/50 px-5 py-2 text-sm font-bold uppercase tracking-wider text-cyan-100">
+                            <span id="phaseDot" class="h-2.5 w-2.5 rounded-full bg-cyan-400 live-pulse"></span>
                             <span id="phaseLabel">{{ $payload['phase_label'] ?? '—' }}</span>
                         </div>
 
-                        <div id="placeBlock" class="{{ ($perf['place'] ?? null) ? '' : 'opacity-40' }}">
-                            <div class="text-xs uppercase tracking-[0.2em] text-slate-500 mb-1">Текущее место</div>
-                            <div class="flex items-baseline justify-center gap-2">
-                                <span id="placeValue" class="sb-place-hero">{{ $perf['place'] ?? '?' }}</span>
-                                <span id="placeOf" class="text-2xl sm:text-3xl text-slate-500 font-medium">/ {{ $perf['place_of'] ?? '—' }}</span>
-                            </div>
-                        </div>
-                        <div id="poolLabel" class="text-xs text-slate-500">
-                            @if($perf && ($perf['pool_label'] ?? null))
-                                Пул Excel: {{ $perf['pool_label'] }}
-                            @endif
+                        <div id="inquiryBanner" class="{{ ($perf['inquiry_active'] ?? false) ? '' : 'hidden' }} mx-auto max-w-4xl rounded-2xl border-2 border-amber-400 bg-amber-950/80 px-6 py-3 text-lg font-black uppercase tracking-wide text-amber-100">
+                            Запрос по <span id="inquiryPanel">{{ $perf['inquiry_panel'] ?? 'оценке' }}</span> — результат предварительный
                         </div>
 
+                        <div class="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-300" id="classificationLabel">{{ $perf['classification_label'] ?? '' }}</div>
                         <div class="text-sm text-slate-500" id="startNumberWrap">
-                            @if($perf && $perf['start_number'])
-                                № <span id="startNumber" class="text-slate-300 font-semibold tabular-nums">{{ $perf['start_number'] }}</span>
-                            @endif
+                            @if($perf && $perf['start_number']) № <span class="font-semibold tabular-nums text-slate-300">{{ $perf['start_number'] }}</span> @endif
                         </div>
-
                         <h2 class="sb-athlete-name px-4" id="athleteName">{{ $perf['athlete'] ?? '—' }}</h2>
-                        <div class="text-lg sm:text-xl text-slate-400 truncate px-4 max-w-3xl mx-auto" id="athleteClub">{{ $perf['club'] ?? '—' }}</div>
-
-                        <span id="apparatusBadge" class="inline-block rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-1.5 text-sm text-slate-200">
+                        <div class="mx-auto max-w-4xl truncate px-4 text-xl text-slate-300 sm:text-2xl" id="athleteClub">{{ $perf['club'] ?? '—' }}</div>
+                        <span id="apparatusBadge" class="inline-block rounded-xl border border-slate-500 bg-slate-900/80 px-5 py-2 text-base font-bold text-white">
                             {{ $perf['apparatus_label'] ?? '—' }}
                         </span>
 
                         <div id="groupWrap" class="{{ ($perf['is_group'] ?? false) ? '' : 'hidden' }} mt-3">
-                            <span class="inline-block rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-200">
-                                Групповое выступление
-                            </span>
+                            <span class="inline-block rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-200">Групповое выступление</span>
                             <div id="groupMembers" class="mt-2 text-base text-slate-300">{{ isset($perf['members']) ? implode(' · ', $perf['members']) : '' }}</div>
                         </div>
                     </div>
 
-                    <div class="sb-scores">
-                        @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Штр', 'apparatus_score' => 'За вид', 'total' => 'Итог'] as $key => $label)
-                            @php
-                                $cardClass = 'sb-score-card' . ($key === 'total' ? ' sb-score-card--total' : '');
-                                $valueClass = 'sb-score-value'
-                                    . ($key === 'total' ? ' sb-score-value--total' : '')
-                                    . ($key === 'penalty' ? ' sb-score-value--penalty' : '');
-                            @endphp
-                            <div class="{{ $cardClass }}">
-                                <div class="sb-score-label">{{ $label }}</div>
-                                <div class="{{ $valueClass }}" id="score{{ ucfirst($key) }}">
-                                    @if($perf && $perf[$key] !== null)
-                                        {{ number_format((float) $perf[$key], 3) }}
-                                    @else
-                                        —
-                                    @endif
-                                </div>
-                            </div>
-                        @endforeach
+                    <div id="calculatingState" class="{{ ($perf && ! ($perf['score_visible'] ?? false)) ? '' : 'hidden' }} rounded-3xl border border-cyan-700/50 bg-cyan-950/25 px-8 py-7 text-center">
+                        <div class="text-2xl font-black text-white sm:text-4xl">Оценка подсчитывается</div>
+                        <div class="mt-3 text-base text-cyan-200">Результат появится после одобрения и вывода оператором</div>
                     </div>
 
-                    <div class="scoreboard-chrome w-full max-w-2xl rounded-2xl border border-slate-700/50 bg-slate-900/50 px-5 py-4">
-                        <div class="flex justify-between text-xs text-slate-400 mb-2">
-                            <span>Судьи</span>
-                            <span id="judgeProgress" class="tabular-nums font-medium text-slate-300">
-                                {{ ($payload['judges']['submitted'] ?? 0) }}/{{ ($payload['judges']['required'] ?? 0) }}
-                            </span>
+                    <div id="resultState" class="{{ ($perf['score_visible'] ?? false) ? '' : 'hidden' }} w-full space-y-5">
+                        <div id="normalDComponents" class="{{ ($perf['is_body_only'] ?? false) ? 'hidden' : '' }} sb-scores mx-auto max-w-5xl">
+                            @foreach(['db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
+                                <div class="sb-score-card">
+                                    <div class="sb-score-label">{{ $label }}</div>
+                                    <div id="score{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
+                                </div>
+                            @endforeach
                         </div>
-                        <div class="h-2 rounded-full bg-slate-800 overflow-hidden">
-                            <div id="judgeProgressBar" class="h-full bg-gradient-to-r from-emerald-600 to-cyan-500 transition-all duration-500"
-                                style="width: {{ ($payload['judges']['required'] ?? 0) > 0 ? round(100 * ($payload['judges']['submitted'] ?? 0) / ($payload['judges']['required'] ?? 1)) : 0 }}%"></div>
+
+                        <div id="bodyOnlyComponents" class="{{ ($perf['is_body_only'] ?? false) ? '' : 'hidden' }} sb-scores mx-auto max-w-4xl">
+                            @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
+                                <div class="sb-score-card">
+                                    <div class="sb-score-label">{{ $label }}</div>
+                                    <div id="bodyScore{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
+                                </div>
+                            @endforeach
+                        </div>
+
+                        <div class="mx-auto grid max-w-5xl gap-4 md:grid-cols-[1.35fr_1fr_1fr]">
+                            <div class="rounded-3xl border-2 border-cyan-400/70 bg-gradient-to-br from-cyan-950 to-slate-950 px-5 py-5 text-center shadow-2xl shadow-cyan-950/50">
+                                <div class="text-sm font-bold uppercase tracking-[0.18em] text-cyan-200">За упражнение</div>
+                                <div id="scoreApparatus_score" class="mt-1 font-mono text-6xl font-black tabular-nums text-white sm:text-7xl">{{ isset($perf['apparatus_score']) && $perf['apparatus_score'] !== null ? number_format((float) $perf['apparatus_score'], 3) : '—' }}</div>
+                            </div>
+                            <div class="rounded-3xl border border-violet-500/60 bg-violet-950/35 px-5 py-5 text-center">
+                                <div class="text-sm font-bold uppercase tracking-wider text-violet-200">Сумма многоборья</div>
+                                <div id="scoreTotal" class="mt-2 font-mono text-4xl font-black tabular-nums text-white sm:text-5xl">{{ isset($perf['total']) && $perf['total'] !== null ? number_format((float) $perf['total'], 3) : '—' }}</div>
+                            </div>
+                            <div id="placeBlock" class="rounded-3xl border border-amber-500/60 bg-amber-950/35 px-5 py-5 text-center {{ ($perf['place'] ?? null) ? '' : 'opacity-40' }}">
+                                <div class="text-sm font-bold uppercase tracking-wider text-amber-200">Место в многоборье</div>
+                                <div class="mt-1 flex items-baseline justify-center gap-2">
+                                    <span id="placeValue" class="text-5xl font-black text-white sm:text-6xl">{{ $perf['place'] ?? '—' }}</span>
+                                    <span id="placeOf" class="text-xl font-bold text-amber-200">из {{ $perf['place_of'] ?? '—' }}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </main>
 
-        <footer class="sb-footer scoreboard-chrome max-w-6xl mx-auto w-full">
-            <span>Индивидуальное табло</span>
+        <footer class="sb-footer scoreboard-chrome mx-auto w-full max-w-7xl">
+            <span>Место: Excel-пул · год рождения · категория</span>
             <span id="liveStatus">Live</span>
         </footer>
     </div>
 
     <script>
     (function () {
-        const url = @json(route('scoreboard.performance.live', $category));
+        const url = @json(route('scoreboard.performance.live', $pollCategory));
         const emptyState = document.getElementById('emptyState');
         const liveContent = document.getElementById('liveContent');
         const liveStatus = document.getElementById('liveStatus');
         const tvBtn = document.getElementById('tvModeBtn');
-        const prev = { d: null, a: null, e: null, penalty: null, apparatus_score: null, total: null, place: null };
+        const prev = { db: null, da: null, d: null, a: null, e: null, penalty: null, apparatus_score: null, total: null, place: null };
 
-        function fmt3(v) {
-            if (v === null || v === undefined) return '—';
-            const n = Number(v);
-            return Number.isNaN(n) ? '—' : n.toFixed(3);
-        }
-        function esc(s) {
-            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-        function flashEl(id) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.classList.add('flash-update');
-            setTimeout(() => el.classList.remove('flash-update'), 1600);
-        }
+        const fmt3 = (value) => value === null || value === undefined || Number.isNaN(Number(value)) ? '—' : Number(value).toFixed(3);
+        const esc = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        const flashEl = (id) => {
+            const element = document.getElementById(id);
+            if (! element) return;
+            element.classList.add('flash-update');
+            setTimeout(() => element.classList.remove('flash-update'), 1600);
+        };
+        const setText = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        };
 
         function setTvMode(on) {
             document.body.classList.toggle('scoreboard-tv-mode', on);
@@ -150,96 +143,97 @@
 
         if (tvBtn) {
             tvBtn.addEventListener('click', async () => {
-                const on = !document.body.classList.contains('scoreboard-tv-mode');
+                const on = ! document.body.classList.contains('scoreboard-tv-mode');
                 setTvMode(on);
-                if (on) {
-                    try { await document.documentElement.requestFullscreen(); } catch (e) {}
-                } else {
-                    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
-                }
+                try {
+                    if (on) await document.documentElement.requestFullscreen();
+                    else if (document.fullscreenElement) await document.exitFullscreen();
+                } catch (error) {}
             });
             document.addEventListener('fullscreenchange', () => {
-                if (!document.fullscreenElement && document.body.classList.contains('scoreboard-tv-mode')) {
-                    setTvMode(false);
-                }
+                if (! document.fullscreenElement) setTvMode(false);
             });
+        }
+
+        function updateScore(key, value, id = null) {
+            const elementId = id || ('score' + key.charAt(0).toUpperCase() + key.slice(1));
+            const formatted = fmt3(value);
+            if (prev[key] !== null && prev[key] !== formatted && formatted !== '—') flashEl(elementId);
+            setText(elementId, formatted);
+            prev[key] = formatted;
         }
 
         function render(data) {
             const perf = data.performance;
-            if (!perf) {
+            if (! perf) {
                 emptyState.classList.remove('hidden');
                 liveContent.classList.add('hidden');
                 return;
             }
+
             emptyState.classList.add('hidden');
             liveContent.classList.remove('hidden');
+            setText('phaseLabel', perf.score_visible ? 'Результат' : (data.phase === 'performing' ? 'На ковре' : 'Оценка подсчитывается'));
+            document.getElementById('phaseDot').className = 'h-2.5 w-2.5 rounded-full ' + (data.phase === 'performing' ? 'bg-cyan-400 live-pulse' : 'bg-emerald-400');
+            setText('categoryName', perf.category_name || 'Поток');
+            setText('classificationLabel', perf.classification_label || '');
+            setText('athleteName', perf.athlete || '—');
+            setText('athleteClub', perf.club || '—');
+            setText('apparatusBadge', perf.apparatus_label || '—');
 
-            document.getElementById('phaseLabel').textContent = data.phase_label || '—';
-            const performing = data.phase === 'performing';
-            document.getElementById('phaseDot').className = 'h-2 w-2 rounded-full ' + (performing ? 'bg-cyan-400 live-pulse' : 'bg-slate-500');
+            document.getElementById('startNumberWrap').innerHTML = perf.start_number
+                ? '№ <span class="font-semibold tabular-nums text-slate-300">' + esc(perf.start_number) + '</span>'
+                : '';
+            document.getElementById('groupWrap').classList.toggle('hidden', ! perf.is_group);
+            setText('groupMembers', (perf.members || []).join(' · '));
+
+            document.getElementById('inquiryBanner').classList.toggle('hidden', ! perf.inquiry_active);
+            setText('inquiryPanel', perf.inquiry_panel || 'оценке');
+            document.getElementById('calculatingState').classList.toggle('hidden', !! perf.score_visible);
+            document.getElementById('resultState').classList.toggle('hidden', ! perf.score_visible);
+
+            if (! perf.score_visible) return;
+
+            document.getElementById('normalDComponents').classList.toggle('hidden', !! perf.is_body_only);
+            document.getElementById('bodyOnlyComponents').classList.toggle('hidden', ! perf.is_body_only);
+            if (perf.is_body_only) {
+                updateScore('d', perf.d, 'bodyScoreD');
+                updateScore('a', perf.a, 'bodyScoreA');
+                updateScore('e', perf.e, 'bodyScoreE');
+                updateScore('penalty', perf.penalty, 'bodyScorePenalty');
+            } else {
+                ['db', 'da', 'a', 'e', 'penalty'].forEach(key => updateScore(key, perf[key]));
+            }
+            updateScore('apparatus_score', perf.apparatus_score, 'scoreApparatus_score');
+            updateScore('total', perf.total);
 
             const placeBlock = document.getElementById('placeBlock');
-            const placeVal = perf.place;
-            if (placeVal !== null && placeVal !== undefined) {
-                placeBlock.classList.remove('opacity-40');
-                document.getElementById('placeValue').textContent = placeVal;
-                if (prev.place !== null && prev.place !== placeVal) flashEl('placeValue');
-                prev.place = placeVal;
-            } else {
-                placeBlock.classList.add('opacity-40');
-                document.getElementById('placeValue').textContent = '?';
-                prev.place = null;
-            }
-            document.getElementById('placeOf').textContent = '/ ' + (perf.place_of ?? '—');
-            document.getElementById('poolLabel').textContent = perf.pool_label ? 'Пул Excel: ' + perf.pool_label : '';
-
-            document.getElementById('athleteName').textContent = perf.athlete || '—';
-            document.getElementById('athleteClub').textContent = perf.club || '—';
-            document.getElementById('apparatusBadge').textContent = perf.apparatus_label || '—';
-
-            const groupWrap = document.getElementById('groupWrap');
-            if (groupWrap) {
-                groupWrap.classList.toggle('hidden', !perf.is_group);
-                document.getElementById('groupMembers').textContent = (perf.members || []).join(' · ');
-            }
-
-            const startWrap = document.getElementById('startNumberWrap');
-            startWrap.innerHTML = perf.start_number
-                ? '№ <span class="text-slate-300 font-semibold tabular-nums">' + esc(perf.start_number) + '</span>'
-                : '';
-
-            ['d', 'a', 'e', 'penalty', 'apparatus_score', 'total'].forEach(key => {
-                const id = 'score' + key.charAt(0).toUpperCase() + key.slice(1);
-                const val = fmt3(perf[key]);
-                const el = document.getElementById(id);
-                if (el && prev[key] !== null && prev[key] !== val && val !== '—') flashEl(id);
-                if (el) el.textContent = val;
-                prev[key] = val;
-            });
-
-            const judges = data.judges || { submitted: 0, required: 0 };
-            document.getElementById('judgeProgress').textContent = judges.submitted + '/' + judges.required;
-            document.getElementById('judgeProgressBar').style.width =
-                (judges.required > 0 ? Math.round(100 * judges.submitted / judges.required) : 0) + '%';
+            const place = perf.place;
+            placeBlock.classList.toggle('opacity-40', place === null || place === undefined);
+            setText('placeValue', place ?? '—');
+            setText('placeOf', 'из ' + (perf.place_of ?? '—'));
+            if (prev.place !== null && prev.place !== place) flashEl('placeValue');
+            prev.place = place;
         }
 
         let lastRev = null;
         async function tick() {
             try {
-                const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const data = await res.json();
+                const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                if (! response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
                 liveStatus.textContent = 'Обновлено';
-                if (data.rev && data.rev === lastRev) return; // без изменений — пропускаем перерисовку
+                if (data.rev && data.rev === lastRev) return;
                 lastRev = data.rev;
                 render(data);
-            } catch (e) {
-                liveStatus.textContent = 'Ошибка';
+            } catch (error) {
+                liveStatus.textContent = 'Ошибка связи';
             }
         }
+
         setInterval(tick, document.hidden ? 3000 : 1000);
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+        document.addEventListener('visibilitychange', () => { if (! document.hidden) tick(); });
+        render(@json($payload));
         tick();
     })();
     </script>

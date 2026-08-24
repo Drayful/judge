@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Performance;
+use App\Support\ScoreboardUi;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -12,17 +13,29 @@ class ScoreboardJudgeController extends Controller
 {
     public function index(): View
     {
-        $performances = Performance::query()
+        $pendingPerformances = Performance::query()
             ->with(['athlete.members', 'category.tournament'])
             ->whereNotNull('approved_at')
             ->whereNotNull('total')
             ->whereNull('published_at')
             ->whereNull('withdrawn_at')
-            ->orderByDesc('approved_at')
+            ->orderBy('approved_at')
             ->orderBy('id')
             ->get();
 
-        return view('scoreboard-judge.index', compact('performances'));
+        $shownPerformances = Performance::query()
+            ->with(['athlete.members', 'category.tournament'])
+            ->whereNotNull('approved_at')
+            ->whereNotNull('published_at')
+            ->whereNotNull('scoreboard_accepted_at')
+            ->whereNotNull('total')
+            ->whereNull('withdrawn_at')
+            ->latest('scoreboard_accepted_at')
+            ->latest('id')
+            ->limit(30)
+            ->get();
+
+        return view('scoreboard-judge.index', compact('pendingPerformances', 'shownPerformances'));
     }
 
     public function accept(Request $request, Performance $performance): RedirectResponse
@@ -33,17 +46,15 @@ class ScoreboardJudgeController extends Controller
                 abort(422, 'На табло можно принять только подтверждённый главным судьёй результат.');
             }
 
-            if ($locked->published_at === null) {
-                $acceptedAt = now();
-                $locked->update([
-                    'published_at' => $acceptedAt,
-                    'scoreboard_accepted_at' => $acceptedAt,
-                    'scoreboard_accepted_by' => $request->user()?->id,
-                    'status' => 'published',
-                ]);
-            }
+            $acceptedAt = now();
+            $locked->update([
+                'published_at' => $locked->published_at ?? $acceptedAt,
+                'scoreboard_accepted_at' => $acceptedAt,
+                'scoreboard_accepted_by' => $request->user()?->id,
+                'status' => 'published',
+            ]);
         });
 
-        return back()->with('status', 'Результат принят: табло обновлено, время принятия сохранено.');
+        return back()->with('status', 'Результат показан на табло на '.ScoreboardUi::RESULT_HOLD_SECONDS.' секунд.');
     }
 }

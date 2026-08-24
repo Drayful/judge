@@ -190,8 +190,8 @@
                                         Удалить
                                     </button>
                                 </form>
-                                <a class="text-emerald-400 hover:text-emerald-300 hover:underline font-medium text-sm" href="{{ route('secretary.tournament.live', $tr) }}?category={{ $c->id }}">
-                                    Открыть очередь →
+                                <a class="text-sky-300 hover:text-sky-200 hover:underline font-medium text-sm" href="{{ route('secretary.queue.review', $c) }}">
+                                    Просмотр потока →
                                 </a>
                             </div>
                         </div>

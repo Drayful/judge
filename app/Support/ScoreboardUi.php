@@ -12,6 +12,8 @@ class ScoreboardUi
 {
     private const PLACE_PRECISION = 3;
 
+    public const RESULT_HOLD_SECONDS = 12;
+
     /**
      * @return array<string, string>
      */
@@ -61,6 +63,45 @@ class ScoreboardUi
         return $ordered
             ->filter(fn (Performance $p) => $p->status === 'done' && $p->published_at === null)
             ->last();
+    }
+
+    /**
+     * Что именно должен показывать экран в зале:
+     * недавно выбранный оператором результат имеет краткий приоритет,
+     * затем табло возвращается к активной гимнастке турнира.
+     */
+    public static function boardPerformance(Category $fallbackCategory): ?Performance
+    {
+        $fallbackCategory->loadMissing('tournament');
+        $tournament = $fallbackCategory->tournament;
+        if ($tournament === null) {
+            return self::livePerformance($fallbackCategory);
+        }
+
+        $relations = ['athlete.members', 'category.tournament', 'judgeScores.judge', 'inquiries'];
+        $selectedResult = Performance::query()
+            ->with($relations)
+            ->whereHas('category', fn ($query) => $query->where('tournament_id', $tournament->id))
+            ->whereNotNull('published_at')
+            ->whereNotNull('scoreboard_accepted_at')
+            ->where('scoreboard_accepted_at', '>=', now()->subSeconds(self::RESULT_HOLD_SECONDS))
+            ->whereNull('withdrawn_at')
+            ->latest('scoreboard_accepted_at')
+            ->latest('id')
+            ->first();
+
+        if ($selectedResult !== null) {
+            return $selectedResult;
+        }
+
+        $activeCategory = $tournament->active_category_id !== null
+            ? Category::query()
+                ->with('tournament')
+                ->where('tournament_id', $tournament->id)
+                ->find($tournament->active_category_id)
+            : null;
+
+        return self::livePerformance($activeCategory ?? $fallbackCategory);
     }
 
     public static function performancePhase(?Performance $perf): string
@@ -145,10 +186,26 @@ class ScoreboardUi
 
         $sheet = $entry?->importSheet();
         if ($sheet !== null) {
-            $athleteIds = Entry::query()
+            $sheetEntries = Entry::query()
                 ->where('tournament_id', $tournament->id)
-                ->get(['athlete_id', 'meta'])
-                ->filter(fn (Entry $candidate) => $candidate->importSheet() === $sheet)
+                ->get(['athlete_id', 'birth_year', 'division', 'meta'])
+                ->filter(fn (Entry $candidate) => $candidate->importSheet() === $sheet);
+
+            $birthYear = $category->resolvedBirthYear();
+            $division = $category->resolvedDivision();
+            $classifiedEntries = $sheetEntries->filter(function (Entry $candidate) use ($birthYear, $division): bool {
+                if ($birthYear !== null && (int) $candidate->birth_year !== $birthYear) {
+                    return false;
+                }
+
+                return $division === null
+                    || strtoupper(trim((string) $candidate->division)) === $division;
+            });
+
+            // У старых импортов год/категория могли не сохраниться в entries.
+            // В этом случае оставляем прежний безопасный пул по одному Excel-листу.
+            $poolEntries = $classifiedEntries->isNotEmpty() ? $classifiedEntries : $sheetEntries;
+            $athleteIds = $poolEntries
                 ->pluck('athlete_id')
                 ->map(fn ($id) => (int) $id)
                 ->unique()
@@ -186,9 +243,9 @@ class ScoreboardUi
         $category->loadMissing('tournament');
         $pool = self::rankingPool($category, $performance);
         $poolAthleteIds = $pool['athlete_ids'];
-        $categoryIds = $poolAthleteIds !== null
-            ? $category->tournament?->categories()->pluck('id')->map(fn ($id) => (int) $id)->all() ?? [$category->id]
-            : self::groupCategoryIds($category);
+        // Даже при совпавшем Excel-листе никогда не смешиваем результаты другого
+        // года или категории: потоки объединяются только внутри одной группы.
+        $categoryIds = self::groupCategoryIds($category);
 
         $published = Performance::query()
             ->whereIn('category_id', $categoryIds)
@@ -331,6 +388,16 @@ class ScoreboardUi
         $phase = self::performancePhase($perf);
         $isVisibleOnBoard = $perf->published_at !== null;
         $inq = $perf->inquiries->sortByDesc('id')->first();
+        $isBodyOnly = $perf->isBodyOnlyApparatus();
+        $scoreRows = SecretaryLiveUi::scoreRowsBySlot($perf, $category, true);
+        $dbLeader = $scoreRows['DB1'] ?? null;
+        $daLeader = $scoreRows['DA1'] ?? null;
+        $officialDb = $dbLeader?->average_submitted_at !== null && $dbLeader?->average_score !== null
+            ? (float) $dbLeader->average_score
+            : ($perf->db_average !== null ? (float) $perf->db_average : null);
+        $officialDa = $daLeader?->average_submitted_at !== null && $daLeader?->average_score !== null
+            ? (float) $daLeader->average_score
+            : ($perf->da_average !== null ? (float) $perf->da_average : null);
         $judgeSlots = SecretaryLiveUi::judgeSlots($perf, $category);
         $mainSlots = collect($judgeSlots)->filter(
             fn ($s) => in_array($s['label'], SecretaryLiveUi::AUTO_ADVANCE_REQUIRED_LABELS, true) && ! $s['inactive']
@@ -343,11 +410,16 @@ class ScoreboardUi
         $overallTotal = $ranking['overall_total'] ?? null;
         $notPerformed = $isVisibleOnBoard && $overallTotal !== null && abs($overallTotal) < 0.0005;
 
+        $displayUntil = $perf->scoreboard_accepted_at
+            ?->copy()
+            ?->addSeconds(self::RESULT_HOLD_SECONDS);
+
         $rev = md5(implode('|', [
             $perf->id, $perf->status, $phase,
             $perf->d_score, $perf->a_score, $perf->e_score, $perf->penalty, $perf->total, $overallTotal,
             $place, $placeOf, $submittedMain, $requiredMain,
             $perf->finalized_at?->getTimestamp(), $perf->published_at?->getTimestamp(),
+            $perf->scoreboard_accepted_at?->getTimestamp(),
             $inq?->status,
         ]));
 
@@ -360,12 +432,20 @@ class ScoreboardUi
                 'club' => $perf->athlete?->club,
                 'apparatus' => $perf->apparatus,
                 'apparatus_label' => self::apparatusLabel($perf->apparatus),
+                'category_name' => $category->name,
+                'classification_label' => collect([
+                    $category->resolvedBirthYear() ? $category->resolvedBirthYear().' г.р.' : null,
+                    $category->resolvedDivision() ? 'кат. '.$category->resolvedDivision() : null,
+                ])->filter()->implode(', '),
                 'is_group' => $category->program === 'group' || (bool) $perf->athlete?->is_team,
+                'is_body_only' => $isBodyOnly,
                 'members' => (bool) $perf->athlete?->is_team
                     ? $perf->athlete->members->map(fn ($m) => trim(($m->last_name ?? '').' '.($m->first_name ?? '')))->values()->all()
                     : [],
                 'status' => $perf->status,
                 'd' => $isVisibleOnBoard ? $perf->d_score : null,
+                'db' => $isVisibleOnBoard && ! $isBodyOnly ? $officialDb : null,
+                'da' => $isVisibleOnBoard && ! $isBodyOnly ? $officialDa : null,
                 'a' => $isVisibleOnBoard ? $perf->a_score : null,
                 'e' => $isVisibleOnBoard ? $perf->e_score : null,
                 'penalty' => $isVisibleOnBoard ? $perf->penalty : null,
@@ -380,6 +460,9 @@ class ScoreboardUi
                 'finalized_at' => $perf->finalized_at?->toIso8601String(),
                 'published_at' => $perf->published_at?->toIso8601String(),
                 'inquiry_status' => $inq?->status,
+                'inquiry_panel' => $inq?->subpanel ? strtoupper($inq->subpanel) : strtoupper((string) ($inq?->panel ?? '')),
+                'inquiry_active' => in_array($inq?->status, ['submitted', 'under_review'], true),
+                'scoreboard_display_until' => $displayUntil?->toIso8601String(),
             ],
             'phase' => $phase,
             'phase_label' => self::phaseLabel($phase),

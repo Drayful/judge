@@ -14,7 +14,10 @@ class AsyncPageScrollTest extends TestCase
         $this->assertStringContainsString("htmlElement.style.overflowAnchor = 'none'", $source);
         $this->assertStringContainsString("body.style.overflowAnchor = 'none'", $source);
         $this->assertStringContainsString("htmlElement.style.scrollBehavior = 'auto'", $source);
-        $this->assertGreaterThanOrEqual(3, substr_count($source, 'restoreScroll();'));
+        $this->assertGreaterThanOrEqual(2, substr_count($source, 'restoreScroll();'));
+        $this->assertStringContainsString('[0, 50, 150, 350, 650]', $source);
+        $this->assertStringContainsString('scrollIntentRevision !== initialScrollIntentRevision', $source);
+        $this->assertStringContainsString("history.scrollRestoration = 'manual'", $source);
         $this->assertStringContainsString('htmlElement.style.overflowAnchor = previousHtmlOverflowAnchor', $source);
         $this->assertStringContainsString('body.style.overflowAnchor = previousBodyOverflowAnchor', $source);
     }

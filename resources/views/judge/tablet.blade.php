@@ -41,16 +41,16 @@
         <div class="judge-shell w-full max-w-[1600px] mx-auto px-2.5 py-2.5 flex-1 min-h-0 flex flex-col gap-2.5">
 
             {{-- ====== ШАПКА (одна строка) ====== --}}
-            <div class="judge-topbar shrink-0 flex items-center gap-2 {{ $pKey === 'e' ? 'h-20' : 'h-14' }} px-2">
+            <div class="judge-topbar shrink-0 flex h-20 items-center gap-2 px-2">
                 <a href="{{ route('judge.tournaments') }}" class="judge-back-button grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg text-slate-300 hover:text-white" aria-label="Назад к турнирам">←</a>
 
                 <div class="flex-1 min-w-0 px-2 py-1 flex items-center gap-3 h-full">
                     @if($athlete)
-                        <div class="min-w-0 {{ $pKey === 'e' ? 'w-full' : '' }}">
-                            <div class="{{ $pKey === 'e' ? 'text-[11px]' : 'text-[9px]' }} font-semibold uppercase tracking-[0.22em] text-slate-500">Live performance</div>
-                            <div class="flex min-w-0 {{ $pKey === 'e' ? 'flex-col items-start gap-0.5' : 'items-baseline gap-3' }}">
-                                <span @if($pKey === 'e') data-e-large-athlete-name @endif class="{{ $pKey === 'e' ? 'text-3xl md:text-4xl leading-none' : 'text-lg' }} max-w-full font-bold tracking-tight text-white truncate">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
-                                <span class="{{ $pKey === 'e' ? 'text-sm' : 'text-[11px]' }} max-w-full text-slate-400 truncate">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
+                        <div class="min-w-0 w-full">
+                            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Live performance</div>
+                            <div class="flex min-w-0 flex-col items-start gap-0.5">
+                                <span @if($pKey === 'e') data-e-large-athlete-name @endif class="{{ $pKey === 'e' ? 'text-3xl md:text-4xl' : 'text-2xl md:text-3xl' }} max-w-full truncate font-bold leading-none tracking-tight text-white">{{ $athlete->last_name }} {{ $athlete->first_name }}</span>
+                                <span class="max-w-full truncate text-sm text-slate-300">№ {{ $current?->start_number ?? '—' }} · {{ $category->name }} · {{ $current->apparatus ?? '—' }} · {{ $cityLine }}</span>
                             </div>
                         </div>
                     @else
@@ -370,15 +370,6 @@
                     }
 
                     this.$watch('actions', () => this.publishLiveAction('Изменён черновик оценки'));
-                    this.$watch('pendingSymbol', (value) => {
-                        if (value) this.publishLiveAction('Выбран элемент: ' + (value.label || value.symbol));
-                    });
-                    this.$watch('pendingDc', (value) => {
-                        if (value) this.publishLiveAction('Выбран тип сотрудничества: ' + (value.label || value.symbol));
-                    });
-                    this.$watch('acroPending', (value) => {
-                        if (value) this.publishLiveAction('Включён режим: акробатика');
-                    });
                     this.$watch('ageGroup', (value) => this.publishLiveAction('Выбрана возрастная группа: ' + value));
                 },
 
@@ -777,14 +768,15 @@
                     }
                     return tag + ' ' + Number(a.v).toFixed(1);
                 },
-                /** «Х» (DA индивид.) — несделанная акробатика. */
+                /** «Х» (DA индивид.) — обычный элемент или акробатика, если её режим был выбран. */
                 markAcroNotDone() {
+                    const isAcro = this.acroPending;
                     this.acroPending = false;
                     this.actions.unshift({
                         v: 0,
-                        acro: true,
+                        acro: isAcro,
                         notDone: true,
-                        label: 'Акробатика',
+                        label: isAcro ? 'Акробатика' : 'Элемент',
                     });
                 },
                 /** «Х» (DA группа) — сотрудничество не выполнено: занимает слот DC, 0 баллов. */
@@ -1042,7 +1034,8 @@
                 /**
                  * DA: засчитываются максимум 12 (юниоры) / 15 (сеньоры) элементов
                  * в порядке ввода; акробатик среди них не больше 3.
-                 * Несделанная акробатика («Х») занимает слот акробатики с 0 баллов.
+                 * «Х» занимает слот элемента с 0 баллов; после выбора «Акробатика»
+                 * он также занимает один из слотов акробатики.
                  */
                 daComputed() {
                     if (this.groupDaFlow) {
@@ -1057,7 +1050,9 @@
                         const a = this.actions[i];
                         const isAcro = !! a.acro;
                         if (a.notDone) {
-                            if (isAcro && acro < lim.acro && used < lim.elements) { acro += 1; used += 1; }
+                            if (used >= lim.elements || (isAcro && acro >= lim.acro)) continue;
+                            used += 1;
+                            if (isAcro) acro += 1;
                             continue;
                         }
                         if (used >= lim.elements) continue;

@@ -416,6 +416,7 @@ class SecretaryController extends Controller
     public function groups(Tournament $tournament): View
     {
         $tournament->load([
+            'categories' => fn ($q) => $q->orderedByPerformanceTime(),
             'groups' => fn ($q) => $q->orderBy('order_index')->orderBy('id'),
             'groups.categories' => fn ($q) => $q->orderedByPerformanceTime(),
             'groups.categories.sessions',
@@ -1605,11 +1606,20 @@ class SecretaryController extends Controller
         return view('secretary.queue', $this->queueViewData($category, $session));
     }
 
+    public function reviewQueue(Request $request, Category $category): View
+    {
+        $category->loadMissing('tournament');
+        $session = $this->requestedStreamSession($request, $category);
+
+        return view('secretary.stream-review', $this->queueViewData($category, $session));
+    }
+
     /**
      * Лёгкий опрос для автообновления Live/очереди (оценки судей без WebSocket).
      */
     public function queuePing(Request $request, Category $category): JsonResponse
     {
+        $category->loadMissing('tournament');
         $session = $this->requestedStreamSession($request, $category);
         $performances = Performance::query()
             ->where('category_id', $category->id)
@@ -1665,15 +1675,29 @@ class SecretaryController extends Controller
                 ->implode(';');
         }
 
-        $catSig = $category->id.':'.($session?->id ?? 'all').':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->auto_advance ? '1' : '0');
+        $catSig = $category->id.':'.($session?->id ?? 'all').':'.$category->updated_at?->getTimestamp().':'.implode(',', $category->inactiveJudgeSlotList()).':'.($category->autoAdvanceEnabled() ? '1' : '0');
 
         // Промежуточные нажатия судей остаются в журнале, но не должны заменять
         // всю Live-страницу. Журнал обновится при следующем значимом изменении.
         $rev = md5($perfSig."\n".$scoresDigest."\n".$catSig);
 
+        $redirectUrl = null;
+        $activeCategoryId = $category->tournament?->active_category_id;
+        if ($category->tournament?->isCategoryInCombinedLiveQueue($category)
+            && $category->tournament?->isCategoryInCombinedLiveQueue((int) $activeCategoryId)
+            && $activeCategoryId
+            && $activeCategoryId !== $category->id) {
+            $redirectUrl = route('secretary.tournament.live', [
+                'tournament' => $category->tournament_id,
+                'category' => $activeCategoryId,
+                'session' => $category->tournament?->active_stream_session_id,
+            ]);
+        }
+
         return response()->json([
             'rev' => $rev,
             'current_performance_id' => $current?->id,
+            'redirect_url' => $redirectUrl,
         ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
@@ -1734,19 +1758,63 @@ class SecretaryController extends Controller
                 ->orderedByPerformanceTime()
                 ->get()
             : collect();
+        $combinedLiveQueue = collect();
+        $combinedCategoryIds = $tournament?->combinedLiveCategoryIds() ?? [];
+        if ($tournament?->hasCombinedLiveQueue()
+            && in_array($category->id, $combinedCategoryIds, true)) {
+            $sessionNo = $session?->session_no;
+            $combinedLiveQueue = Category::query()
+                ->where('tournament_id', $category->tournament_id)
+                ->whereIn('id', $combinedCategoryIds)
+                ->get()
+                ->sortBy(fn (Category $stream) => array_search($stream->id, $combinedCategoryIds, true))
+                ->values()
+                ->map(function (Category $stream) use ($sessionNo) {
+                    $targetSessionId = $sessionNo !== null
+                        ? $stream->sessions()->where('session_no', $sessionNo)->value('id')
+                        : null;
+                    $rows = Performance::query()
+                        ->with('athlete')
+                        ->where('category_id', $stream->id)
+                        ->when(
+                            $targetSessionId !== null,
+                            fn ($query) => $query->where('stream_session_id', $targetSessionId),
+                            fn ($query) => $query->whereNull('stream_session_id'),
+                        )
+                        ->orderBy('order_index')
+                        ->orderBy('id')
+                        ->get();
+
+                    return [
+                        'category' => $stream,
+                        'session_id' => $targetSessionId,
+                        'performances' => $rows,
+                    ];
+                });
+        }
 
         // История по каждой гимнастке потока: все индивидуальные оценки доступны
         // прямо из общей таблицы, включая отключённые позднее судейские слоты.
         $scoreHistoryByPerformance = $ordered->mapWithKeys(function (Performance $performance) use ($category) {
             $slots = [];
+            $rules = $performance->category?->scoring_rules ?? $category->scoring_rules ?? [];
             foreach (SecretaryLiveUi::scoreRowsBySlot($performance, $category, true) as $slot => $row) {
                 if ($row === null) {
                     continue;
                 }
+                $score = $row->score !== null ? (float) $row->score : null;
+                $isDeduction = in_array($row->panel, ['a', 'e'], true);
+                $base = (float) ($rules[$row->panel.'_base'] ?? 10.0);
+                $displayScore = $score;
+                if ($isDeduction && $score !== null) {
+                    $displayScore = max(0.0, $base - $score);
+                }
                 $slots[$slot] = [
                     'slot' => $slot,
                     'judge' => $row->judge?->name ?? '—',
-                    'score' => $row->score !== null ? number_format((float) $row->score, 3, '.', '') : '—',
+                    'score' => $score !== null ? number_format($score, 3, '.', '') : '—',
+                    'display_score' => $displayScore !== null ? number_format($displayScore, 3, '.', '') : '—',
+                    'display_label' => $isDeduction ? 'Сбавка' : 'Оценка',
                     'age_group' => $row->age_group,
                     'submitted_at' => $row->submitted_at?->format('H:i:s'),
                     'entries' => $row->entries ?? [],
@@ -1760,6 +1828,7 @@ class SecretaryController extends Controller
                 'athlete' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
                 'update_url' => route('secretary.performance.updateJudgeScore', $performance),
                 'return_url' => route('secretary.performance.returnScores', $performance),
+                'live_history_url' => route('secretary.performance.scoreLiveHistory', $performance),
                 'slots' => $slots,
                 'spread' => $spread,
             ]];
@@ -1802,6 +1871,7 @@ class SecretaryController extends Controller
             'streamSession' => $session,
             'categorySessions' => $category->sessions()->get(),
             'tournamentCategories' => $tournamentCategories,
+            'combinedLiveQueue' => $combinedLiveQueue,
             'performances' => $performances,
             'orderedPerformances' => $ordered,
             'currentPerformance' => $currentPerformance,
@@ -1879,7 +1949,7 @@ class SecretaryController extends Controller
             $locked->approved_at = now();
             $locked->save();
 
-            if ($category !== null && $locked->status === 'performing') {
+            if ($category?->autoAdvanceEnabled() && $locked->status === 'performing') {
                 $moved = StreamAdvanceService::advanceToNextInCategory($category, $locked->stream_session_id);
             }
         });
@@ -2009,6 +2079,75 @@ class SecretaryController extends Controller
     }
 
     /**
+     * Текущие действия одного судейского слота для модального Live-просмотра.
+     * Ничего не меняет в оценке и не переключает активный поток турнира.
+     */
+    public function scoreLiveHistory(Performance $performance, Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+        ]);
+        $slot = strtoupper((string) $data['slot']);
+        $performance->loadMissing(['athlete', 'category.tournament', 'judgeScores.judge']);
+        $category = $performance->category;
+        abort_unless($category !== null, 404);
+
+        $row = SecretaryLiveUi::scoreRowsBySlot($performance, $category, true)[$slot] ?? null;
+        $score = null;
+        if ($row !== null) {
+            $rawScore = $row->score !== null ? (float) $row->score : null;
+            $isDeduction = in_array($row->panel, ['a', 'e'], true);
+            $rules = $category->scoring_rules ?? [];
+            $base = (float) ($rules[$row->panel.'_base'] ?? 10.0);
+            $displayScore = $isDeduction && $rawScore !== null
+                ? max(0.0, $base - $rawScore)
+                : $rawScore;
+            $score = [
+                'judge' => $row->judge?->name ?? '—',
+                'score' => $rawScore !== null ? number_format($rawScore, 3, '.', '') : '—',
+                'display_score' => $displayScore !== null ? number_format($displayScore, 3, '.', '') : '—',
+                'display_label' => $isDeduction ? 'Сбавка' : 'Оценка',
+                'submitted_at' => $row->submitted_at?->format('H:i:s'),
+                'age_group' => $row->age_group,
+                'entries' => $row->entries ?? [],
+            ];
+        }
+
+        $actions = JudgeScoreAction::query()
+            ->with('judge:id,name')
+            ->where('performance_id', $performance->id)
+            ->where('slot', $slot)
+            // Незавершённый первый шаг DB/DA не является выставленной оценкой.
+            // Такие записи могли сохраниться у клиентов старой версии.
+            ->where('action', 'not like', 'Выбран элемент:%')
+            ->where('action', 'not like', 'Выбран тип сотрудничества:%')
+            ->where('action', '!=', 'Включён режим: акробатика')
+            ->latest('id')
+            ->limit(100)
+            ->get()
+            ->map(fn (JudgeScoreAction $action) => [
+                'id' => $action->id,
+                'judge' => $action->judge?->name ?? 'Судья',
+                'action' => $action->action,
+                'draft_score' => $action->draft_score !== null
+                    ? number_format((float) $action->draft_score, 3, '.', '')
+                    : null,
+                'entries' => $action->entries ?? [],
+                'created_at' => $action->created_at?->format('H:i:s'),
+            ])
+            ->all();
+
+        return response()->json([
+            'ok' => true,
+            'performance_id' => $performance->id,
+            'athlete' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
+            'slot' => $slot,
+            'score' => $score,
+            'actions' => $actions,
+        ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+
+    /**
      * Исправить оценку конкретного судьи (секретарь / главный судья).
      */
     public function updateJudgeScore(Performance $performance, Request $request): RedirectResponse
@@ -2046,31 +2185,45 @@ class SecretaryController extends Controller
     }
 
     /**
-     * Выставить финальную оценку вручную (секретарь / главный судья): D/A/E/штраф
-     * задаются напрямую, оценки судей больше не пересчитывают итог, пока действует
-     * ручной режим. Итог фиксируется сразу.
+     * Выставить финальную оценку вручную (секретарь / главный судья): DB/DA/A/E/сбавка.
+     * Единый d_score сохраняется как обратная совместимость для старых форм/API.
      */
     public function setFinalScore(Performance $performance, Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'd_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'db_score' => ['nullable', 'required_with:da_score', 'numeric', 'min:0', 'max:99.999'],
+            'da_score' => ['nullable', 'required_with:db_score', 'numeric', 'min:0', 'max:99.999'],
+            'd_score' => ['nullable', 'required_without_all:db_score,da_score', 'numeric', 'min:0', 'max:99.999'],
             'a_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
             'e_score' => ['required', 'numeric', 'min:0', 'max:99.999'],
             'penalty' => ['nullable', 'numeric', 'min:0', 'max:99.999'],
         ], [], [
+            'db_score' => 'оценка DB',
+            'da_score' => 'оценка DA',
             'd_score' => 'оценка D',
             'a_score' => 'оценка A',
             'e_score' => 'оценка E',
-            'penalty' => 'штраф',
+            'penalty' => 'сбавка',
         ]);
+
+        $hasSplitD = isset($data['db_score'], $data['da_score']);
+        $dbScore = $hasSplitD ? round((float) $data['db_score'], 3) : null;
+        $daScore = $hasSplitD ? round((float) $data['da_score'], 3) : null;
+        $dScore = $hasSplitD
+            ? round($dbScore + $daScore, 3)
+            : round((float) $data['d_score'], 3);
 
         $penalty = isset($data['penalty']) && $data['penalty'] !== null && $data['penalty'] !== ''
             ? round((float) $data['penalty'], 3)
             : null;
 
-        DB::transaction(function () use ($performance, $request, $data, $penalty) {
+        DB::transaction(function () use ($performance, $request, $data, $penalty, $hasSplitD, $dbScore, $daScore, $dScore) {
             $performance = Performance::query()->lockForUpdate()->findOrFail($performance->id);
-            $performance->d_score = round((float) $data['d_score'], 3);
+            $performance->d_score = $dScore;
+            if ($hasSplitD) {
+                $performance->db_average = $dbScore;
+                $performance->da_average = $daScore;
+            }
             $performance->a_score = round((float) $data['a_score'], 3);
             $performance->e_score = round((float) $data['e_score'], 3);
             $performance->penalty = $penalty;
@@ -2451,10 +2604,45 @@ class SecretaryController extends Controller
 
     public function setAutoAdvance(Request $request, Category $category): RedirectResponse
     {
-        $category->auto_advance = true;
-        $category->save();
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+        ]);
+        $enabled = (bool) $data['enabled'];
+        $category->update(['auto_advance' => $enabled]);
 
-        return back()->with('status', 'Автопереход всегда включён: после всех основных оценок поток перейдёт к следующей гимнастке.');
+        return back()->with('status', $enabled
+            ? 'Автопереход включён для этого потока.'
+            : 'Автопереход выключен: переход выполняется только вручную.');
+    }
+
+    public function setTournamentCombinedLiveQueue(Request $request, Tournament $tournament): RedirectResponse
+    {
+        $data = $request->validate([
+            'category_ids' => ['nullable', 'array'],
+            'category_ids.*' => ['integer', 'distinct'],
+        ]);
+
+        $requestedIds = collect($data['category_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values();
+        $selectedIds = $tournament->categories()
+            ->whereIn('id', $requestedIds)
+            ->orderedByPerformanceTime()
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (count($selectedIds) !== $requestedIds->count()) {
+            return back()->withErrors(['combined_queue' => 'Один из выбранных потоков не относится к этому турниру.']);
+        }
+        if (count($selectedIds) === 1) {
+            return back()->withErrors(['combined_queue' => 'Для объединения выберите минимум два потока или снимите все отметки.']);
+        }
+
+        $tournament->update(['live_queue_category_ids' => $selectedIds]);
+
+        return redirect()->to(route('secretary.tournament.groups', $tournament).'#tournament-live-queue')
+            ->with('status', count($selectedIds) >= 2
+                ? 'Выбранные потоки объединены только для Live-очереди. Протоколы, места и выгрузки не меняются.'
+                : 'Объединённая Live-очередь этой группы отключена.');
     }
 
     /**
@@ -2478,16 +2666,18 @@ class SecretaryController extends Controller
             $current[] = $slot;
         }
 
-        $category->inactive_judge_slots = $current;
-        $category->save();
+        $category->loadMissing('tournament');
+        $category->tournament?->update(['inactive_judge_slots' => $current]);
+        Category::query()
+            ->where('tournament_id', $category->tournament_id)
+            ->update(['inactive_judge_slots' => $current]);
 
         Performance::query()
-            ->where('category_id', $category->id)
+            ->whereHas('category', fn ($query) => $query->where('tournament_id', $category->tournament_id))
             ->whereNull('approved_at')
             ->where('scores_overridden', false)
-            ->each(function (Performance $performance) use ($category) {
-                $performance->setRelation('category', $category);
-                $performance->load('judgeScores.judge');
+            ->each(function (Performance $performance) {
+                $performance->load(['judgeScores.judge', 'category.tournament']);
                 $performance->recalculateTotals();
                 $performance->finalized_at = null;
                 $performance->published_at = null;
@@ -2497,8 +2687,8 @@ class SecretaryController extends Controller
             });
 
         $message = $shouldBeActive
-            ? "Слот {$slot} включён."
-            : "Слот {$slot} отключён — оценки этой позиции не требуются.";
+            ? "Слот {$slot} включён для всего турнира."
+            : "Слот {$slot} отключён для всего турнира — оценки этой позиции не требуются.";
 
         if ($request->expectsJson()) {
             return response()->json([

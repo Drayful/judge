@@ -58,6 +58,27 @@ class ManualFinalScoreTest extends TestCase
         $this->assertEqualsWithDelta(20.5, (float) $perf->total, 0.0001);
     }
 
+    public function test_manual_final_score_accepts_db_and_da_and_stores_their_sum_as_d(): void
+    {
+        $secretary = User::factory()->create(['role' => 'secretary']);
+        $perf = $this->performance();
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.performance.setFinalScore', $perf), [
+                'db_score' => 2.3,
+                'da_score' => 3.2,
+                'a_score' => 8.2,
+                'e_score' => 7.1,
+                'penalty' => 0.3,
+            ])->assertRedirect();
+
+        $perf->refresh();
+        $this->assertEqualsWithDelta(2.3, (float) $perf->db_average, 0.0001);
+        $this->assertEqualsWithDelta(3.2, (float) $perf->da_average, 0.0001);
+        $this->assertEqualsWithDelta(5.5, (float) $perf->d_score, 0.0001);
+        $this->assertEqualsWithDelta(20.5, (float) $perf->total, 0.0001);
+    }
+
     public function test_chief_judge_allowed_and_judge_scores_do_not_override_manual(): void
     {
         $chief = User::factory()->create(['role' => 'chief_judge']);

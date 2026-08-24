@@ -1,15 +1,17 @@
 {{-- DA-бригада: сложность предмета. Отдельный планшет.
      Логика: значения (0.2/0.3/0.4/0.5) напрямую, либо «Акробатика» + значение.
      Засчитываются только первые ТРИ акробатики — 4-я и далее уходят в историю,
-     но в итог не попадают («не учтено»). «Х» — несделанная акробатика (0 баллов). --}}
+     но в итог не попадают («не учтено»). «Х» — несделанный обычный элемент,
+     а после выбора «Акробатика» — несделанная акробатика (0 баллов). --}}
 
-{{-- ====== ЛЕВАЯ ЗОНА: Х (несделанная акробатика) + 0.2 + Акробатика ====== --}}
+{{-- ====== ЛЕВАЯ ЗОНА: Х (элемент / акробатика не сделаны) + 0.2 + Акробатика ====== --}}
 <div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
-    {{-- «Х» — несделанная акробатика: занимает слот, в итог 0 (размер как у цифр) --}}
+    {{-- «Х» — обычный элемент; после выбора режима A — акробатика. Занимает слот, в итог 0. --}}
     <button type="button" @click="markAcroNotDone()"
+        :class="acroPending ? 'ring-2 ring-amber-400 brightness-110' : ''"
         class="flex-1 min-h-0 rounded-2xl bg-[#5a1d28] hover:bg-[#74232f] border border-rose-800/60 text-white font-bold active:scale-[0.98] flex flex-col items-center justify-center shadow-md transition">
         <div class="text-4xl xl:text-5xl leading-none font-black">Х</div>
-        <div class="mt-1 text-[10px] text-rose-200/80">не сделана · 0</div>
+        <div class="mt-1 text-[10px] text-rose-100" x-text="acroPending ? 'акробатика не сделана · 0' : 'элемент не сделан · 0'"></div>
     </button>
 
     <button type="button" @click="assignValue(0.2)"
@@ -54,10 +56,10 @@
 
         {{-- Зачёт элементов --}}
         <div class="flex items-center gap-2 text-[10px] font-mono tabular-nums">
-            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
                   :class="daComputed().used >= daLim().elements ? 'text-amber-300' : 'text-slate-300'"
                   x-text="'Элементов: ' + daComputed().used + '/' + daLim().elements"></span>
-            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
                   :class="daComputed().acro >= daLim().acro ? 'text-amber-300' : 'text-slate-300'"
                   x-text="'Акробатик: ' + daComputed().acro + '/' + daLim().acro"></span>
         </div>

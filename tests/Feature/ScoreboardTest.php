@@ -9,6 +9,7 @@ use App\Models\JudgeScore;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -577,5 +578,116 @@ class ScoreboardTest extends TestCase
         $response->assertJsonPath('rows.1.athlete', 'Вторая Белла');
         $response->assertJsonPath('rows.1.place', 2);
         $response->assertJsonPath('rows.1.total', 25);
+    }
+
+    public function test_operator_queue_is_oldest_approved_first(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup']);
+        $category = Category::create(['tournament_id' => $tournament->id, 'name' => '2016 B']);
+        $earlyAthlete = Athlete::create(['first_name' => 'Ранняя', 'last_name' => 'Оценка']);
+        $lateAthlete = Athlete::create(['first_name' => 'Поздняя', 'last_name' => 'Оценка']);
+
+        foreach ([[$earlyAthlete, '10:00:00'], [$lateAthlete, '10:01:00']] as [$athlete, $time]) {
+            Performance::create([
+                'category_id' => $category->id,
+                'athlete_id' => $athlete->id,
+                'status' => 'done',
+                'total' => 20,
+                'finalized_at' => "2026-08-24 {$time}",
+                'approved_at' => "2026-08-24 {$time}",
+            ]);
+        }
+
+        $operator = User::factory()->create(['role' => 'scoreboard_judge']);
+        $this->actingAs($operator)
+            ->get(route('scoreboard-judge.index'))
+            ->assertOk()
+            ->assertSeeInOrder(['Оценка Ранняя', 'Оценка Поздняя']);
+    }
+
+    public function test_operator_selected_result_temporarily_overrides_current_athlete(): void
+    {
+        Carbon::setTestNow('2026-08-24 12:00:00');
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $activeCategory = Category::create(['tournament_id' => $tournament->id, 'name' => 'Поток 1', 'is_published' => true]);
+        $resultCategory = Category::create(['tournament_id' => $tournament->id, 'name' => 'Поток 2', 'is_published' => true]);
+        $tournament->update(['active_category_id' => $activeCategory->id]);
+
+        $currentAthlete = Athlete::create(['first_name' => 'Текущая', 'last_name' => 'Гимнастка']);
+        Performance::create([
+            'category_id' => $activeCategory->id,
+            'athlete_id' => $currentAthlete->id,
+            'status' => 'performing',
+        ]);
+        $shownAthlete = Athlete::create(['first_name' => 'Показанная', 'last_name' => 'Оценка']);
+        Performance::create([
+            'category_id' => $resultCategory->id,
+            'athlete_id' => $shownAthlete->id,
+            'status' => 'published',
+            'total' => 25,
+            'published_at' => now(),
+            'scoreboard_accepted_at' => now(),
+            'is_counted' => true,
+        ]);
+
+        $this->getJson(route('scoreboard.performance.live', $activeCategory))
+            ->assertOk()
+            ->assertJsonPath('performance.athlete', 'Оценка Показанная')
+            ->assertJsonPath('performance.score_visible', true);
+
+        Carbon::setTestNow(now()->addSeconds(13));
+        $this->getJson(route('scoreboard.performance.live', $activeCategory))
+            ->assertOk()
+            ->assertJsonPath('performance.athlete', 'Гимнастка Текущая')
+            ->assertJsonPath('performance.score_visible', false);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_excel_pool_ranking_never_mixes_another_year_or_division(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2016 B',
+            'birth_year' => 2016, 'division' => 'B', 'is_published' => true,
+        ]);
+        $otherCategory = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2015 A',
+            'birth_year' => 2015, 'division' => 'A', 'is_published' => true,
+        ]);
+        $current = Athlete::create(['first_name' => 'Текущая', 'last_name' => 'Гимнастка']);
+        $leader = Athlete::create(['first_name' => 'Лидер', 'last_name' => 'Гимнастка']);
+
+        foreach ([[$current, 2016, 'B'], [$leader, 2016, 'B']] as $index => [$athlete, $year, $division]) {
+            Entry::create([
+                'tournament_id' => $tournament->id,
+                'athlete_id' => $athlete->id,
+                'program' => 'individual',
+                'birth_year' => $year,
+                'division' => $division,
+                'order_index' => $index + 1,
+                'meta' => ['sheet' => 'Общий лист'],
+            ]);
+        }
+
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $leader->id,
+            'status' => 'published', 'total' => 12, 'published_at' => now(), 'is_counted' => true,
+        ]);
+        Performance::create([
+            'category_id' => $otherCategory->id, 'athlete_id' => $current->id,
+            'status' => 'published', 'total' => 100, 'published_at' => now(), 'is_counted' => true,
+        ]);
+        Performance::create([
+            'category_id' => $category->id, 'athlete_id' => $current->id,
+            'status' => 'performing', 'scores_overridden' => true,
+            'total' => 10, 'published_at' => now(), 'is_counted' => true,
+        ]);
+
+        $this->getJson(route('scoreboard.performance.live', $category))
+            ->assertOk()
+            ->assertJsonPath('performance.total', 10)
+            ->assertJsonPath('performance.place', 2)
+            ->assertJsonPath('performance.place_of', 2);
     }
 }

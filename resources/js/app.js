@@ -7,6 +7,17 @@ window.Alpine = Alpine;
 Alpine.start();
 
 const ASYNC_PAGE_SELECTOR = '[data-async-page]';
+let scrollIntentRevision = 0;
+
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+['wheel', 'touchmove', 'pointerdown'].forEach((eventName) => {
+    window.addEventListener(eventName, () => { scrollIntentRevision += 1; }, { passive: true, capture: true });
+});
+window.addEventListener('keydown', (event) => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+        scrollIntentRevision += 1;
+    }
+}, { capture: true });
 
 const asyncPage = {
     busy: false,
@@ -82,6 +93,14 @@ const asyncPage = {
 
         const scrollX = window.scrollX;
         const scrollY = window.scrollY;
+        const initialScrollIntentRevision = scrollIntentRevision;
+        const nestedScroll = Array.from(current.querySelectorAll('[data-preserve-scroll]'))
+            .map((element) => ({
+                key: element.id || element.dataset.preserveScroll,
+                left: element.scrollLeft,
+                top: element.scrollTop,
+            }))
+            .filter(({ key }) => key);
         const htmlElement = document.documentElement;
         const body = document.body;
         const previousHtmlOverflowAnchor = htmlElement.style.overflowAnchor;
@@ -92,8 +111,15 @@ const asyncPage = {
             ? (active.id ? `#${CSS.escape(active.id)}` : (active.getAttribute('name') ? `[name="${CSS.escape(active.getAttribute('name'))}"]` : null))
             : null;
         const restoreScroll = () => {
+            if (scrollIntentRevision !== initialScrollIntentRevision) return;
             const maxScrollY = Math.max(0, htmlElement.scrollHeight - window.innerHeight);
             window.scrollTo(scrollX, Math.min(scrollY, maxScrollY));
+            nestedScroll.forEach(({ key, left, top }) => {
+                const escaped = CSS.escape(String(key));
+                const element = document.getElementById(key)
+                    || document.querySelector(`[data-preserve-scroll="${escaped}"]`);
+                if (element instanceof HTMLElement) element.scrollTo(left, top);
+            });
         };
 
         // Replacing the whole Live root makes browser scroll anchoring follow
@@ -119,19 +145,22 @@ const asyncPage = {
             await this.executeScripts(newRoot);
             window.dispatchEvent(new CustomEvent('judge:page-updated', { detail: { url } }));
 
-            await new Promise((resolve) => {
-                requestAnimationFrame(() => {
-                    restoreScroll();
-                    if (focusKey) {
-                        const nextFocus = document.querySelector(focusKey);
-                        if (nextFocus instanceof HTMLElement) nextFocus.focus({ preventScroll: true });
-                    }
+            if (focusKey) {
+                const nextFocus = document.querySelector(focusKey);
+                if (nextFocus instanceof HTMLElement) nextFocus.focus({ preventScroll: true });
+            }
+
+            // Images, fonts, Alpine and conditional score blocks can finish laying out
+            // after the first frame. Keep the exact position until layout settles,
+            // but immediately stop restoring when the user starts scrolling.
+            await Promise.all([0, 50, 150, 350, 650].map((delay) => new Promise((resolve) => {
+                setTimeout(() => {
                     requestAnimationFrame(() => {
                         restoreScroll();
                         resolve();
                     });
-                });
-            });
+                }, delay);
+            })));
         } finally {
             htmlElement.style.overflowAnchor = previousHtmlOverflowAnchor;
             body.style.overflowAnchor = previousBodyOverflowAnchor;

@@ -50,6 +50,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/secretary/categories/{category}/queue/ping', [SecretaryController::class, 'queuePing'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.queue.ping');
+    Route::get('/secretary/categories/{category}/review', [SecretaryController::class, 'reviewQueue'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.queue.review');
     Route::post('/secretary/categories/{category}/queue', [SecretaryController::class, 'addToQueue'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.queue.add');
@@ -119,6 +122,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/groups/{group}/streams', [SecretaryController::class, 'generateStreams'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.streams');
+    Route::post('/secretary/tournaments/{tournament}/live-queue', [SecretaryController::class, 'setTournamentCombinedLiveQueue'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.tournament.liveQueue');
     Route::post('/secretary/tournaments/{tournament}/categories/{category}/sessions', [SecretaryController::class, 'storeStreamSession'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.categories.sessions.store');
@@ -194,6 +200,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/performances/{performance}/return-scores', [SecretaryController::class, 'returnScores'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.performance.returnScores');
+    Route::get('/secretary/performances/{performance}/score-live-history', [SecretaryController::class, 'scoreLiveHistory'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.performance.scoreLiveHistory');
     Route::post('/secretary/performances/{performance}/update-judge-score', [SecretaryController::class, 'updateJudgeScore'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.performance.updateJudgeScore');

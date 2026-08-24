@@ -670,7 +670,7 @@ class JudgeController extends Controller
             $locked->save();
             $finalized = true;
 
-            if ($locked->category) {
+            if ($locked->category?->autoAdvanceEnabled()) {
                 $moved = StreamAdvanceService::advanceToNextInCategory(
                     $locked->category,
                     $locked->stream_session_id,

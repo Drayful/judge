@@ -147,17 +147,68 @@
             overflow: hidden;
             border-radius: 9px;
             border-color: rgb(100 116 139 / .44) !important;
-            background-color: rgb(20 29 47) !important;
-            background-image: linear-gradient(145deg, rgb(var(--judge-accent) / .13), transparent 58%, rgb(0 0 0 / .18)) !important;
-            color: rgb(248 250 252) !important;
             box-shadow: 0 7px 18px rgb(0 0 0 / .2), inset 0 1px rgb(255 255 255 / .07);
             transition: transform .12s ease, filter .12s ease, border-color .12s ease, box-shadow .12s ease;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 1px 2px rgb(0 0 0 / .7);
+        }
+
+        .judge-workspace button > div:first-child,
+        .judge-workspace button > span:first-child {
+            font-weight: 800;
+        }
+
+        /* DB/DA: символ и подпись используют всю доступную площадь кнопки. */
+        .judge-workspace button[style*="background-color"] > div:first-child {
+            font-size: clamp(2.5rem, min(7vh, 4.8vw), 5.25rem) !important;
+            line-height: .9 !important;
+        }
+
+        .judge-workspace button[style*="background-color"] > div:last-child:not(:first-child) {
+            margin-top: .45rem !important;
+            font-size: clamp(.95rem, min(2.2vh, 1.6vw), 1.4rem) !important;
+            line-height: 1.05 !important;
+            color: white !important;
+            opacity: 1 !important;
+        }
+
+        .judge-workspace button[class*="text-2xl"],
+        .judge-workspace button[class*="text-3xl"],
+        .judge-workspace button[class*="text-4xl"],
+        .judge-workspace button[class*="text-5xl"],
+        .judge-workspace button[class*="text-6xl"],
+        .judge-workspace button[class*="text-7xl"] {
+            line-height: .95 !important;
+        }
+
+        .judge-status-chip {
+            display: inline-flex;
+            min-height: clamp(2rem, 4.5vh, 2.9rem);
+            align-items: center;
+            justify-content: center;
+            padding: .35rem clamp(.55rem, 1vw, .9rem) !important;
+            font-size: clamp(.9rem, min(2.25vh, 1.35vw), 1.3rem) !important;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+
+        .judge-workspace button > .text-2xl,
+        .judge-workspace button > .text-3xl,
+        .judge-workspace button > .text-4xl {
+            line-height: .95 !important;
+        }
+
+        .judge-workspace button:not([class*="bg-"]):not([style*="background"]) {
+            background-color: rgb(20 29 47);
+            background-image: linear-gradient(145deg, rgb(var(--judge-accent) / .13), transparent 58%, rgb(0 0 0 / .18));
+            color: rgb(248 250 252);
         }
 
         .judge-workspace button:hover {
             border-color: rgb(var(--judge-accent) / .48);
-            background-color: rgb(30 41 59) !important;
             box-shadow: 0 9px 22px rgb(0 0 0 / .26), inset 0 1px rgb(255 255 255 / .1);
+            filter: brightness(1.14);
         }
 
         .judge-workspace button:active {
@@ -234,21 +285,50 @@
         .judge-workspace button[class*="#7a1f2e"],
         .judge-workspace button[class*="#962638"] {
             border-color: rgb(244 63 94 / .4) !important;
-            background-color: rgb(76 18 36) !important;
-            background-image: linear-gradient(145deg, rgb(251 113 133 / .18), transparent 62%) !important;
-            color: rgb(255 228 230) !important;
+            background-color: rgb(159 18 57) !important;
+            background-image: linear-gradient(145deg, rgb(251 113 133 / .4), transparent 62%) !important;
+            color: white !important;
         }
 
         .judge-workspace button[class*="bg-emerald"] {
             border-color: rgb(16 185 129 / .42) !important;
-            background-color: rgb(6 78 59) !important;
-            color: rgb(209 250 229) !important;
+            background-color: rgb(4 120 87) !important;
+            color: white !important;
+        }
+
+        .judge-workspace button[class*="#0f5f6f"],
+        .judge-workspace button[class*="#1e6a85"],
+        .judge-workspace button[class*="#0e6a7a"] {
+            background-color: rgb(8 145 178) !important;
+            border-color: rgb(103 232 249 / .7) !important;
+        }
+
+        .judge-workspace button[class*="#13294b"],
+        .judge-workspace button[class*="#163057"] {
+            background-color: rgb(30 64 175) !important;
+            border-color: rgb(147 197 253 / .65) !important;
+        }
+
+        .judge-workspace button[class*="#4a3d8a"],
+        .judge-workspace button[class*="#5547a5"] {
+            background-color: rgb(109 40 217) !important;
+            border-color: rgb(196 181 253 / .7) !important;
         }
 
         /* Tailwind arbitrary pixel utilities do not follow the root scale. */
-        .judge-console .text-\[9px\] { font-size: .5625rem !important; }
-        .judge-console .text-\[10px\] { font-size: .625rem !important; }
-        .judge-console .text-\[11px\] { font-size: .6875rem !important; }
+        .judge-console .text-\[9px\] { font-size: .75rem !important; }
+        .judge-console .text-\[10px\] { font-size: .8125rem !important; }
+        .judge-console .text-\[11px\] { font-size: .875rem !important; }
+        .judge-workspace button.text-xs { font-size: 1rem !important; line-height: 1.25rem !important; }
+        .judge-workspace button.text-sm { font-size: 1.0625rem !important; line-height: 1.35rem !important; }
+        .judge-workspace button.text-base { font-size: 1.125rem !important; line-height: 1.45rem !important; }
+        .judge-workspace button.text-xl { font-size: clamp(1.55rem, min(5vh, 3.4vw), 3rem) !important; }
+        .judge-workspace button.text-2xl { font-size: clamp(2.3rem, min(7vh, 4.8vw), 4.75rem) !important; }
+        .judge-workspace button.text-3xl { font-size: clamp(2.65rem, min(8vh, 5.5vw), 5.5rem) !important; }
+        .judge-workspace button.text-4xl { font-size: clamp(3rem, min(9vh, 6.5vw), 6.25rem) !important; }
+        .judge-workspace button > .text-2xl { font-size: clamp(2rem, min(6vh, 4vw), 4rem) !important; }
+        .judge-workspace button > .text-3xl { font-size: clamp(2.35rem, min(7vh, 4.8vw), 4.75rem) !important; }
+        .judge-workspace button > .text-4xl { font-size: clamp(2.75rem, min(8vh, 5.5vw), 5.5rem) !important; }
         .judge-console .min-w-\[100px\] { min-width: 6.25rem !important; }
         .judge-console .min-h-\[20px\] { min-height: 1.25rem !important; }
         .judge-console .w-\[380px\] { width: min(23.75rem, calc(100vw - 2rem)) !important; }

@@ -96,6 +96,13 @@ class Category extends Model
      */
     public function inactiveJudgeSlotList(): array
     {
+        $tournament = $this->relationLoaded('tournament')
+            ? $this->getRelation('tournament')
+            : $this->tournament()->first();
+        if ($tournament !== null && $tournament->inactive_judge_slots !== null) {
+            return $tournament->inactiveJudgeSlotList();
+        }
+
         $raw = $this->inactive_judge_slots;
         if (! is_array($raw)) {
             return [];
@@ -105,6 +112,11 @@ class Category extends Model
             static fn ($v) => is_string($v) ? strtoupper(trim($v)) : null,
             $raw,
         ))));
+    }
+
+    public function autoAdvanceEnabled(): bool
+    {
+        return (bool) $this->auto_advance;
     }
 
     public function isJudgeSlotActive(string $slot): bool

@@ -90,10 +90,10 @@
 
         {{-- Зачёт: элементы с наивысшей стоимостью + лимит рисков --}}
         <div class="flex items-center gap-2 text-[10px] font-mono tabular-nums">
-            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
                   :class="dbComputed().used >= dbLim().elements ? 'text-amber-300' : 'text-slate-300'"
                   x-text="'Элементов: ' + dbComputed().used + '/' + dbLim().elements"></span>
-            <span class="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border border-slate-700 px-1.5 py-0.5"
                   :class="dbComputed().risks >= dbLim().risks ? 'text-amber-300' : 'text-slate-300'"
                   x-text="'Рисков: ' + dbComputed().risks + '/' + dbLim().risks"></span>
         </div>

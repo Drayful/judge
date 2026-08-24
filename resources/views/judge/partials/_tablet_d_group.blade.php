@@ -82,16 +82,16 @@
         </div>
 
         <div class="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-mono tabular-nums">
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDbComputed().totalOver ? 'border-rose-600 bg-rose-950/40 text-rose-200' : 'border-slate-700 text-slate-300'"
                   x-text="'Элементов: ' + groupDbComputed().used + '/' + groupDbLim().elements"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDbComputed().dbOver ? 'border-rose-600 bg-rose-950/40 text-rose-200' : 'border-slate-700 text-slate-300'"
                   x-text="'DB: ' + groupDbComputed().dbUsed + '/' + groupDbLim().dbMax"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDbComputed().deOver ? 'border-rose-600 bg-rose-950/40 text-rose-200' : 'border-slate-700 text-slate-300'"
                   x-text="'DE: ' + groupDbComputed().deUsed + '/' + groupDbLim().deMax"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   class="border-emerald-700/50 bg-emerald-950/25 text-emerald-200"
                   x-text="'Рисков (всегда в зачёте): ' + groupDbComputed().risks"></span>
         </div>

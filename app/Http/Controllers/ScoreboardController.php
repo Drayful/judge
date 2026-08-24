@@ -73,11 +73,13 @@ class ScoreboardController extends Controller
     {
         $this->ensureAvailable($category);
         $category->loadMissing('tournament');
-        $livePerformance = ScoreboardUi::livePerformance($category);
+        $livePerformance = ScoreboardUi::boardPerformance($category);
+        $payloadCategory = $livePerformance?->category ?? $category;
 
         return view('scoreboard.performance', [
-            'category' => $category,
-            'initialPayload' => ScoreboardUi::performancePayload($category, $livePerformance),
+            'category' => $payloadCategory,
+            'pollCategory' => $category,
+            'initialPayload' => ScoreboardUi::performancePayload($payloadCategory, $livePerformance),
         ]);
     }
 
@@ -85,9 +87,10 @@ class ScoreboardController extends Controller
     {
         $this->ensureAvailable($category);
 
-        return response()->json(
-            ScoreboardUi::performancePayload($category, ScoreboardUi::livePerformance($category))
-        );
+        $performance = ScoreboardUi::boardPerformance($category);
+        $payloadCategory = $performance?->category ?? $category;
+
+        return response()->json(ScoreboardUi::performancePayload($payloadCategory, $performance));
     }
 
     private function resolveSelectedCategory(int $categoryId, int $tournamentId): ?Category

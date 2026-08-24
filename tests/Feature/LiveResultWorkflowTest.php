@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Athlete;
 use App\Models\Category;
+use App\Models\Group;
 use App\Models\JudgeScore;
 use App\Models\JudgeScoreAction;
 use App\Models\Performance;
@@ -227,7 +228,8 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($secretary)
             ->get(route('secretary.queue', $performance->category))
             ->assertOk()
-            ->assertSee('Управление оценками')
+            ->assertSee('История гимнасток потока')
+            ->assertSee('Вернуть панель целиком')
             ->assertSee('LINE1')
             ->assertSee('0.600')
             ->assertDontSee('Общая линейная сбавка')
@@ -289,8 +291,8 @@ class LiveResultWorkflowTest extends TestCase
             ->assertOk()
             ->assertSee('junior: { elements: 6, risks: 3 }', false)
             ->assertSee('senior: { elements: 8, risks: 4 }', false)
-            ->assertSee("if (risks >= lim.risks) continue;", false)
-            ->assertSee("} else if (used >= lim.elements) {", false)
+            ->assertSee('if (risks >= lim.risks) continue;', false)
+            ->assertSee('} else if (used >= lim.elements) {', false)
             ->assertSee("if (isRisk) {\n                            risks += 1;\n                        } else {\n                            used += 1;", false)
             ->assertDontSee('if (used >= lim.elements) break;', false);
     }
@@ -498,7 +500,7 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($secretary)
             ->get(route('secretary.queue', $performance->category))
             ->assertOk()
-            ->assertSee('Ручная средняя DB')
+            ->assertSee('DB')
             ->assertSee('4.100');
     }
 
@@ -617,6 +619,7 @@ class LiveResultWorkflowTest extends TestCase
         $performance = $this->performance();
         $category = $performance->category;
         $category->update([
+            'auto_advance' => true,
             'inactive_judge_slots' => ['DB2', 'DA2', 'A3', 'A4', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
         ]);
         $tournament = $category->tournament;
@@ -1115,6 +1118,62 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertSame($penaltyRevision, $liveActionRevision);
     }
 
+    public function test_secretary_can_poll_live_actions_for_one_specific_judge_slot(): void
+    {
+        $performance = $this->performance();
+        $a1 = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        $e1 = User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
+        JudgeScoreAction::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $a1->id,
+            'slot' => 'A1',
+            'panel' => 'a',
+            'action' => 'Добавлена сбавка 0.3',
+            'draft_score' => 0.3,
+            'entries' => [['v' => 0.3, 'label' => 'Техника', 'counted' => true]],
+        ]);
+        JudgeScoreAction::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $e1->id,
+            'slot' => 'E1',
+            'panel' => 'e',
+            'action' => 'Чужое действие',
+            'draft_score' => 0.5,
+        ]);
+        JudgeScoreAction::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $a1->id,
+            'slot' => 'A1',
+            'panel' => 'a',
+            'action' => 'Выбран элемент: Прыжок',
+            'draft_score' => 0,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->getJson(route('secretary.performance.scoreLiveHistory', $performance).'?slot=A1')
+            ->assertOk()
+            ->assertJsonPath('slot', 'A1')
+            ->assertJsonPath('actions.0.judge', $a1->name)
+            ->assertJsonPath('actions.0.draft_score', '0.300')
+            ->assertJsonPath('actions.0.entries.0.label', 'Техника')
+            ->assertJsonCount(1, 'actions');
+    }
+
+    public function test_stream_history_opens_live_view_even_before_final_score_arrives(): void
+    {
+        $performance = $this->performance();
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $performance->category))
+            ->assertOk()
+            ->assertSee('data-stream-history-score', false)
+            ->assertSee('data-slot="A1"', false)
+            ->assertSee('score-live-history')
+            ->assertSee('обновление каждую секунду');
+    }
+
     public function test_stream_history_lists_every_judge_score_and_keeps_controls_inside_async_page(): void
     {
         $first = $this->performance();
@@ -1198,9 +1257,200 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($secretary)
             ->get(route('secretary.queue', $category))
             ->assertOk()
-            ->assertSee('data-stream-history-spread-warning', false)
-            ->assertSee('автопереход выполнен, требуется контроль')
-            ->assertSee('A (артистизм)');
+            ->assertDontSee('data-stream-history-spread-warning', false)
+            ->assertSee('border-rose-500 bg-rose-900/75', false)
+            ->assertSee('A1')
+            ->assertSee('A2');
+    }
+
+    public function test_read_only_stream_review_does_not_replace_the_active_live_queue(): void
+    {
+        $first = $this->performance();
+        $tournament = $first->category->tournament;
+        $second = Category::create([
+            'tournament_id' => $tournament->id,
+            'name' => 'Просматриваемый поток',
+            'program' => 'individual',
+        ]);
+        $tournament->update(['active_category_id' => $first->category_id]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue.review', $second))
+            ->assertOk()
+            ->assertSee('Независимый просмотр')
+            ->assertSee('не меняет активный поток');
+
+        $this->assertSame($first->category_id, $tournament->fresh()->active_category_id);
+    }
+
+    public function test_disabled_judge_slots_are_saved_for_the_whole_tournament(): void
+    {
+        $first = $this->performance();
+        $tournament = $first->category->tournament;
+        $second = Category::create([
+            'tournament_id' => $tournament->id,
+            'name' => 'Второй поток',
+            'program' => 'individual',
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->postJson(route('secretary.category.judgeSlot.toggle', $first->category), [
+                'slot' => 'E4',
+                'active' => 0,
+            ])
+            ->assertOk()
+            ->assertJsonPath('active', false);
+
+        $this->assertContains('E4', $tournament->fresh()->inactiveJudgeSlotList());
+        $this->assertFalse($second->fresh()->isJudgeSlotActive('E4'));
+
+        $this->actingAs($secretary)
+            ->postJson(route('secretary.category.judgeSlot.toggle', $second), [
+                'slot' => 'E4',
+                'active' => 1,
+            ])
+            ->assertOk()
+            ->assertJsonPath('active', true);
+
+        $this->assertTrue($first->category->fresh()->isJudgeSlotActive('E4'));
+    }
+
+    public function test_auto_advance_switch_controls_the_selected_stream(): void
+    {
+        $performance = $this->performance();
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.category.autoAdvance', $performance->category), ['enabled' => 1])
+            ->assertRedirect();
+        $this->assertTrue($performance->category->fresh()->auto_advance);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.category.autoAdvance', $performance->category), ['enabled' => 0])
+            ->assertRedirect();
+        $this->assertFalse($performance->category->fresh()->auto_advance);
+    }
+
+    public function test_combined_live_queue_advances_to_the_next_stream_without_reassigning_results(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $group = Group::create([
+            'tournament_id' => $tournament->id,
+            'name' => '2016 B',
+            'program' => 'individual',
+        ]);
+        $otherGroup = Group::create([
+            'tournament_id' => $tournament->id,
+            'name' => '2017 A',
+            'program' => 'individual',
+        ]);
+        $firstCategory = Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $group->id,
+            'name' => 'Поток 1',
+            'program' => 'individual',
+            'stream_no' => 1,
+        ]);
+        $secondCategory = Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $group->id,
+            'name' => 'Поток 2',
+            'program' => 'individual',
+            'stream_no' => 2,
+        ]);
+        $thirdCategory = Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $otherGroup->id,
+            'name' => 'Поток 3',
+            'program' => 'individual',
+            'stream_no' => 3,
+        ]);
+        $first = Performance::create([
+            'category_id' => $firstCategory->id,
+            'athlete_id' => Athlete::create(['last_name' => 'Первая', 'first_name' => 'Анна'])->id,
+            'status' => 'performing',
+            'order_index' => 1,
+        ]);
+        $second = Performance::create([
+            'category_id' => $secondCategory->id,
+            'athlete_id' => Athlete::create(['last_name' => 'Вторая', 'first_name' => 'Мария'])->id,
+            'status' => 'scheduled',
+            'order_index' => 1,
+        ]);
+        $third = Performance::create([
+            'category_id' => $thirdCategory->id,
+            'athlete_id' => Athlete::create(['last_name' => 'Третья', 'first_name' => 'Елена'])->id,
+            'status' => 'scheduled',
+            'order_index' => 1,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.liveQueue', $tournament), [
+                'category_ids' => [$firstCategory->id],
+            ])
+            ->assertSessionHasErrors('combined_queue');
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.liveQueue', $tournament), [
+                'category_ids' => [$firstCategory->id, $thirdCategory->id],
+            ])
+            ->assertRedirect(route('secretary.tournament.groups', $tournament).'#tournament-live-queue');
+        $this->actingAs($secretary)
+            ->get(route('secretary.tournament.groups', $tournament))
+            ->assertOk()
+            ->assertSee('Объединённая Live-очередь')
+            ->assertSee(route('secretary.tournament.liveQueue', $tournament), false);
+
+        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($firstCategory));
+        $this->assertSame('done', $first->fresh()->status);
+        $this->assertSame('scheduled', $second->fresh()->status);
+        $this->assertSame('performing', $third->fresh()->status);
+        $this->assertSame($thirdCategory->id, $third->fresh()->category_id);
+        $this->assertSame([$firstCategory->id, $thirdCategory->id], $tournament->fresh()->combinedLiveCategoryIds());
+        $this->assertSame($thirdCategory->id, $tournament->fresh()->active_category_id);
+
+        $this->actingAs($secretary)
+            ->post(route('secretary.tournament.liveQueue', $tournament))
+            ->assertRedirect(route('secretary.tournament.groups', $tournament).'#tournament-live-queue');
+        $this->assertSame([], $tournament->fresh()->combinedLiveCategoryIds());
+    }
+
+    public function test_a_and_e_history_shows_the_submitted_deduction_but_keeps_raw_score_for_editing(): void
+    {
+        $performance = $this->performance();
+        $judge = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $judge->id,
+            'panel' => 'a',
+            'score' => 8.75,
+            'submitted_at' => now(),
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $performance->category))
+            ->assertOk()
+            ->assertSee('1.250')
+            ->assertSee('8.750');
+    }
+
+    public function test_da_not_done_action_supports_regular_element_and_acrobatics_modes(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_d_da', 'slot' => 'DA1']);
+
+        $this->actingAs($judge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertDontSee('Сначала нажмите «Акробатика»')
+            ->assertSee('acro: isAcro', false)
+            ->assertSee("label: isAcro ? 'Акробатика' : 'Элемент'", false)
+            ->assertSee("acroPending ? 'акробатика не сделана · 0' : 'элемент не сделан · 0'", false);
     }
 
     public function test_secretary_can_return_to_previous_participant_without_reordering_queue(): void

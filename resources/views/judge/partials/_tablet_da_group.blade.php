@@ -55,16 +55,16 @@
         <div class="my-1 text-5xl xl:text-6xl font-extrabold tabular-nums text-white leading-none" x-text="finalScore().toFixed(2)"></div>
 
         <div class="flex flex-wrap items-center justify-center gap-1.5 text-[10px] font-mono tabular-nums">
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDaComputed().used > groupDaLim().elementsMax ? 'border-rose-600 bg-rose-950/40 text-rose-200' : (groupDaComputed().used < groupDaLim().elementsMin ? 'border-amber-600/60 text-amber-200' : 'border-slate-700 text-slate-300')"
                   x-text="'DC: ' + groupDaComputed().used + '/' + groupDaLim().elementsMax"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDaComputed().cc < groupDaLim().ccMin ? 'border-amber-600/60 text-amber-200' : 'border-slate-700 text-slate-300'"
                   x-text="'CC: ' + groupDaComputed().cc + '/' + groupDaLim().ccMin"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDaComputed().cr < groupDaLim().crMin ? 'border-amber-600/60 text-amber-200' : 'border-slate-700 text-slate-300'"
                   x-text="'CR: ' + groupDaComputed().cr + '/' + groupDaLim().crMin"></span>
-            <span class="rounded bg-slate-800 border px-1.5 py-0.5"
+            <span class="judge-status-chip rounded bg-slate-800 border px-1.5 py-0.5"
                   :class="groupDaComputed().multi < groupDaLim().multiMin ? 'border-amber-600/60 text-amber-200' : 'border-slate-700 text-slate-300'"
                   x-text="'Бр/Лв: ' + groupDaComputed().multi + '/' + groupDaLim().multiMin"></span>
         </div>

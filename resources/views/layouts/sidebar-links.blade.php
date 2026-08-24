@@ -45,7 +45,7 @@
 
     @if($canScoreboardJudge)
         <a href="{{ route('scoreboard-judge.index') }}" class="{{ request()->routeIs('scoreboard-judge.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
-            Судья на табло
+            Оператор табло
         </a>
     @endif
 

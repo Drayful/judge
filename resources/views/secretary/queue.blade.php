@@ -96,12 +96,16 @@
                 @if(isset($tournamentCategories) && $tournamentCategories->isNotEmpty() && $category->tournament)
                     <div class="mt-4 flex flex-wrap items-end gap-3">
                         <div class="min-w-[min(100%,280px)] flex-1">
+                            <label for="stream_search" class="block text-xs font-medium text-slate-400 mb-1">Поиск потока</label>
+                            <input id="stream_search" type="search" placeholder="Год, категория, название или номер…"
+                                   class="mb-2 block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:border-emerald-500 focus:ring-emerald-500">
                             <label for="stream_select" class="block text-xs font-medium text-slate-400 mb-1">Поток</label>
                             <select id="stream_select" name="stream"
                                 class="block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500"
-                                onchange="if (this.value) window.location.href = this.value;">
+                                onchange="if (this.value) window.JudgeAsync?.refresh(this.value, { force: true, silent: true }) || window.location.assign(this.value);">
                                 @foreach($tournamentCategories as $tc)
-                                    <option value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $tc->id }}"
+                                    <option data-search="{{ Str::lower($tc->name.' '.$tc->id.' '.($tc->stream_no ?? '')) }}"
+                                        value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $tc->id }}"
                                         @selected($tc->id === $category->id)>
                                         Поток #{{ $tc->id }} · {{ $tc->name }}
                                     </option>
@@ -111,7 +115,7 @@
                         @if(isset($categorySessions) && $categorySessions->isNotEmpty())
                             <div class="min-w-[min(100%,280px)] flex-1">
                                 <label for="session_select" class="block text-xs font-medium text-slate-400 mb-1">День / сессия</label>
-                                <select id="session_select" class="block w-full rounded-xl border border-sky-800/70 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" onchange="if (this.value) window.location.href = this.value;">
+                                <select id="session_select" class="block w-full rounded-xl border border-sky-800/70 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" onchange="if (this.value) window.JudgeAsync?.refresh(this.value, { force: true, silent: true }) || window.location.assign(this.value);">
                                     @foreach($categorySessions as $session)
                                         <option value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $category->id }}&session={{ $session->id }}" @selected($streamSession?->id === $session->id)>
                                             {{ $session->scheduled_on?->format('d.m.Y') }}@if($session->starts_at) · {{ substr($session->starts_at, 0, 5) }}@endif · {{ implode(', ', $session->apparatus ?? []) }}
@@ -120,6 +124,10 @@
                                 </select>
                             </div>
                         @endif
+                        <a href="{{ route('secretary.queue.review', ['category' => $category->id, 'session' => $streamSession?->id]) }}" target="_blank" rel="noopener"
+                           class="rounded-xl border border-sky-700/70 bg-sky-950/40 px-4 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-900/50">
+                            Просмотр потока ↗
+                        </a>
                     </div>
                 @endif
 
@@ -228,8 +236,26 @@
 
             {{-- Порядок выступления --}}
             <div class="live-panel p-5">
-                <h2 class="text-base font-semibold text-white">Порядок выступления потока</h2>
-                <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Текущая — подсвечена.</p>
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 class="text-base font-semibold text-white">Порядок выступления потока</h2>
+                        <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Текущая — подсвечена.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <form method="POST" action="{{ route('secretary.category.autoAdvance', $category) }}">
+                            @csrf
+                            <input type="hidden" name="enabled" value="{{ $category->autoAdvanceEnabled() ? 0 : 1 }}">
+                            <button type="submit" class="rounded-lg border px-3 py-2 text-xs font-semibold {{ $category->autoAdvanceEnabled() ? 'border-emerald-700 bg-emerald-950/45 text-emerald-100' : 'border-slate-700 bg-slate-900 text-slate-300' }}">
+                                Автопереход: {{ $category->autoAdvanceEnabled() ? 'ВКЛ' : 'ВЫКЛ' }}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                @if($category->tournament?->isCategoryInCombinedLiveQueue($category))
+                    <div class="mt-3 rounded-lg border border-violet-700/60 bg-violet-950/25 px-3 py-2 text-xs text-violet-100">
+                        Этот поток входит в выбранную объединённую Live-очередь из {{ count($category->tournament->combinedLiveCategoryIds()) }} потоков. Настройка находится на странице «Группы и потоки». Стартовый/финальный протокол и места не меняются.
+                    </div>
+                @endif
                 <ul class="mt-4 max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
                     <?php $queuePosition = 0; foreach ($orderedPerformances as $p): $queuePosition++; ?>
                         <?php
@@ -255,6 +281,29 @@
                         </li>
                     <?php endforeach; ?>
                 </ul>
+                @if(($combinedLiveQueue ?? collect())->isNotEmpty())
+                    <details class="mt-4 rounded-xl border border-violet-800/50 bg-slate-950/45 p-3">
+                        <summary class="cursor-pointer text-xs font-semibold text-violet-200">Вся совмещённая очередь группы</summary>
+                        <div class="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1">
+                            @foreach($combinedLiveQueue as $combinedStream)
+                                <div>
+                                    <div class="sticky top-0 rounded-md bg-violet-950/90 px-2 py-1 text-xs font-semibold text-violet-100">
+                                        Поток {{ $combinedStream['category']->stream_no ?? '#'.$combinedStream['category']->id }} · {{ $combinedStream['category']->name }}
+                                    </div>
+                                    <ol class="mt-1 space-y-1">
+                                        @foreach($combinedStream['performances'] as $combinedPerformance)
+                                            <li class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs {{ $combinedPerformance->status === 'performing' ? 'bg-orange-900/60 text-orange-100' : 'bg-slate-900/60 text-slate-300' }}">
+                                                <span class="w-8 font-mono text-slate-500">{{ $combinedPerformance->start_number ?? $loop->iteration }}</span>
+                                                <span class="min-w-0 flex-1 truncate">{{ $combinedPerformance->athlete->last_name }} {{ $combinedPerformance->athlete->first_name }}</span>
+                                                <span class="font-mono text-[10px] text-slate-500">{{ $combinedPerformance->status }}</span>
+                                            </li>
+                                        @endforeach
+                                    </ol>
+                                </div>
+                            @endforeach
+                        </div>
+                    </details>
+                @endif
             </div>
 
             {{-- Активные судьи --}}
@@ -297,6 +346,7 @@
         </div>
 
         {{-- Оценки --}}
+        @if(false) {{-- Временно скрыто: управление перенесено в историю гимнасток потока. --}}
         <div class="live-panel p-5">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
@@ -597,18 +647,25 @@
                             @endif
                         </div>
                         <p class="mt-1 text-xs text-slate-500">
-                            Проставьте итоговые D / A / E и штраф напрямую — без ожидания судей. Пока включён ручной режим,
+                            Проставьте итоговые DB / DA / A / E и сбавку напрямую — без ожидания судей. D рассчитывается как DB + DA.
+                            Пока включён ручной режим,
                             оценки судей не пересчитывают итог. Итог фиксируется сразу.
                         </p>
 
                         <form method="POST" action="{{ route('secretary.performance.setFinalScore', $currentPerformance) }}"
-                              class="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 items-end"
+                              class="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end"
                               onsubmit="return confirm('Выставить финальную оценку вручную и зафиксировать итог?');">
                             @csrf
                             <div>
-                                <label class="block text-[10px] uppercase tracking-wider text-slate-500">D</label>
-                                <input type="number" name="d_score" step="0.001" min="0" max="99.999" required
-                                       value="{{ old('d_score', $d !== null ? number_format((float) $d, 3, '.', '') : '') }}"
+                                <label class="block text-[10px] uppercase tracking-wider text-cyan-300">DB</label>
+                                <input type="number" name="db_score" step="0.001" min="0" max="99.999" required
+                                       value="{{ old('db_score', $currentPerformance?->db_average !== null ? number_format((float) $currentPerformance->db_average, 3, '.', '') : '') }}"
+                                       class="mt-1 w-full rounded-md border border-cyan-900/60 bg-slate-950 text-cyan-100 text-sm py-1.5 px-2 font-mono tabular-nums">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase tracking-wider text-cyan-300">DA</label>
+                                <input type="number" name="da_score" step="0.001" min="0" max="99.999" required
+                                       value="{{ old('da_score', $currentPerformance?->da_average !== null ? number_format((float) $currentPerformance->da_average, 3, '.', '') : '') }}"
                                        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-sm py-1.5 px-2 font-mono tabular-nums">
                             </div>
                             <div>
@@ -624,7 +681,7 @@
                                        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 text-slate-100 text-sm py-1.5 px-2 font-mono tabular-nums">
                             </div>
                             <div>
-                                <label class="block text-[10px] uppercase tracking-wider text-rose-300/80">Штраф</label>
+                                <label class="block text-[10px] uppercase tracking-wider text-rose-300/80">Сбавка</label>
                                 <input type="number" name="penalty" step="0.001" min="0" max="99.999"
                                        value="{{ old('penalty', $pen !== null ? number_format((float) $pen, 3, '.', '') : '') }}"
                                        class="mt-1 w-full rounded-md border border-rose-900/50 bg-slate-950 text-rose-100 text-sm py-1.5 px-2 font-mono tabular-nums">
@@ -634,7 +691,8 @@
                             </button>
                         </form>
 
-                        @error('d_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        @error('db_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
+                        @error('da_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
                         @error('a_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
                         @error('e_score') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
                         @error('penalty') <p class="mt-2 text-xs text-rose-300">{{ $message }}</p> @enderror
@@ -652,6 +710,7 @@
                 </div>
             @endif
         </div>
+        @endif
 
         {{-- История потока --}}
         <div class="live-panel p-5">
@@ -664,10 +723,21 @@
                     Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}: {{ ($panelSpread['has_violation'] ?? false) ? 'нарушено' : 'ок' }}
                 </span>
             </div>
-            <div class="space-y-3" data-stream-history-layout="responsive">
+            <div id="stream-performance-history" class="space-y-3" data-stream-history-layout="responsive" data-preserve-scroll="stream-performance-history">
                 @forelse($orderedPerformances as $p)
-                    @php($isCurrentHistoryPerformance = $currentPerformance && $currentPerformance->id === $p->id)
-                    @php($historySpread = $scoreHistoryByPerformance[$p->id]['spread'] ?? null)
+                    @php
+                        $isCurrentHistoryPerformance = $currentPerformance && $currentPerformance->id === $p->id;
+                        $historySpread = $scoreHistoryByPerformance[$p->id]['spread'] ?? null;
+                        $historyRows = \App\Support\SecretaryLiveUi::scoreRowsBySlot($p, $category, true);
+                        $historyDb1 = $historyRows['DB1'] ?? null;
+                        $historyDa1 = $historyRows['DA1'] ?? null;
+                        $historyDb = $historyDb1?->average_submitted_at !== null
+                            ? $historyDb1?->average_score
+                            : $p->db_average;
+                        $historyDa = $historyDa1?->average_submitted_at !== null
+                            ? $historyDa1?->average_score
+                            : $p->da_average;
+                    @endphp
                     <article class="rounded-xl border p-3 sm:p-4 {{ $isCurrentHistoryPerformance ? 'border-orange-600/70 bg-orange-950/30 ring-1 ring-orange-500/20' : 'border-slate-800 bg-slate-950/45' }}">
                         <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                             <div class="flex min-w-0 items-start gap-3">
@@ -686,9 +756,10 @@
                             </div>
 
                             <div class="flex flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
-                                <div class="grid min-w-0 flex-1 grid-cols-5 gap-1.5 xl:min-w-[430px] xl:flex-none">
+                                <div class="grid min-w-0 flex-1 grid-cols-3 gap-1.5 sm:grid-cols-6 xl:min-w-[520px] xl:flex-none">
                                     @foreach([
-                                        ['label' => 'D', 'value' => $p->d_score, 'class' => 'text-slate-100'],
+                                        ['label' => 'DB', 'value' => $historyDb, 'class' => 'text-cyan-100'],
+                                        ['label' => 'DA', 'value' => $historyDa, 'class' => 'text-cyan-100'],
                                         ['label' => 'A', 'value' => $p->a_score, 'class' => 'text-slate-100'],
                                         ['label' => 'E', 'value' => $p->e_score, 'class' => 'text-slate-100'],
                                         ['label' => 'Сбавка', 'value' => $p->penalty, 'class' => 'text-rose-200'],
@@ -703,6 +774,21 @@
                                     @endforeach
                                 </div>
 
+                                @if($p->approved_at !== null)
+                                    <span class="w-full shrink-0 rounded-lg border border-emerald-700/70 bg-emerald-950/45 px-3 py-2 text-center text-xs font-bold text-emerald-200 sm:w-auto"
+                                          title="Одобрено {{ $p->approved_at->format('d.m.Y H:i:s') }}">
+                                        ✓ Оценка одобрена
+                                    </span>
+                                @elseif($p->finalized_at !== null && $p->total !== null && ! $p->isWithdrawn())
+                                    <form method="POST" action="{{ route('supervisor.approve', $p) }}" class="w-full shrink-0 sm:w-auto">
+                                        @csrf
+                                        <button type="submit"
+                                            class="w-full rounded-lg border border-emerald-600/80 bg-emerald-700/45 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-600/60">
+                                            👍 Одобрить оценку
+                                        </button>
+                                    </form>
+                                @endif
+
                                 @if(! $p->isWithdrawn())
                                     <button
                                         type="button"
@@ -710,6 +796,8 @@
                                         data-action="{{ route('secretary.performance.setFinalScore', $p) }}"
                                         data-athlete="{{ trim($p->athlete->last_name.' '.$p->athlete->first_name) }}"
                                         data-apparatus="{{ $p->apparatus ?? $category->apparatus ?? '—' }}"
+                                        data-db-score="{{ $p->db_average }}"
+                                        data-da-score="{{ $p->da_average }}"
                                         data-d-score="{{ $p->d_score }}"
                                         data-a-score="{{ $p->a_score }}"
                                         data-e-score="{{ $p->e_score }}"
@@ -725,37 +813,48 @@
                             </div>
                         </div>
 
-                        @if(($historySpread['has_violation'] ?? false) && !empty($historySpread['violations']))
-                            <div data-stream-history-spread-warning class="mt-3 rounded-lg border border-rose-700/60 bg-rose-950/35 px-3 py-2 text-xs text-rose-100">
-                                <div class="font-semibold">⚠ Расхождение оценок больше {{ number_format($historySpread['max_spread'], 1) }} — автопереход выполнен, требуется контроль.</div>
-                                <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-mono text-rose-200">
-                                    @foreach($historySpread['violations'] as $violation)
-                                        <span>{{ $violation['label'] }}: {{ number_format($violation['min'], 3) }}–{{ number_format($violation['max'], 3) }} (Δ {{ number_format($violation['spread'], 3) }})</span>
-                                    @endforeach
-                                </div>
-                            </div>
-                        @endif
-
                         <div class="mt-3 grid grid-cols-4 gap-1.5 border-t border-slate-800/80 pt-3 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                             @foreach($historyJudgeColumns as $judgeColumn)
-                                @php($judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null)
-                                <div class="min-w-0 rounded-lg border {{ $judgeHistory ? 'border-emerald-900/70 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/45' }} px-1 py-1.5 text-center">
-                                    <div class="truncate font-mono text-[9px] font-semibold uppercase tracking-wide {{ $judgeHistory ? 'text-emerald-400/80' : 'text-slate-500' }}">{{ $judgeColumn }}</div>
-                                    @if($judgeHistory)
-                                        <button type="button"
-                                            data-stream-history-score
-                                            data-performance-id="{{ $p->id }}"
-                                            data-slot="{{ $judgeColumn }}"
-                                            class="mt-0.5 block w-full truncate rounded px-0.5 py-0.5 font-mono text-xs font-semibold text-emerald-200 underline decoration-emerald-700/60 underline-offset-2 hover:bg-emerald-950/60 hover:text-white sm:text-sm"
-                                            title="Нажмите, чтобы посмотреть и исправить оценку {{ $judgeColumn }}">
-                                            {{ $judgeHistory['score'] }}
-                                        </button>
-                                    @else
-                                        <div class="mt-0.5 font-mono text-xs text-slate-600 sm:text-sm">—</div>
+                                @php
+                                    $judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null;
+                                    $historySlotHasSpread = in_array($judgeColumn, $historySpread['violating_slots'] ?? [], true);
+                                @endphp
+                                <div class="min-w-0 rounded-lg border px-1 py-1.5 text-center {{ $historySlotHasSpread ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($judgeHistory ? 'border-emerald-900/70 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/45') }}">
+                                    <div class="truncate font-mono text-[9px] font-semibold uppercase tracking-wide {{ $historySlotHasSpread ? 'text-white' : ($judgeHistory ? 'text-emerald-400/80' : 'text-slate-500') }}">{{ $judgeColumn }}</div>
+                                    <button type="button"
+                                        data-stream-history-score
+                                        data-performance-id="{{ $p->id }}"
+                                        data-slot="{{ $judgeColumn }}"
+                                        class="mt-0.5 block w-full truncate rounded px-0.5 py-0.5 font-mono text-xs font-semibold underline underline-offset-2 hover:text-white sm:text-sm {{ $historySlotHasSpread ? 'text-white decoration-rose-200/80 hover:bg-rose-800/70' : ($judgeHistory ? 'text-emerald-200 decoration-emerald-700/60 hover:bg-emerald-950/60' : 'text-sky-300 decoration-sky-800/70 hover:bg-sky-950/60') }}"
+                                        title="Открыть Live-действия судьи {{ $judgeColumn }}">
+                                        {{ $judgeHistory['display_score'] ?? 'live' }}
+                                    </button>
+                                    @if(($judgeHistory['display_label'] ?? null) === 'Сбавка')
+                                        <div class="truncate text-[9px] {{ $historySlotHasSpread ? 'text-rose-100' : 'text-slate-500' }}">сбавка</div>
+                                    @elseif(! $judgeHistory)
+                                        <div class="truncate text-[9px] text-sky-500">смотреть</div>
                                     @endif
                                 </div>
                             @endforeach
                         </div>
+
+                        @if(! $p->isWithdrawn())
+                            <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/80 pt-3">
+                                <span class="w-full text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:w-auto">Вернуть панель целиком:</span>
+                                @foreach(['db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавки'] as $panelKey => $panelLabel)
+                                    <form method="POST" action="{{ route('secretary.performance.returnScores', $p) }}" class="inline" onsubmit="return confirm('Вернуть все оценки панели {{ $panelLabel }} судьям на доработку?');">
+                                        @csrf
+                                        <input type="hidden" name="panel" value="{{ $panelKey }}">
+                                        <button type="submit" class="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-white">↩ {{ $panelLabel }}</button>
+                                    </form>
+                                @endforeach
+                                <form method="POST" action="{{ route('secretary.performance.returnScores', $p) }}" class="inline" onsubmit="return confirm('Вернуть ВСЕ оценки этой гимнастки судьям? Итог будет сброшен.');">
+                                    @csrf
+                                    <input type="hidden" name="panel" value="all">
+                                    <button type="submit" class="rounded-md border border-rose-800/70 bg-rose-950/50 px-2.5 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-900/60">↩ Все оценки</button>
+                                </form>
+                            </div>
+                        @endif
                     </article>
                 @empty
                     <div class="rounded-xl border border-dashed border-slate-800 px-4 py-8 text-center text-sm text-slate-500">
@@ -1011,11 +1110,16 @@
 
         <form id="manual-score-form" method="POST" class="mt-5" onsubmit="return confirm('Сохранить ручной итог для выбранной гимнастки?');">
             @csrf
-            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div>
-                    <label for="manual-score-d" class="block text-[10px] uppercase tracking-wider text-slate-400">D</label>
-                    <input id="manual-score-d" name="d_score" type="number" step="0.001" min="0" max="99.999" required
-                           class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-white focus:border-orange-500 focus:ring-orange-500">
+                    <label for="manual-score-db" class="block text-[10px] uppercase tracking-wider text-cyan-300">DB</label>
+                    <input id="manual-score-db" name="db_score" type="number" step="0.001" min="0" max="99.999" required
+                           class="mt-1 w-full rounded-lg border border-cyan-900/70 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-cyan-100 focus:border-orange-500 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label for="manual-score-da" class="block text-[10px] uppercase tracking-wider text-cyan-300">DA</label>
+                    <input id="manual-score-da" name="da_score" type="number" step="0.001" min="0" max="99.999" required
+                           class="mt-1 w-full rounded-lg border border-cyan-900/70 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-cyan-100 focus:border-orange-500 focus:ring-orange-500">
                 </div>
                 <div>
                     <label for="manual-score-a" class="block text-[10px] uppercase tracking-wider text-slate-400">A</label>
@@ -1028,7 +1132,7 @@
                            class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-white focus:border-orange-500 focus:ring-orange-500">
                 </div>
                 <div>
-                    <label for="manual-score-penalty" class="block text-[10px] uppercase tracking-wider text-rose-300">Штраф</label>
+                    <label for="manual-score-penalty" class="block text-[10px] uppercase tracking-wider text-rose-300">Сбавка</label>
                     <input id="manual-score-penalty" name="penalty" type="number" step="0.001" min="0" max="99.999"
                            class="mt-1 w-full rounded-lg border border-rose-900/70 bg-slate-900 px-3 py-2.5 text-center font-mono text-xl text-rose-100 focus:border-orange-500 focus:ring-orange-500">
                 </div>
@@ -1038,6 +1142,7 @@
                 <div>
                     <div class="text-[10px] uppercase tracking-wider text-slate-500">Предварительный итог</div>
                     <div id="manual-score-total" class="font-mono text-3xl font-bold tabular-nums text-orange-200">—</div>
+                    <div class="mt-1 text-xs text-slate-400">D = DB + DA: <span id="manual-score-d-total" class="font-mono font-bold text-cyan-200">—</span></div>
                 </div>
                 <div class="flex gap-2">
                     <button type="button" data-manual-score-close class="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button>
@@ -1048,14 +1153,14 @@
     </div>
 </div>
 {{-- ===== Модалка: история выставления оценки ===== --}}
-<div id="score-history-modal" class="hidden fixed inset-0 z-50">
-    <div class="absolute inset-0 bg-black/60" data-history-close></div>
-    <div class="relative mx-auto mt-16 w-[min(92vw,760px)] max-h-[75vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5 shadow-2xl">
+<div id="score-history-modal" data-pause-live-refresh="1" class="hidden fixed inset-0 z-50 p-2 sm:p-4">
+    <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-history-close></div>
+    <div class="relative mx-auto flex h-[calc(100vh-1rem)] w-[min(98vw,1320px)] flex-col overflow-hidden rounded-2xl border-2 border-sky-700/70 bg-slate-950 p-4 shadow-2xl shadow-sky-950/60 sm:h-[calc(100vh-2rem)] sm:p-6">
         <div class="flex items-start justify-between gap-3">
-            <h3 id="score-history-title" class="text-base font-semibold text-white">История выставления оценки</h3>
-            <button type="button" data-history-close class="rounded-lg border border-slate-700 px-2.5 py-1 text-sm text-slate-300 hover:bg-slate-800">✕</button>
+            <h3 id="score-history-title" class="text-xl font-extrabold text-white sm:text-2xl">История выставления оценки</h3>
+            <button type="button" data-history-close class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-lg font-bold text-white hover:bg-slate-700">✕</button>
         </div>
-        <div id="score-history-body" class="mt-4 space-y-4 text-sm text-slate-200"></div>
+        <div id="score-history-body" class="mt-4 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1 text-base text-slate-100"></div>
     </div>
 </div>
 
@@ -1070,8 +1175,10 @@
     const apparatus = document.getElementById('manual-score-apparatus');
     const warning = document.getElementById('manual-score-unpublish-warning');
     const total = document.getElementById('manual-score-total');
+    const dTotal = document.getElementById('manual-score-d-total');
     const fields = {
-        d: document.getElementById('manual-score-d'),
+        db: document.getElementById('manual-score-db'),
+        da: document.getElementById('manual-score-da'),
         a: document.getElementById('manual-score-a'),
         e: document.getElementById('manual-score-e'),
         penalty: document.getElementById('manual-score-penalty'),
@@ -1083,11 +1190,14 @@
         return Number.isFinite(number) ? number.toFixed(3) : fallback;
     };
     const updateTotal = () => {
-        const d = Number(fields.d.value);
+        const db = Number(fields.db.value);
+        const da = Number(fields.da.value);
         const a = Number(fields.a.value);
         const e = Number(fields.e.value);
         const penalty = fields.penalty.value === '' ? 0 : Number(fields.penalty.value);
-        total.textContent = [d, a, e, penalty].every(Number.isFinite)
+        const d = db + da;
+        dTotal.textContent = [db, da].every(Number.isFinite) ? d.toFixed(3) : '—';
+        total.textContent = [db, da, a, e, penalty].every(Number.isFinite)
             ? (d + a + e - penalty).toFixed(3)
             : '—';
     };
@@ -1098,14 +1208,16 @@
             form.action = button.dataset.action || '';
             athlete.textContent = button.dataset.athlete || 'Гимнастка';
             apparatus.textContent = 'Предмет: ' + (button.dataset.apparatus || '—');
-            fields.d.value = formatInput(button.dataset.dScore);
+            const hasSplitD = button.dataset.dbScore !== '' || button.dataset.daScore !== '';
+            fields.db.value = formatInput(hasSplitD ? button.dataset.dbScore : button.dataset.dScore);
+            fields.da.value = formatInput(hasSplitD ? button.dataset.daScore : 0);
             fields.a.value = formatInput(button.dataset.aScore);
             fields.e.value = formatInput(button.dataset.eScore);
             fields.penalty.value = formatInput(button.dataset.penalty, '0.000');
             warning.classList.toggle('hidden', button.dataset.willUnpublish !== '1');
             updateTotal();
             modal.classList.remove('hidden');
-            fields.d.focus();
+            fields.db.focus();
         });
     });
     Object.values(fields).forEach((field) => field.addEventListener('input', updateTotal));
@@ -1124,6 +1236,9 @@
     const title = document.getElementById('score-history-title');
     const body = document.getElementById('score-history-body');
     if (! modal) return;
+    let liveInterval = null;
+    let liveRequestInFlight = false;
+    let liveSelection = null;
 
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -1165,40 +1280,136 @@
             ? `<span class="font-black text-indigo-300">${esc(dcDisplay(e.symbol))}</span> `
             : '';
         const sym = dcSym || (e.symbol ? `<span class="font-black">${esc(e.symbol)}</span> ` : (e.acro ? '<span class="font-black text-indigo-300">A</span> ' : ''));
-        const label = e.label ? `<span class="text-slate-400">${esc(e.label)}</span>${exTag} ` : '';
+        const label = e.label ? `<span class="font-semibold text-slate-200">${esc(e.label)}</span>${exTag} ` : '';
         const val = e.combo
             ? '<span class="text-emerald-300">выполнено</span>'
             : (e.notDone ? '<span class="text-rose-300">Х · 0 (не выполнен)</span>' : `<span class="font-mono tabular-nums">${Number(e.v).toFixed(1)}</span>`);
         const counted = (e.notDone || e.combo) ? '' : (e.counted === false ? ' <span class="text-[10px] text-rose-300">не в зачёте</span>' : '');
-        return `<li class="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 ${e.counted === false && !e.notDone && !e.combo ? 'opacity-60' : ''}">${sym}${label}${val}${counted}</li>`;
+        return `<li class="flex min-h-14 items-center gap-3 rounded-xl border border-sky-800/60 bg-slate-900 px-3 py-2 text-base shadow-sm ${e.counted === false && !e.notDone && !e.combo ? 'opacity-60' : ''}">${sym}${label}<span class="ml-auto text-xl font-extrabold">${val}</span>${counted}</li>`;
     };
 
-    const slotBlock = (performanceHistory, slot, withActions = false) => {
-        const h = performanceHistory?.slots?.[slot];
+    const slotBlock = (performanceHistory, slot, withActions = false, scoreOverride = undefined) => {
+        const h = scoreOverride === undefined ? performanceHistory?.slots?.[slot] : scoreOverride;
         if (! h) return '';
         const ag = h.age_group === 'junior' ? 'Юниоры' : (h.age_group === 'senior' ? 'Сеньоры' : null);
         const meta = [h.judge, ag, h.submitted_at ? 'отправлено ' + h.submitted_at : null].filter(Boolean).map(esc).join(' · ');
         const entries = Array.isArray(h.entries) && h.entries.length
-            ? `<ul class="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1 text-xs">${h.entries.map(entryLine).join('')}</ul>`
-            : '<div class="mt-2 text-xs text-slate-500">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
+            ? `<ul class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">${h.entries.map(entryLine).join('')}</ul>`
+            : '<div class="mt-3 text-sm text-slate-400">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
         const actions = withActions ? slotActions(performanceHistory, slot, h.score) : '';
         return `
-            <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div class="rounded-2xl border-2 border-emerald-700/70 bg-emerald-950/25 p-5">
                 <div class="flex items-center justify-between gap-2">
-                    <div class="font-mono font-bold text-emerald-300">${esc(slot)} <span class="text-white">${esc(h.score)}</span></div>
-                    <div class="text-[11px] text-slate-500">${meta}</div>
+                    <div class="font-mono text-2xl font-black text-emerald-300 sm:text-3xl">${esc(slot)} <span class="text-white">${esc(h.display_score)}</span>${h.display_label === 'Сбавка' ? ' <span class="text-sm font-sans text-emerald-200">сбавка</span>' : ''}</div>
+                    <div class="text-sm font-medium text-slate-300">${meta}</div>
                 </div>
                 ${entries}
                 ${actions}
             </div>`;
     };
 
+    const liveActionsBlock = (actions) => {
+        if (! Array.isArray(actions) || actions.length === 0) {
+            return '<div class="rounded-2xl border-2 border-dashed border-sky-600 bg-sky-950/40 px-6 py-12 text-center text-xl font-semibold text-sky-100">Судья пока не завершил ни одного действия для этой оценки.<div class="mt-2 text-sm font-normal text-sky-300">Выбор элемента без балла здесь не показывается. Окно обновляется автоматически.</div></div>';
+        }
+
+        const latest = actions[0];
+        const latestDraft = latest.draft_score !== null && latest.draft_score !== undefined ? esc(latest.draft_score) : '—';
+
+        return `
+            <div class="rounded-2xl border-2 border-sky-600/80 bg-sky-950/35 p-4 sm:p-5">
+                <div class="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                    <div class="rounded-xl border border-cyan-500/70 bg-cyan-900/45 px-5 py-4">
+                        <div class="text-sm font-bold uppercase tracking-wider text-cyan-200">Текущий черновик</div>
+                        <div class="mt-1 font-mono text-5xl font-black tabular-nums text-white sm:text-6xl">${latestDraft}</div>
+                        <div class="mt-2 text-lg font-bold text-cyan-100">${esc(latest.action || 'Действие')}</div>
+                    </div>
+                    <div class="flex min-w-52 flex-col justify-center rounded-xl border border-amber-500/60 bg-amber-950/45 px-5 py-4 text-amber-100">
+                        <div class="text-lg font-bold">${esc(latest.judge || 'Судья')}</div>
+                        <div class="mt-1 font-mono text-2xl font-black">${esc(latest.created_at || '—')}</div>
+                        <div class="mt-2 text-sm text-amber-300">LIVE · обновление каждую секунду</div>
+                    </div>
+                </div>
+                <div class="mb-2 text-sm font-bold uppercase tracking-wider text-sky-200">История завершённых действий</div>
+                <div class="grid max-h-[42vh] gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
+                    ${actions.map((action) => {
+                        const entries = Array.isArray(action.entries) && action.entries.length
+                            ? `<ul class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">${action.entries.map(entryLine).join('')}</ul>`
+                            : '';
+                        return `
+                            <div class="rounded-xl border border-slate-700 bg-slate-950/80 px-4 py-3">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div class="text-base font-bold text-white">${esc(action.action || 'Действие')}</div>
+                                        <div class="mt-1 text-sm text-slate-400">${esc(action.judge || 'Судья')} · ${esc(action.created_at || '—')}</div>
+                                    </div>
+                                    ${action.draft_score !== null && action.draft_score !== undefined ? `<div class="shrink-0 rounded-lg bg-sky-900/70 px-3 py-2 text-right"><div class="text-xs font-bold uppercase text-sky-300">Сумма</div><div class="font-mono text-2xl font-black text-white">${esc(action.draft_score)}</div></div>` : ''}
+                                </div>
+                                ${entries}
+                            </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    };
+
+    const stopLive = () => {
+        if (liveInterval) clearInterval(liveInterval);
+        liveInterval = null;
+        liveSelection = null;
+        liveRequestInFlight = false;
+    };
+
+    const refreshLive = async () => {
+        if (! liveSelection || liveRequestInFlight || modal.classList.contains('hidden')) return;
+        if (body.contains(document.activeElement) && document.activeElement?.matches('input, select, textarea')) return;
+        liveRequestInFlight = true;
+        try {
+            const url = new URL(liveSelection.url, window.location.origin);
+            url.searchParams.set('slot', liveSelection.slot);
+            const response = await fetch(url, {
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                cache: 'no-store',
+            });
+            if (! response.ok) throw new Error(`Ошибка ${response.status}`);
+            const data = await response.json();
+            if (! liveSelection || String(data.performance_id) !== String(liveSelection.performanceId) || data.slot !== liveSelection.slot) return;
+            const finalScore = data.score
+                ? slotBlock(liveSelection.performanceHistory, liveSelection.slot, true, data.score)
+                : '<div class="rounded-2xl border-2 border-dashed border-amber-700 bg-amber-950/25 p-5 text-lg font-semibold text-amber-200">Итоговая оценка ещё не отправлена.</div>';
+            body.innerHTML = liveActionsBlock(data.actions) + finalScore;
+        } catch (error) {
+            if (body.childElementCount === 0) {
+                body.innerHTML = `<div class="rounded-lg border border-rose-800/70 bg-rose-950/35 px-3 py-2 text-sm text-rose-100">${esc(error?.message || 'Не удалось получить Live-действия.')}</div>`;
+            }
+        } finally {
+            liveRequestInFlight = false;
+        }
+    };
+
     const open = (performanceHistory, slots, heading, withActions = false) => {
+        stopLive();
         const blocks = slots.map((s) => slotBlock(performanceHistory, s, withActions && slots.length === 1)).filter(Boolean);
         if (! blocks.length) return;
         title.textContent = heading;
         body.innerHTML = blocks.join('');
         modal.classList.remove('hidden');
+    };
+
+    const openLive = (performanceHistory, performanceId, slot) => {
+        stopLive();
+        title.textContent = `${performanceHistory?.athlete || 'Гимнастка'} — ${slot} · Live`;
+        body.innerHTML = '<div class="rounded-xl border border-sky-900/70 bg-sky-950/20 px-4 py-6 text-center text-sm text-sky-200">Загружаю действия судьи…</div>';
+        modal.classList.remove('hidden');
+        liveSelection = {
+            performanceHistory,
+            performanceId,
+            slot,
+            url: performanceHistory?.live_history_url,
+        };
+        if (! liveSelection.url) return;
+        refreshLive();
+        liveInterval = setInterval(refreshLive, 1000);
     };
 
     document.querySelectorAll('[data-history-slot]').forEach((td) => {
@@ -1213,13 +1424,8 @@
         button.addEventListener('click', () => {
             const performanceHistory = histories[String(button.dataset.performanceId)];
             const slot = button.dataset.slot;
-            if (! performanceHistory?.slots?.[slot]) return;
-            open(
-                performanceHistory,
-                [slot],
-                `${performanceHistory.athlete || 'Гимнастка'} — ${slot}`,
-                true,
-            );
+            if (! performanceHistory) return;
+            openLive(performanceHistory, button.dataset.performanceId, slot);
         });
     });
 
@@ -1233,12 +1439,15 @@
         });
     }
 
-    modal.querySelectorAll('[data-history-close]').forEach((el) => {
-        el.addEventListener('click', () => modal.classList.add('hidden'));
-    });
+    const close = () => {
+        stopLive();
+        modal.classList.add('hidden');
+    };
+    modal.querySelectorAll('[data-history-close]').forEach((el) => el.addEventListener('click', close));
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') modal.classList.add('hidden');
+        if (e.key === 'Escape') close();
     });
+    window.addEventListener('judge:before-page-update', stopLive, { once: true });
 })();
 </script>
 <script>
@@ -1403,6 +1612,32 @@
 </script>
 <script>
 (function () {
+    const search = document.getElementById('stream_search');
+    const select = document.getElementById('stream_select');
+    if (! search || ! select) return;
+
+    const options = Array.from(select.options).map((option) => ({
+        option,
+        text: `${option.textContent} ${option.dataset.search || ''}`.toLocaleLowerCase('ru'),
+    }));
+    const filter = () => {
+        const needle = search.value.trim().toLocaleLowerCase('ru');
+        options.forEach(({ option, text }) => {
+            option.hidden = needle !== '' && ! text.includes(needle);
+        });
+        const firstVisible = options.find(({ option }) => ! option.hidden);
+        if (firstVisible && select.selectedOptions[0]?.hidden) select.value = firstVisible.option.value;
+    };
+    search.addEventListener('input', filter);
+    search.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        if (select.value) window.JudgeAsync?.refresh(select.value, { force: true, silent: true }) || window.location.assign(select.value);
+    });
+})();
+</script>
+<script>
+(function () {
     const pageRoot = document.querySelector('[data-async-page]');
     const formatDuration = (seconds) => {
         const value = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -1487,7 +1722,7 @@
             if (j.rev !== lastRev) {
                 let refreshed = false;
                 if (window.JudgeAsync) {
-                    refreshed = await window.JudgeAsync.refresh(window.location.href, { silent: true });
+                    refreshed = await window.JudgeAsync.refresh(j.redirect_url || window.location.href, { silent: true });
                 }
 
                 if (refreshed) return;
@@ -1496,7 +1731,8 @@
                 // if background replacement is still unavailable, reload automatically.
                 failedRefreshes += 1;
                 if (!window.JudgeAsync || failedRefreshes >= 2) {
-                    window.location.reload();
+                    if (j.redirect_url) window.location.assign(j.redirect_url);
+                    else window.location.reload();
                 }
             }
         } catch (e) {

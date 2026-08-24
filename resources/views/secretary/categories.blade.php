@@ -47,15 +47,7 @@
                                         @endif
                                     </td>
                                     <td class="py-3 text-right">
-                                        @if($c->tournament)
-                                            <a class="text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.tournament.live', $c->tournament) }}?category={{ $c->id }}">
-                                                Очередь →
-                                            </a>
-                                        @else
-                                            <a class="text-emerald-400 hover:text-emerald-300" href="{{ route('secretary.queue', $c) }}">
-                                                Очередь →
-                                            </a>
-                                        @endif
+                                        <a class="text-sky-300 hover:text-sky-200" href="{{ route('secretary.queue.review', $c) }}">Просмотр →</a>
                                     </td>
                                 </tr>
                             @endforeach
@@ -81,15 +73,7 @@
                                     @endif
                                 </div>
                                 <div class="mt-3 flex justify-end">
-                                    @if($c->tournament)
-                                        <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.tournament.live', $c->tournament) }}?category={{ $c->id }}">
-                                            Очередь →
-                                        </a>
-                                    @else
-                                        <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.queue', $c) }}">
-                                            Очередь →
-                                        </a>
-                                    @endif
+                                    <a class="text-sky-300 hover:text-sky-200 font-medium" href="{{ route('secretary.queue.review', $c) }}">Просмотр →</a>
                                 </div>
                             </div>
                         @endforeach
