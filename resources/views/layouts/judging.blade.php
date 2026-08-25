@@ -199,6 +199,37 @@
             line-height: .95 !important;
         }
 
+        /* A, страница 2: крупные значения используют высоту больших кнопок. */
+        .judge-a-choice-value {
+            font-size: clamp(2rem, min(2.6vw, 6vh), 3.25rem);
+            line-height: .9;
+        }
+
+        .judge-a-event-value {
+            font-size: clamp(2.25rem, min(3.3vw, 6.5vh), 4.25rem);
+            line-height: .9;
+        }
+
+        .judge-a-event-label {
+            font-size: clamp(.95rem, min(1.15vw, 2.5vh), 1.35rem);
+            line-height: 1.08;
+        }
+
+        .judge-a-wide-label {
+            font-size: clamp(1.1rem, min(1.45vw, 3vh), 1.65rem);
+            line-height: 1.08;
+        }
+
+        .judge-a-compact-value {
+            font-size: clamp(1.5rem, min(2vw, 4vh), 2.5rem);
+            line-height: .9;
+        }
+
+        .judge-line-value {
+            font-size: clamp(4rem, min(8vw, 13vh), 8rem);
+            line-height: .85;
+        }
+
         .judge-workspace button:not([class*="bg-"]):not([style*="background"]) {
             background-color: rgb(20 29 47);
             background-image: linear-gradient(145deg, rgb(var(--judge-accent) / .13), transparent 58%, rgb(0 0 0 / .18));

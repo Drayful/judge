@@ -52,13 +52,13 @@
         <div class="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2">
             <button type="button" @click="setLinePenalty('line_gymnast')" :disabled="busy"
                 class="self-end rounded-lg border border-cyan-700/50 bg-[#0f5f6f] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#117383] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
-                <span class="block text-6xl font-extrabold tabular-nums">0.30</span>
+                <span class="judge-line-value block font-extrabold tabular-nums">0.30</span>
                 <span class="mt-3 block text-xl font-bold uppercase tracking-wide">Гимнастка за линию</span>
             </button>
 
             <button type="button" @click="setLinePenalty('line_ball')" :disabled="busy"
                 class="self-end rounded-lg border border-cyan-700/50 bg-[#1e6a85] px-7 py-10 text-left text-white shadow-lg transition hover:bg-[#247c9b] active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">
-                <span class="block text-6xl font-extrabold tabular-nums">0.30</span>
+                <span class="judge-line-value block font-extrabold tabular-nums">0.30</span>
                 <span class="mt-3 block text-xl font-bold uppercase tracking-wide">Мяч за линию</span>
             </button>
         </div>

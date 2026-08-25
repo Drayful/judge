@@ -133,7 +133,7 @@
         @foreach ($allScores as $v)
             <button type="button" @click="assignValue({{ $v }})"
                 :class="pendingDc ? 'ring-2 ring-amber-400/80 brightness-110' : ''"
-                class="min-h-0 rounded-xl bg-[#13294b] hover:bg-[#1a3865] border border-slate-700 text-white text-xl xl:text-2xl font-bold shadow-md tabular-nums active:scale-[0.98] flex items-center justify-center transition">
+                class="min-h-0 rounded-xl bg-[#13294b] hover:bg-[#1a3865] border border-slate-700 text-white text-4xl xl:text-5xl font-bold shadow-md tabular-nums active:scale-[0.98] flex items-center justify-center transition">
                 {{ number_format($v, 1) }}
             </button>
         @endforeach

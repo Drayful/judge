@@ -61,7 +61,7 @@
                                 :class="cat.{{ $item['cat'] }} > 0 ? 'border-emerald-400 bg-emerald-800/90 text-white' : 'border-rose-700/70 bg-rose-950/50 text-rose-100'"
                                 class="min-h-0 rounded-xl border p-2 text-center text-sm font-bold leading-tight active:scale-[0.98] disabled:cursor-default disabled:opacity-100">
                                 <span x-show="cat.{{ $item['cat'] }} > 0" class="mb-1 block text-3xl leading-none text-emerald-200">✓</span>
-                                <span x-show="cat.{{ $item['cat'] }} === 0" class="mb-1 block font-mono text-lg text-rose-300">−0.30</span>
+                                <span x-show="cat.{{ $item['cat'] }} === 0" class="judge-a-compact-value mb-1 block font-mono text-rose-200">−0.30</span>
                                 {{ $item['label'] }}
                             </button>
                         @endforeach
@@ -128,7 +128,9 @@
                         @foreach ([0, 0.3, 0.6, 1.0] as $value)
                             <button type="button" @click="selectPenalty('character', {{ $value }})"
                                 :class="categoryPenalty('character') === {{ $value }} ? 'border-emerald-500 bg-emerald-800 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
-                                class="h-full min-h-14 rounded-lg border py-2 font-mono text-base font-bold active:scale-[0.98]">{{ number_format($value, 1) }}</button>
+                                class="h-full min-h-14 rounded-lg border px-1 py-2 font-mono font-bold active:scale-[0.98]">
+                                <span class="judge-a-choice-value block tabular-nums">{{ number_format($value, 1) }}</span>
+                            </button>
                         @endforeach
                     </div>
                 </div>
@@ -138,13 +140,18 @@
                         @foreach ([0, 0.3, 0.6] as $value)
                             <button type="button" @click="selectPenalty('bodyExpr', {{ $value }})"
                                 :class="categoryPenalty('bodyExpr') === {{ $value }} ? 'border-emerald-500 bg-emerald-800 text-white' : 'border-slate-700 bg-slate-800 text-slate-200'"
-                                class="h-full min-h-14 rounded-lg border py-2 font-mono text-base font-bold active:scale-[0.98]">{{ number_format($value, 1) }}</button>
+                                class="h-full min-h-14 rounded-lg border px-1 py-2 font-mono font-bold active:scale-[0.98]">
+                                <span class="judge-a-choice-value block tabular-nums">{{ number_format($value, 1) }}</span>
+                            </button>
                         @endforeach
                     </div>
                 </div>
                 <button type="button" @click="togglePenalty(0.3, 'faceExpr')"
                     :class="hasPenalty('faceExpr') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                    class="flex-1 rounded-xl border px-3 py-2 text-center text-sm font-semibold leading-tight active:scale-[0.98]"><span class="block font-mono text-lg font-bold">−0.30</span>Экспрессия лица</button>
+                    class="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border px-3 py-2 text-center font-semibold active:scale-[0.98]">
+                    <span class="judge-a-event-value block font-mono font-extrabold tabular-nums">−0.30</span>
+                    <span class="judge-a-wide-label block">Экспрессия лица</span>
+                </button>
             </div>
 
             <div class="col-span-4 min-h-0 flex flex-col gap-2">
@@ -168,14 +175,16 @@
                 @foreach($eventPenalties as $item)
                     <button type="button" @click="togglePenalty({{ $item['v'] }}, '{{ $item['cat'] }}')"
                         :class="hasPenalty('{{ $item['cat'] }}') ? 'border-rose-500 bg-rose-900/70 text-white' : 'border-slate-700 bg-slate-800 text-slate-300'"
-                        class="min-h-0 rounded-xl border px-2 py-1.5 text-center text-[10px] font-semibold leading-tight active:scale-[0.98]">
-                        <span class="block font-mono text-base font-extrabold">−{{ number_format($item['v'], 2) }}</span>{{ $item['label'] }}
+                        class="min-h-0 rounded-xl border px-2 py-1.5 text-center font-semibold active:scale-[0.98]">
+                        <span class="judge-a-event-value block font-mono font-extrabold tabular-nums">−{{ number_format($item['v'], 2) }}</span>
+                        <span class="judge-a-event-label mt-3 block">{{ $item['label'] }}</span>
                     </button>
                 @endforeach
                 @if($groupProgram)
                     <div class="min-h-0 flex flex-col rounded-xl border border-amber-700/60 bg-amber-900/60 p-1.5 text-white">
                         <button type="button" @click="add(0.6, 'bodyConstruction')" class="flex-1 text-left text-[10px] font-semibold leading-tight active:scale-[0.98]">
-                            <span class="block font-mono text-base font-extrabold">−0.60</span>Конструкция / поднятое положение · за каждый элемент
+                            <span class="judge-a-event-value block font-mono font-extrabold tabular-nums">−0.60</span>
+                            <span class="judge-a-event-label mt-2 block">Конструкция / поднятое положение · за каждый элемент</span>
                             <span class="mt-1 block text-[9px] text-amber-200" x-text="'Сумма: −' + categoryPenalty('bodyConstruction').toFixed(2)"></span>
                         </button>
                     </div>
