@@ -47,12 +47,12 @@
                         </div>
 
                         <div class="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-300" id="classificationLabel">{{ $perf['classification_label'] ?? '' }}</div>
-                        <div class="text-sm text-slate-500" id="startNumberWrap">
+                        <div class="text-base font-semibold text-slate-400 sm:text-lg" id="startNumberWrap">
                             @if($perf && $perf['start_number']) № <span class="font-semibold tabular-nums text-slate-300">{{ $perf['start_number'] }}</span> @endif
                         </div>
                         <h2 class="sb-athlete-name px-4" id="athleteName">{{ $perf['athlete'] ?? '—' }}</h2>
                         <div class="mx-auto max-w-4xl truncate px-4 text-xl text-slate-300 sm:text-2xl" id="athleteClub">{{ $perf['club'] ?? '—' }}</div>
-                        <span id="apparatusBadge" class="inline-block rounded-xl border border-slate-500 bg-slate-900/80 px-5 py-2 text-base font-bold text-white">
+                        <span id="apparatusBadge" class="inline-block rounded-xl border border-slate-500 bg-slate-900/80 px-6 py-2 text-lg font-black text-white sm:text-2xl">
                             {{ $perf['apparatus_label'] ?? '—' }}
                         </span>
 
@@ -69,17 +69,17 @@
 
                     <div id="resultState" class="{{ ($perf['score_visible'] ?? false) ? '' : 'hidden' }} w-full space-y-5">
                         <div id="normalDComponents" class="{{ ($perf['is_body_only'] ?? false) ? 'hidden' : '' }} sb-scores mx-auto max-w-5xl">
-                            @foreach(['db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
-                                <div class="sb-score-card">
+                            @foreach(['d' => 'D', 'db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
+                                <div class="sb-score-card {{ in_array($key, ['d', 'a', 'e'], true) ? 'sb-score-card--primary' : '' }}">
                                     <div class="sb-score-label">{{ $label }}</div>
                                     <div id="score{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
                                 </div>
                             @endforeach
                         </div>
 
-                        <div id="bodyOnlyComponents" class="{{ ($perf['is_body_only'] ?? false) ? '' : 'hidden' }} sb-scores mx-auto max-w-4xl">
+                        <div id="bodyOnlyComponents" class="{{ ($perf['is_body_only'] ?? false) ? '' : 'hidden' }} sb-scores sb-scores--body mx-auto max-w-4xl">
                             @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
-                                <div class="sb-score-card">
+                                <div class="sb-score-card {{ in_array($key, ['d', 'a', 'e'], true) ? 'sb-score-card--primary' : '' }}">
                                     <div class="sb-score-label">{{ $label }}</div>
                                     <div id="bodyScore{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
                                 </div>
@@ -89,16 +89,16 @@
                         <div class="mx-auto grid max-w-5xl gap-4 md:grid-cols-[1.35fr_1fr_1fr]">
                             <div class="rounded-3xl border-2 border-cyan-400/70 bg-gradient-to-br from-cyan-950 to-slate-950 px-5 py-5 text-center shadow-2xl shadow-cyan-950/50">
                                 <div class="text-sm font-bold uppercase tracking-[0.18em] text-cyan-200">За упражнение</div>
-                                <div id="scoreApparatus_score" class="mt-1 font-mono text-6xl font-black tabular-nums text-white sm:text-7xl">{{ isset($perf['apparatus_score']) && $perf['apparatus_score'] !== null ? number_format((float) $perf['apparatus_score'], 3) : '—' }}</div>
+                                <div id="scoreApparatus_score" class="sb-final-score">{{ isset($perf['apparatus_score']) && $perf['apparatus_score'] !== null ? number_format((float) $perf['apparatus_score'], 3) : '—' }}</div>
                             </div>
                             <div class="rounded-3xl border border-violet-500/60 bg-violet-950/35 px-5 py-5 text-center">
                                 <div class="text-sm font-bold uppercase tracking-wider text-violet-200">Сумма многоборья</div>
-                                <div id="scoreTotal" class="mt-2 font-mono text-4xl font-black tabular-nums text-white sm:text-5xl">{{ isset($perf['total']) && $perf['total'] !== null ? number_format((float) $perf['total'], 3) : '—' }}</div>
+                                <div id="scoreTotal" class="sb-overall-score">{{ isset($perf['total']) && $perf['total'] !== null ? number_format((float) $perf['total'], 3) : '—' }}</div>
                             </div>
                             <div id="placeBlock" class="rounded-3xl border border-amber-500/60 bg-amber-950/35 px-5 py-5 text-center {{ ($perf['place'] ?? null) ? '' : 'opacity-40' }}">
                                 <div class="text-sm font-bold uppercase tracking-wider text-amber-200">Место в многоборье</div>
                                 <div class="mt-1 flex items-baseline justify-center gap-2">
-                                    <span id="placeValue" class="text-5xl font-black text-white sm:text-6xl">{{ $perf['place'] ?? '—' }}</span>
+                                    <span id="placeValue" class="sb-rank-value">{{ $perf['place'] ?? '—' }}</span>
                                     <span id="placeOf" class="text-xl font-bold text-amber-200">из {{ $perf['place_of'] ?? '—' }}</span>
                                 </div>
                             </div>
@@ -202,7 +202,7 @@
                 updateScore('e', perf.e, 'bodyScoreE');
                 updateScore('penalty', perf.penalty, 'bodyScorePenalty');
             } else {
-                ['db', 'da', 'a', 'e', 'penalty'].forEach(key => updateScore(key, perf[key]));
+                ['d', 'db', 'da', 'a', 'e', 'penalty'].forEach(key => updateScore(key, perf[key]));
             }
             updateScore('apparatus_score', perf.apparatus_score, 'scoreApparatus_score');
             updateScore('total', perf.total);

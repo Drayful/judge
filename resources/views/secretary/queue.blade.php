@@ -101,10 +101,10 @@
                                    class="mb-2 block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:border-emerald-500 focus:ring-emerald-500">
                             <label for="stream_select" class="block text-xs font-medium text-slate-400 mb-1">Поток</label>
                             <select id="stream_select" name="stream"
-                                class="block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500"
-                                onchange="if (this.value) window.JudgeAsync?.refresh(this.value, { force: true, silent: true }) || window.location.assign(this.value);">
+                                class="block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
+                                <option value="" disabled hidden data-stream-placeholder>Выберите найденный поток…</option>
                                 @foreach($tournamentCategories as $tc)
-                                    <option data-search="{{ Str::lower($tc->name.' '.$tc->id.' '.($tc->stream_no ?? '')) }}"
+                                    <option data-stream-option data-search="{{ Str::lower($tc->name.' '.$tc->id.' '.($tc->stream_no ?? '')) }}"
                                         value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $tc->id }}"
                                         @selected($tc->id === $category->id)>
                                         Поток #{{ $tc->id }} · {{ $tc->name }}
@@ -1616,23 +1616,39 @@
     const select = document.getElementById('stream_select');
     if (! search || ! select) return;
 
-    const options = Array.from(select.options).map((option) => ({
+    const placeholder = select.querySelector('[data-stream-placeholder]');
+    const options = Array.from(select.querySelectorAll('[data-stream-option]')).map((option) => ({
         option,
         text: `${option.textContent} ${option.dataset.search || ''}`.toLocaleLowerCase('ru'),
     }));
+    const navigate = async () => {
+        if (! select.value) return;
+        const url = select.value;
+        const refreshed = window.JudgeAsync
+            ? await window.JudgeAsync.refresh(url, { force: true, silent: true })
+            : false;
+        if (! refreshed) window.location.assign(url);
+    };
     const filter = () => {
         const needle = search.value.trim().toLocaleLowerCase('ru');
         options.forEach(({ option, text }) => {
             option.hidden = needle !== '' && ! text.includes(needle);
         });
-        const firstVisible = options.find(({ option }) => ! option.hidden);
-        if (firstVisible && select.selectedOptions[0]?.hidden) select.value = firstVisible.option.value;
+        // Не выбираем первый результат автоматически: иначе последующий выбор
+        // того же пункта не создаёт событие change и поток не открывается.
+        if (select.selectedOptions[0]?.hidden) {
+            if (placeholder) placeholder.hidden = false;
+            select.value = '';
+        }
     };
     search.addEventListener('input', filter);
+    select.addEventListener('change', navigate);
     search.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        if (select.value) window.JudgeAsync?.refresh(select.value, { force: true, silent: true }) || window.location.assign(select.value);
+        const visible = options.filter(({ option }) => ! option.hidden);
+        if (! select.value && visible.length === 1) select.value = visible[0].option.value;
+        navigate();
     });
 })();
 </script>

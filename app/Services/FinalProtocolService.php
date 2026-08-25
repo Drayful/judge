@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Support\CompetitionPool;
 use App\Support\PerformanceApparatus;
 use Illuminate\Support\Collection;
 
@@ -95,10 +96,13 @@ class FinalProtocolService
             return [];
         }
 
-        $data = $this->buildPublished(
+        $pool = CompetitionPool::resolve($category);
+        $data = $this->buildGroup(
             $tournament,
             $category->resolvedBirthYear(),
-            $category->resolvedDivision()
+            $category->resolvedDivision(),
+            true,
+            $pool['athlete_ids'],
         );
 
         $map = [];
@@ -112,8 +116,13 @@ class FinalProtocolService
     /**
      * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
      */
-    private function buildGroup(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly): array
-    {
+    private function buildGroup(
+        Tournament $tournament,
+        ?int $birthYear,
+        ?string $division,
+        bool $publishedOnly,
+        ?array $athleteIds = null,
+    ): array {
         $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
 
         $categories = $tournament->categories()->get()->filter(
@@ -127,6 +136,7 @@ class FinalProtocolService
             ->whereNotNull('total')
             ->where('is_counted', true)
             ->whereNull('withdrawn_at')
+            ->when($athleteIds !== null, fn ($query) => $query->whereIn('athlete_id', $athleteIds))
             ->when($publishedOnly, fn ($q) => $q->whereNotNull('published_at'))
             ->orderBy('athlete_id')
             ->orderBy('order_index')

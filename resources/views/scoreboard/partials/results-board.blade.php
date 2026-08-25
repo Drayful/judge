@@ -3,7 +3,7 @@
         <div class="text-center">
             <div class="text-5xl mb-4 opacity-30">★</div>
             <p class="text-lg text-slate-300 font-medium">Пока без результатов</p>
-            <p class="mt-2 text-sm text-slate-500">Оценки появятся после публикации секретарём</p>
+            <p class="mt-2 text-sm text-slate-500">Оценки появятся после вывода оператором табло</p>
         </div>
     </div>
 

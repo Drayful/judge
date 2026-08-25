@@ -690,4 +690,74 @@ class ScoreboardTest extends TestCase
             ->assertJsonPath('performance.place', 2)
             ->assertJsonPath('performance.place_of', 2);
     }
+
+    public function test_general_results_table_shows_the_whole_excel_pool_across_streams(): void
+    {
+        $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
+        $stream1 = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2016 B — поток 1',
+            'birth_year' => 2016, 'division' => 'B', 'is_published' => true,
+        ]);
+        $stream2 = Category::create([
+            'tournament_id' => $tournament->id, 'name' => '2016 B — поток 2',
+            'birth_year' => 2016, 'division' => 'B', 'is_published' => true,
+        ]);
+
+        $currentStreamAthlete = Athlete::create(['first_name' => 'Вторая', 'last_name' => 'Гимнастка']);
+        $otherStreamLeader = Athlete::create(['first_name' => 'Первая', 'last_name' => 'Гимнастка']);
+        $otherSheetAthlete = Athlete::create(['first_name' => 'Чужая', 'last_name' => 'Гимнастка']);
+
+        foreach ([$currentStreamAthlete, $otherStreamLeader] as $index => $athlete) {
+            Entry::create([
+                'tournament_id' => $tournament->id,
+                'athlete_id' => $athlete->id,
+                'program' => 'individual',
+                'birth_year' => 2016,
+                'division' => 'B',
+                'order_index' => $index + 1,
+                'meta' => ['sheet' => '2016B'],
+            ]);
+        }
+        Entry::create([
+            'tournament_id' => $tournament->id,
+            'athlete_id' => $otherSheetAthlete->id,
+            'program' => 'individual',
+            'birth_year' => 2016,
+            'division' => 'B',
+            'order_index' => 3,
+            'meta' => ['sheet' => 'Другой лист'],
+        ]);
+
+        foreach ([
+            [$stream1, $currentStreamAthlete, 20],
+            [$stream2, $otherStreamLeader, 30],
+            [$stream2, $otherSheetAthlete, 100],
+        ] as [$stream, $athlete, $total]) {
+            Performance::create([
+                'category_id' => $stream->id,
+                'athlete_id' => $athlete->id,
+                'status' => 'published',
+                'total' => $total,
+                'published_at' => now(),
+                'scoreboard_accepted_at' => now(),
+                'is_counted' => true,
+            ]);
+        }
+
+        $this->getJson(route('scoreboard.category.live', $stream1))
+            ->assertOk()
+            ->assertJsonCount(2, 'rows')
+            ->assertJsonPath('rows.0.athlete', 'Гимнастка Первая')
+            ->assertJsonPath('rows.0.place', 1)
+            ->assertJsonPath('rows.1.athlete', 'Гимнастка Вторая')
+            ->assertJsonPath('rows.1.place', 2)
+            ->assertJsonMissing(['athlete' => 'Гимнастка Чужая']);
+
+        $this->get(route('scoreboard.table', $stream1))
+            ->assertOk()
+            ->assertSee('Общая таблица результатов')
+            ->assertSee('Excel-пул: 2016B')
+            ->assertSee('Гимнастка Первая')
+            ->assertDontSee('Гимнастка Чужая');
+    }
 }

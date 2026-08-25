@@ -3,7 +3,6 @@
 namespace App\Support;
 
 use App\Models\Category;
-use App\Models\Entry;
 use App\Models\Performance;
 use App\Models\Tournament;
 use Illuminate\Support\Collection;
@@ -156,84 +155,6 @@ class ScoreboardUi
     }
 
     /**
-     * Пул рейтинга: прежде всего все записи одного Excel-листа. Если запись была
-     * добавлена вручную, используем состав системной группы, из которой собраны потоки.
-     *
-     * @return array{athlete_ids:?list<int>,label:?string}
-     */
-    private static function rankingPool(Category $category, Performance $performance): array
-    {
-        $category->loadMissing('tournament');
-        $tournament = $category->tournament;
-        if ($tournament === null) {
-            return ['athlete_ids' => null, 'label' => null];
-        }
-
-        $entry = null;
-        if ($category->group_id !== null) {
-            $entry = Entry::query()
-                ->where('tournament_id', $tournament->id)
-                ->where('athlete_id', $performance->athlete_id)
-                ->where('group_id', $category->group_id)
-                ->first();
-        }
-
-        $entry ??= Entry::query()
-            ->where('tournament_id', $tournament->id)
-            ->where('athlete_id', $performance->athlete_id)
-            ->get()
-            ->first(fn (Entry $candidate) => $candidate->importSheet() !== null);
-
-        $sheet = $entry?->importSheet();
-        if ($sheet !== null) {
-            $sheetEntries = Entry::query()
-                ->where('tournament_id', $tournament->id)
-                ->get(['athlete_id', 'birth_year', 'division', 'meta'])
-                ->filter(fn (Entry $candidate) => $candidate->importSheet() === $sheet);
-
-            $birthYear = $category->resolvedBirthYear();
-            $division = $category->resolvedDivision();
-            $classifiedEntries = $sheetEntries->filter(function (Entry $candidate) use ($birthYear, $division): bool {
-                if ($birthYear !== null && (int) $candidate->birth_year !== $birthYear) {
-                    return false;
-                }
-
-                return $division === null
-                    || strtoupper(trim((string) $candidate->division)) === $division;
-            });
-
-            // У старых импортов год/категория могли не сохраниться в entries.
-            // В этом случае оставляем прежний безопасный пул по одному Excel-листу.
-            $poolEntries = $classifiedEntries->isNotEmpty() ? $classifiedEntries : $sheetEntries;
-            $athleteIds = $poolEntries
-                ->pluck('athlete_id')
-                ->map(fn ($id) => (int) $id)
-                ->unique()
-                ->values()
-                ->all();
-
-            return ['athlete_ids' => $athleteIds, 'label' => $sheet];
-        }
-
-        if ($category->group_id !== null) {
-            $athleteIds = Entry::query()
-                ->where('tournament_id', $tournament->id)
-                ->where('group_id', $category->group_id)
-                ->pluck('athlete_id')
-                ->map(fn ($id) => (int) $id)
-                ->unique()
-                ->values()
-                ->all();
-
-            if ($athleteIds !== []) {
-                return ['athlete_ids' => $athleteIds, 'label' => $category->group?->name];
-            }
-        }
-
-        return ['athlete_ids' => null, 'label' => null];
-    }
-
-    /**
      * Текущий рейтинг складывает все уже принятые виды каждой гимнастки из пула.
      *
      * @return array{place:?int,place_of:int,overall_total:?float,pool_label:?string}
@@ -241,7 +162,7 @@ class ScoreboardUi
     private static function rankingSnapshot(Category $category, Performance $performance): array
     {
         $category->loadMissing('tournament');
-        $pool = self::rankingPool($category, $performance);
+        $pool = CompetitionPool::resolve($category, $performance);
         $poolAthleteIds = $pool['athlete_ids'];
         // Даже при совпавшем Excel-листе никогда не смешиваем результаты другого
         // года или категории: потоки объединяются только внутри одной группы.

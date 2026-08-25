@@ -26,8 +26,9 @@
             <div>
                 <label for="review-stream-select" class="text-xs font-medium text-slate-400">Поток</label>
                 <select id="review-stream-select" class="mt-1 w-full rounded-xl border-slate-700 bg-slate-950 text-slate-100 focus:border-sky-500 focus:ring-sky-500">
+                    <option value="" disabled hidden data-stream-placeholder>Выберите найденный поток…</option>
                     @foreach($tournamentCategories as $stream)
-                        <option data-search="{{ Str::lower($stream->name.' '.$stream->id.' '.($stream->stream_no ?? '')) }}"
+                        <option data-stream-option data-search="{{ Str::lower($stream->name.' '.$stream->id.' '.($stream->stream_no ?? '')) }}"
                                 value="{{ route('secretary.queue.review', ['category' => $stream->id]) }}"
                                 @selected($stream->id === $category->id)>
                             Поток {{ $stream->stream_no ?? '#'.$stream->id }} · {{ $stream->name }}
@@ -98,18 +99,34 @@
             const select = document.getElementById('review-stream-select');
             const session = document.getElementById('review-session-select');
             if (search && select) {
-                const options = Array.from(select.options).map((option) => ({
+                const placeholder = select.querySelector('[data-stream-placeholder]');
+                const options = Array.from(select.querySelectorAll('[data-stream-option]')).map((option) => ({
                     option,
                     text: `${option.textContent} ${option.dataset.search || ''}`.toLocaleLowerCase('ru'),
                 }));
+                const navigate = async () => {
+                    if (! select.value) return;
+                    const url = select.value;
+                    const refreshed = window.JudgeAsync
+                        ? await window.JudgeAsync.refresh(url, { force: true, silent: true })
+                        : false;
+                    if (! refreshed) window.location.assign(url);
+                };
                 search.addEventListener('input', () => {
                     const needle = search.value.trim().toLocaleLowerCase('ru');
                     options.forEach(({ option, text }) => { option.hidden = needle !== '' && !text.includes(needle); });
-                    const match = options.find(({ option }) => !option.hidden);
-                    if (match) select.value = match.option.value;
+                    if (select.selectedOptions[0]?.hidden) {
+                        if (placeholder) placeholder.hidden = false;
+                        select.value = '';
+                    }
                 });
-                select.addEventListener('change', () => {
-                    if (select.value) window.JudgeAsync?.refresh(select.value, { force: true, silent: true }) || window.location.assign(select.value);
+                select.addEventListener('change', navigate);
+                search.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    const visible = options.filter(({ option }) => ! option.hidden);
+                    if (! select.value && visible.length === 1) select.value = visible[0].option.value;
+                    navigate();
                 });
             }
             session?.addEventListener('change', () => {

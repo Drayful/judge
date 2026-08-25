@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Services\FinalProtocolService;
+use App\Support\CompetitionPool;
 use App\Support\ScoreboardUi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -51,6 +52,7 @@ class ScoreboardController extends Controller
         return view('scoreboard.table', [
             'category' => $category,
             'rows' => $this->publishedRows($category),
+            'competitionPool' => CompetitionPool::resolve($category),
         ]);
     }
 
@@ -165,22 +167,33 @@ class ScoreboardController extends Controller
     }
 
     /**
-     * Опубликованные участницы потока с местами по группе (год + категория), как в итоговом протоколе.
+     * Опубликованные участницы Excel-пула из всех потоков нужного года и категории.
      *
      * @return Collection<int, object>
      */
     private function publishedRows(Category $category)
     {
         $groupRanks = $this->finalProtocol->publishedAthletesById($category);
+        if ($groupRanks === []) {
+            return collect();
+        }
+
+        $category->loadMissing('tournament');
+        $categoryIds = $category->tournament?->categories()->get()
+            ->filter(fn (Category $candidate) => $candidate->resolvedBirthYear() === $category->resolvedBirthYear()
+                && $candidate->resolvedDivision() === $category->resolvedDivision())
+            ->pluck('id')
+            ->all() ?? [$category->id];
 
         $streamPerformances = Performance::query()
             ->with(['athlete', 'inquiries' => fn ($q) => $q->orderByDesc('id')])
-            ->where('category_id', $category->id)
+            ->whereIn('category_id', $categoryIds)
+            ->whereIn('athlete_id', array_keys($groupRanks))
             ->whereNotNull('total')
             ->whereNotNull('published_at')
             ->where('is_counted', true)
             ->whereNull('withdrawn_at')
-            ->orderBy('order_index')
+            ->orderBy('published_at')
             ->orderBy('id')
             ->get()
             ->groupBy('athlete_id');
@@ -216,7 +229,13 @@ class ScoreboardController extends Controller
                 ];
             })
             ->filter()
-            ->sortByDesc('total')
+            ->sort(function (object $left, object $right): int {
+                $leftPlace = $left->place ?? PHP_INT_MAX;
+                $rightPlace = $right->place ?? PHP_INT_MAX;
+
+                return $leftPlace <=> $rightPlace
+                    ?: $left->id <=> $right->id;
+            })
             ->values();
 
         return $rows;
