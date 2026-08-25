@@ -22,6 +22,11 @@
     $canApproveFinal = in_array(auth()->user()?->role, ['secretary', 'organising_committee', 'chief_judge', 'admin', 'super_admin'], true);
     $manualAveragesReady = $currentPerformance
         && \App\Support\SecretaryLiveUi::requiredManualAveragesSubmitted($currentPerformance, $category);
+    $queuePingUrl = route('secretary.queue.ping', [
+        'category' => $category,
+        'session' => $streamSession?->id,
+        'combined' => ($isCombinedLiveView ?? false) ? 1 : null,
+    ]);
 @endphp
 
 <x-app-layout>
@@ -84,7 +89,7 @@
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {{-- Управление потоком --}}
             <div class="live-panel p-5 xl:col-span-1">
-                <h2 class="text-base font-semibold text-white">Управление потоком</h2>
+                <h2 class="text-base font-semibold text-white">{{ ($isCombinedLiveView ?? false) ? 'Управление объединённой очередью' : 'Управление потоком' }}</h2>
                 <p class="mt-1 text-xs text-slate-500">
                     @if(isset($tournamentCategories) && $tournamentCategories->isNotEmpty() && $category->tournament)
                         Один экран на весь турнир: переключайте поток (из импорта Excel: группа → поток). Выбор предмета сохраняется в карточке выступления.
@@ -103,13 +108,25 @@
                             <select id="stream_select" name="stream"
                                 class="block w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500">
                                 <option value="" disabled hidden data-stream-placeholder>Выберите найденный поток…</option>
+                                @if($combinedLiveUrl)
+                                    <optgroup label="Объединённые Live-очереди">
+                                        <option data-stream-option data-combined-live-option
+                                            data-search="{{ Str::lower(($combinedLiveQueueLabel ?? '').' объединенная объединённая очередь') }}"
+                                            value="{{ $combinedLiveUrl }}"
+                                            @selected($isCombinedLiveView ?? false)>
+                                            ⇄ {{ $combinedLiveQueueLabel }}
+                                        </option>
+                                    </optgroup>
+                                @endif
+                                <optgroup label="Обычные потоки">
                                 @foreach($tournamentCategories as $tc)
                                     <option data-stream-option data-search="{{ Str::lower($tc->name.' '.$tc->id.' '.($tc->stream_no ?? '')) }}"
                                         value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $tc->id }}"
-                                        @selected($tc->id === $category->id)>
+                                        @selected(! ($isCombinedLiveView ?? false) && $tc->id === $category->id)>
                                         Поток #{{ $tc->id }} · {{ $tc->name }}
                                     </option>
                                 @endforeach
+                                </optgroup>
                             </select>
                         </div>
                         @if(isset($categorySessions) && $categorySessions->isNotEmpty())
@@ -117,7 +134,7 @@
                                 <label for="session_select" class="block text-xs font-medium text-slate-400 mb-1">День / сессия</label>
                                 <select id="session_select" class="block w-full rounded-xl border border-sky-800/70 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-100 focus:ring-emerald-500 focus:border-emerald-500" onchange="if (this.value) window.JudgeAsync?.refresh(this.value, { force: true, silent: true }) || window.location.assign(this.value);">
                                     @foreach($categorySessions as $session)
-                                        <option value="{{ route('secretary.tournament.live', $category->tournament) }}?category={{ $category->id }}&session={{ $session->id }}" @selected($streamSession?->id === $session->id)>
+                                        <option value="{{ route('secretary.tournament.live', ['tournament' => $category->tournament, 'category' => $category->id, 'session' => $session->id, 'combined' => ($isCombinedLiveView ?? false) ? 1 : null]) }}" @selected($streamSession?->id === $session->id)>
                                             {{ $session->scheduled_on?->format('d.m.Y') }}@if($session->starts_at) · {{ substr($session->starts_at, 0, 5) }}@endif · {{ implode(', ', $session->apparatus ?? []) }}
                                         </option>
                                     @endforeach
@@ -238,8 +255,14 @@
             <div class="live-panel p-5">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h2 class="text-base font-semibold text-white">Порядок выступления потока</h2>
-                        <p class="mt-1 text-xs text-slate-500">Список в порядке выхода. Текущая — подсвечена.</p>
+                        <h2 class="text-base font-semibold text-white">{{ ($isCombinedLiveView ?? false) ? 'Порядок выступления объединённой очереди' : 'Порядок выступления потока' }}</h2>
+                        <p class="mt-1 text-xs text-slate-500">
+                            @if($isCombinedLiveView ?? false)
+                                {{ $combinedLiveQueueLabel }}. У каждой гимнастки сохранён её исходный поток.
+                            @else
+                                Список в порядке выхода. Текущая — подсвечена.
+                            @endif
+                        </p>
                     </div>
                     <div class="flex flex-wrap gap-2">
                         <form method="POST" action="{{ route('secretary.category.autoAdvance', $category) }}">
@@ -253,19 +276,37 @@
                 </div>
                 @if($category->tournament?->isCategoryInCombinedLiveQueue($category))
                     <div class="mt-3 rounded-lg border border-violet-700/60 bg-violet-950/25 px-3 py-2 text-xs text-violet-100">
-                        Этот поток входит в выбранную объединённую Live-очередь из {{ count($category->tournament->combinedLiveCategoryIds()) }} потоков. Настройка находится на странице «Группы и потоки». Стартовый/финальный протокол и места не меняются.
+                        @if($isCombinedLiveView ?? false)
+                            Это только общий вид и порядок Live. Стартовые и финальные протоколы, исходные потоки и места не меняются.
+                        @else
+                            Этот поток входит в выбранную объединённую Live-очередь из {{ count($category->tournament->combinedLiveCategoryIds()) }} потоков. Настройка находится на странице «Группы и потоки». Стартовый/финальный протокол и места не меняются.
+                        @endif
                     </div>
                 @endif
                 <ul class="mt-4 max-h-72 space-y-1 overflow-y-auto pr-1 text-sm">
-                    <?php $queuePosition = 0; foreach ($orderedPerformances as $p): $queuePosition++; ?>
+                    <?php
+                        $displayQueue = ($isCombinedLiveView ?? false)
+                            ? $combinedOrderedPerformances
+                            : $orderedPerformances->map(fn ($performance) => ['performance' => $performance, 'category' => $category]);
+                        $queuePosition = 0;
+                    ?>
+                    @foreach($displayQueue as $queueEntry)
                         <?php
+                            $queuePosition++;
+                            $p = $queueEntry['performance'];
+                            $sourceCategory = $queueEntry['category'];
                             $isCurrent = $currentPerformance && $currentPerformance->id === $p->id;
                             $isWithdrawn = $p->isWithdrawn();
-                            $tag = $p->apparatus ?? $category->apparatus ?? '—';
+                            $tag = $p->apparatus ?? $sourceCategory->apparatus ?? '—';
                         ?>
                         <li class="flex items-center gap-3 rounded-lg px-3 py-2.5 {{ $isWithdrawn ? 'bg-slate-950/30 opacity-60' : ($isCurrent ? 'bg-orange-900/60 ring-2 ring-orange-400/80 shadow-md shadow-orange-950/30' : 'bg-slate-950/40 hover:bg-slate-900/60') }}">
                             <span class="text-slate-500 w-6 text-right font-mono">{{ $p->start_number ?? $queuePosition }}</span>
                             <span class="flex-1 min-w-0 truncate {{ $isWithdrawn ? 'text-slate-500 line-through' : 'text-slate-100' }}">{{ $p->athlete->last_name }} {{ $p->athlete->first_name }}</span>
+                            @if($isCombinedLiveView ?? false)
+                                <span class="shrink-0 rounded-md border border-violet-700/70 bg-violet-950/50 px-2 py-0.5 text-[10px] font-semibold text-violet-100">
+                                    Поток {{ $sourceCategory->stream_no ?? '#'.$sourceCategory->id }}
+                                </span>
+                            @endif
                             <?php if ($isWithdrawn): ?>
                                 <span class="shrink-0 rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">снята</span>
                                 <form method="POST" action="{{ route('secretary.performance.restore', $p) }}" class="shrink-0">
@@ -279,9 +320,9 @@
                                 <?php endif; ?>
                             <?php endif; ?>
                         </li>
-                    <?php endforeach; ?>
+                    @endforeach
                 </ul>
-                @if(($combinedLiveQueue ?? collect())->isNotEmpty())
+                @if(! ($isCombinedLiveView ?? false) && ($combinedLiveQueue ?? collect())->isNotEmpty())
                     <details class="mt-4 rounded-xl border border-violet-800/50 bg-slate-950/45 p-3">
                         <summary class="cursor-pointer text-xs font-semibold text-violet-200">Вся совмещённая очередь группы</summary>
                         <div class="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1">
@@ -1704,7 +1745,7 @@
 <script>
 (function () {
     const pageRoot = document.querySelector('[data-async-page]');
-    const pingUrl = @json(route('secretary.queue.ping', $category).($streamSession ? '?session='.$streamSession->id : ''));
+    const pingUrl = @json($queuePingUrl);
     let lastRev = @json($queueRev);
     let requestInFlight = false;
     let failedRefreshes = 0;

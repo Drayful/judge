@@ -1472,8 +1472,20 @@ class SecretaryController extends Controller
             ]);
         }
 
+        $combinedCategoryIds = $tournament->combinedLiveCategoryIds();
+        $combinedRequested = $request->boolean('combined') && count($combinedCategoryIds) >= 2;
         $defaultId = $categories->first()->id;
+        if ($combinedRequested) {
+            $requestedId = (int) $request->query('category');
+            $activeId = (int) ($tournament->active_category_id ?? 0);
+            $defaultId = in_array($requestedId, $combinedCategoryIds, true)
+                ? $requestedId
+                : (in_array($activeId, $combinedCategoryIds, true) ? $activeId : $combinedCategoryIds[0]);
+        }
         $categoryId = (int) $request->query('category', $defaultId);
+        if ($combinedRequested && ! in_array($categoryId, $combinedCategoryIds, true)) {
+            $categoryId = $defaultId;
+        }
         $category = $categories->firstWhere('id', $categoryId);
 
         if ($category === null) {
@@ -1691,6 +1703,7 @@ class SecretaryController extends Controller
                 'tournament' => $category->tournament_id,
                 'category' => $activeCategoryId,
                 'session' => $category->tournament?->active_stream_session_id,
+                'combined' => $request->boolean('combined') ? 1 : null,
             ]);
         }
 
@@ -1760,20 +1773,28 @@ class SecretaryController extends Controller
             : collect();
         $combinedLiveQueue = collect();
         $combinedCategoryIds = $tournament?->combinedLiveCategoryIds() ?? [];
-        if ($tournament?->hasCombinedLiveQueue()
-            && in_array($category->id, $combinedCategoryIds, true)) {
-            $sessionNo = $session?->session_no;
-            $combinedLiveQueue = Category::query()
+        $combinedStreams = collect();
+        if ($tournament?->hasCombinedLiveQueue()) {
+            $combinedStreams = Category::query()
                 ->where('tournament_id', $category->tournament_id)
                 ->whereIn('id', $combinedCategoryIds)
                 ->get()
                 ->sortBy(fn (Category $stream) => array_search($stream->id, $combinedCategoryIds, true))
-                ->values()
-                ->map(function (Category $stream) use ($sessionNo) {
-                    $targetSessionId = $sessionNo !== null
-                        ? $stream->sessions()->where('session_no', $sessionNo)->value('id')
-                        : null;
-                    $rows = Performance::query()
+                ->values();
+        }
+        $isCombinedLiveView = request()->boolean('combined')
+            && count($combinedCategoryIds) >= 2
+            && in_array($category->id, $combinedCategoryIds, true);
+        if ($tournament?->hasCombinedLiveQueue()
+            && in_array($category->id, $combinedCategoryIds, true)) {
+            $sessionNo = $session?->session_no;
+            $combinedLiveQueue = $combinedStreams->map(function (Category $stream) use ($sessionNo) {
+                $targetSessionId = $sessionNo !== null
+                    ? $stream->sessions()->where('session_no', $sessionNo)->value('id')
+                    : null;
+                $rows = $sessionNo !== null && $targetSessionId === null
+                    ? collect()
+                    : Performance::query()
                         ->with('athlete')
                         ->where('category_id', $stream->id)
                         ->when(
@@ -1785,12 +1806,50 @@ class SecretaryController extends Controller
                         ->orderBy('id')
                         ->get();
 
-                    return [
-                        'category' => $stream,
-                        'session_id' => $targetSessionId,
-                        'performances' => $rows,
-                    ];
-                });
+                return [
+                    'category' => $stream,
+                    'session_id' => $targetSessionId,
+                    'performances' => $rows,
+                ];
+            });
+        }
+        $combinedOrderedPerformances = $combinedLiveQueue
+            ->flatMap(function (array $stream) {
+                return SecretaryLiveUi::orderedPerformances($stream['performances'])
+                    ->map(fn (Performance $performance) => [
+                        'performance' => $performance,
+                        'category' => $stream['category'],
+                    ]);
+            })
+            ->values();
+        $combinedStreamNames = $combinedStreams
+            ->map(fn (Category $stream) => 'Поток '.($stream->stream_no ?? '#'.$stream->id))
+            ->values();
+        $combinedLiveQueueLabel = $combinedStreamNames->isNotEmpty()
+            ? 'Объединённая очередь · '.$combinedStreamNames->implode(' + ')
+            : null;
+        $combinedLiveUrl = null;
+        if ($tournament?->hasCombinedLiveQueue()) {
+            $combinedAnchorId = in_array($category->id, $combinedCategoryIds, true)
+                ? $category->id
+                : (in_array((int) $tournament->active_category_id, $combinedCategoryIds, true)
+                    ? (int) $tournament->active_category_id
+                    : $combinedCategoryIds[0]);
+            $combinedAnchor = $tournamentCategories->firstWhere('id', $combinedAnchorId);
+            $combinedSessionId = null;
+            if ($combinedAnchor !== null && $session?->session_no !== null) {
+                $combinedSessionId = $combinedAnchor->sessions()
+                    ->where('session_no', $session->session_no)
+                    ->value('id');
+            } elseif ($combinedAnchorId === $category->id) {
+                $combinedSessionId = $session?->id;
+            }
+            $combinedLiveUrl = route('secretary.tournament.live', [
+                'tournament' => $category->tournament_id,
+                'category' => $combinedAnchorId,
+                'session' => $combinedSessionId,
+                'combined' => 1,
+            ]);
         }
 
         // История по каждой гимнастке потока: все индивидуальные оценки доступны
@@ -1872,6 +1931,10 @@ class SecretaryController extends Controller
             'categorySessions' => $category->sessions()->get(),
             'tournamentCategories' => $tournamentCategories,
             'combinedLiveQueue' => $combinedLiveQueue,
+            'combinedOrderedPerformances' => $combinedOrderedPerformances,
+            'combinedLiveQueueLabel' => $combinedLiveQueueLabel,
+            'combinedLiveUrl' => $combinedLiveUrl,
+            'isCombinedLiveView' => $isCombinedLiveView,
             'performances' => $performances,
             'orderedPerformances' => $ordered,
             'currentPerformance' => $currentPerformance,

@@ -1403,6 +1403,22 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('Объединённая Live-очередь')
             ->assertSee(route('secretary.tournament.liveQueue', $tournament), false);
 
+        $this->actingAs($secretary)
+            ->get(route('secretary.tournament.live', [
+                'tournament' => $tournament,
+                'category' => $firstCategory,
+                'combined' => 1,
+            ]))
+            ->assertOk()
+            ->assertSee('data-combined-live-option', false)
+            ->assertSee('Порядок выступления объединённой очереди')
+            ->assertSee('Объединённая очередь · Поток 1 + Поток 3')
+            ->assertSee('Первая Анна')
+            ->assertSee('Третья Елена');
+
+        $this->assertSame($firstCategory->id, $first->fresh()->category_id);
+        $this->assertSame($thirdCategory->id, $third->fresh()->category_id);
+
         $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($firstCategory));
         $this->assertSame('done', $first->fresh()->status);
         $this->assertSame('scheduled', $second->fresh()->status);
