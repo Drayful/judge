@@ -1283,6 +1283,9 @@
     let liveInterval = null;
     let liveRequestInFlight = false;
     let liveSelection = null;
+    let liveRenderedHtml = null;
+    let liveScrollPointerDown = false;
+    let liveScrollLockedUntil = 0;
 
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -1375,7 +1378,7 @@
                     </div>
                 </div>
                 <div class="mb-2 text-sm font-bold uppercase tracking-wider text-sky-200">История завершённых действий</div>
-                <div class="grid max-h-[42vh] gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
+                <div data-live-actions-scroll class="grid max-h-[42vh] gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
                     ${actions.map((action) => {
                         const entries = Array.isArray(action.entries) && action.entries.length
                             ? `<ul class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">${action.entries.map(entryLine).join('')}</ul>`
@@ -1401,11 +1404,39 @@
         liveInterval = null;
         liveSelection = null;
         liveRequestInFlight = false;
+        liveRenderedHtml = null;
     };
+
+    const lockLiveScroll = (milliseconds = 900) => {
+        liveScrollLockedUntil = Math.max(liveScrollLockedUntil, Date.now() + milliseconds);
+    };
+
+    const isLiveScrollTarget = (target) => liveSelection
+        && target instanceof Element
+        && (target === body || target.closest('#score-history-body, [data-live-actions-scroll]'));
+
+    body.addEventListener('pointerdown', (event) => {
+        if (! isLiveScrollTarget(event.target)) return;
+        liveScrollPointerDown = true;
+        lockLiveScroll();
+    });
+    const finishLiveScrollPointer = () => {
+        if (! liveScrollPointerDown) return;
+        liveScrollPointerDown = false;
+        lockLiveScroll(1200);
+    };
+    document.addEventListener('pointerup', finishLiveScrollPointer);
+    document.addEventListener('pointercancel', finishLiveScrollPointer);
+    window.addEventListener('blur', finishLiveScrollPointer);
+    body.addEventListener('wheel', () => lockLiveScroll(1200), { passive: true });
+    body.addEventListener('touchmove', () => lockLiveScroll(1200), { passive: true });
+
+    const liveScrollIsBusy = () => liveScrollPointerDown || Date.now() < liveScrollLockedUntil;
 
     const refreshLive = async () => {
         if (! liveSelection || liveRequestInFlight || modal.classList.contains('hidden')) return;
         if (body.contains(document.activeElement) && document.activeElement?.matches('input, select, textarea')) return;
+        if (liveScrollIsBusy()) return;
         liveRequestInFlight = true;
         try {
             const url = new URL(liveSelection.url, window.location.origin);
@@ -1421,7 +1452,26 @@
             const finalScore = data.score
                 ? slotBlock(liveSelection.performanceHistory, liveSelection.slot, true, data.score)
                 : '<div class="rounded-2xl border-2 border-dashed border-amber-700 bg-amber-950/25 p-5 text-lg font-semibold text-amber-200">Итоговая оценка ещё не отправлена.</div>';
-            body.innerHTML = liveActionsBlock(data.actions) + finalScore;
+            const nextHtml = liveActionsBlock(data.actions) + finalScore;
+            if (nextHtml === liveRenderedHtml || liveScrollIsBusy()) return;
+
+            const actionsScroll = body.querySelector('[data-live-actions-scroll]');
+            const bodyScrollTop = body.scrollTop;
+            const actionsScrollTop = actionsScroll?.scrollTop ?? 0;
+            const actionsAtBottom = actionsScroll
+                ? actionsScroll.scrollTop + actionsScroll.clientHeight >= actionsScroll.scrollHeight - 4
+                : false;
+
+            body.innerHTML = nextHtml;
+            liveRenderedHtml = nextHtml;
+            body.scrollTop = Math.min(bodyScrollTop, Math.max(0, body.scrollHeight - body.clientHeight));
+
+            const nextActionsScroll = body.querySelector('[data-live-actions-scroll]');
+            if (nextActionsScroll) {
+                nextActionsScroll.scrollTop = actionsAtBottom
+                    ? Math.max(0, nextActionsScroll.scrollHeight - nextActionsScroll.clientHeight)
+                    : Math.min(actionsScrollTop, Math.max(0, nextActionsScroll.scrollHeight - nextActionsScroll.clientHeight));
+            }
         } catch (error) {
             if (body.childElementCount === 0) {
                 body.innerHTML = `<div class="rounded-lg border border-rose-800/70 bg-rose-950/35 px-3 py-2 text-sm text-rose-100">${esc(error?.message || 'Не удалось получить Live-действия.')}</div>`;

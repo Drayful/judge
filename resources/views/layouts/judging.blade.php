@@ -316,8 +316,8 @@
             min-height: 3rem;
             align-items: center;
             justify-content: center;
-            padding: clamp(.5rem, 2vh, 1.25rem) 1.5rem;
-            opacity: .52;
+            padding: clamp(.35rem, 1.5vh, 1rem) clamp(.75rem, 2vw, 1.5rem);
+            opacity: .68;
         }
 
         .judge-workspace > div:has(> .judge-score-stage) > .judge-center-logo + .judge-submit-button {

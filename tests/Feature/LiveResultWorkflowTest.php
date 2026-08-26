@@ -21,6 +21,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 class LiveResultWorkflowTest extends TestCase
@@ -614,43 +615,25 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertTrue(SecretaryLiveUi::readyToFinalize($performance, $category));
     }
 
-    public function test_average_tablet_can_return_its_whole_panel_for_revision(): void
+    public function test_average_tablet_does_not_offer_panel_return(): void
     {
         $performance = $this->performance();
         $category = $performance->category;
         $tournament = $category->tournament;
         $tournament->update(['active_category_id' => $category->id]);
-        $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
         $dbAverage = User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG']);
-        $dbScore = JudgeScore::create([
-            'performance_id' => $performance->id,
-            'judge_id' => $db1->id,
-            'panel' => 'd',
-            'subpanel' => 'db',
-            'score' => 4.4,
-            'submitted_at' => now(),
-        ]);
 
         $this->actingAs($dbAverage)->postJson(route('judge.submit-average'), [
             'tournament_id' => $tournament->id,
             'average_score' => 4.3,
         ])->assertOk();
 
-        $this->actingAs($dbAverage)->postJson(route('judge.return-difficulty-panel'), [
-            'tournament_id' => $tournament->id,
-            'performance_id' => $performance->id,
-        ])->assertOk()->assertJsonPath('ok', true);
-
-        $this->assertNull($dbScore->fresh()->submitted_at);
-        $averageRow = SecretaryLiveUi::difficultyAverageRows(
-            $performance->fresh()->load(['judgeScores.judge', 'category']),
-        )['DB_AVG'];
-        $this->assertNull($averageRow->average_score);
-        $this->assertNull($averageRow->average_submitted_at);
-        $this->actingAs($db1)
+        $this->actingAs($dbAverage)
             ->get(route('judge.tournament.tablet', $tournament))
             ->assertOk()
-            ->assertSee('Оценка возвращена на доработку');
+            ->assertDontSee('Вернуть всю бригаду');
+
+        $this->assertFalse(Route::has('judge.return-difficulty-panel'));
     }
 
     public function test_independent_db_and_da_averages_are_official_and_required_for_auto_advance(): void

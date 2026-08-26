@@ -249,9 +249,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/judge/submit-average', [JudgeController::class, 'submitAverageAjax'])
         ->middleware('role:judge,admin')
         ->name('judge.submit-average');
-    Route::post('/judge/return-difficulty-panel', [JudgeController::class, 'returnDifficultyPanel'])
-        ->middleware('role:judge')
-        ->name('judge.return-difficulty-panel');
     Route::post('/judge/performances/{performance}/live-actions', [JudgeController::class, 'recordLiveAction'])
         ->middleware('role:judge,admin')
         ->name('judge.performance.live-actions');

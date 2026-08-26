@@ -178,12 +178,6 @@
                             </button>
                         </form>
 
-                        <button type="button"
-                            onclick="returnDifficultyPanel(@js((string) $tournament->id), @js((string) $current->id), @js(route('judge.return-difficulty-panel')), @js(route('judge.tournament.tablet', $tournament)), @js($slot === 'DB_AVG' ? 'DB' : 'DA'))"
-                            class="mt-4 w-full rounded-lg border border-amber-700 bg-amber-950/50 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-900/60">
-                            ↩ Вернуть всю бригаду {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} на доработку
-                        </button>
-
                         <div x-cloak x-show="error" class="mt-4 rounded-lg border border-rose-700 bg-rose-950/60 px-4 py-3 text-sm text-rose-100" x-text="error"></div>
                     </div>
                 </div>
@@ -193,11 +187,6 @@
                         <div class="text-xs uppercase tracking-widest text-emerald-300/80">Официальная средняя {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} отправлена</div>
                         <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ number_format((float) $myScore->average_score, 3, '.', '') }}</div>
                         <p class="mt-4 text-sm text-emerald-100/80">Значение уже участвует в итоговой оценке. Дождитесь следующей гимнастки.</p>
-                        <button type="button"
-                            onclick="returnDifficultyPanel(@js((string) $tournament->id), @js((string) $current->id), @js(route('judge.return-difficulty-panel')), @js(route('judge.tournament.tablet', $tournament)), @js($slot === 'DB_AVG' ? 'DB' : 'DA'))"
-                            class="mt-5 w-full rounded-lg border border-amber-700 bg-amber-950/50 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-900/60">
-                            ↩ Вернуть всю бригаду {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} на доработку
-                        </button>
                     </div>
                 </div>
             @elseif($alreadySubmitted)
@@ -240,38 +229,6 @@
 
 @push('body-scripts')
     <script>
-        async function returnDifficultyPanel(tournamentId, performanceId, url, redirectUrl, panelLabel) {
-            if (! window.confirm('Вернуть всю бригаду ' + panelLabel + ' на доработку? Индивидуальные оценки судей будут открыты повторно.')) return;
-            const csrfToken = document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
-            const body = new FormData();
-            body.append('_token', csrfToken);
-            body.append('tournament_id', tournamentId);
-            body.append('performance_id', performanceId);
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': csrfToken,
-                        'Accept': 'application/json',
-                    },
-                    body,
-                });
-                const data = await response.json().catch(() => ({}));
-                if (! response.ok || data.ok === false) {
-                    throw new Error(data.error || data.message || ('Ошибка ' + response.status));
-                }
-                if (window.JudgeAsync) {
-                    await window.JudgeAsync.refresh(data.redirect_url || redirectUrl, { force: true, silent: true });
-                } else {
-                    window.location.href = data.redirect_url || redirectUrl;
-                }
-            } catch (error) {
-                window.alert(error?.message || 'Не удалось вернуть бригаду на доработку.');
-            }
-        }
-
         function judgeTablet(opts) {
             return {
                 // Конфиг панели
