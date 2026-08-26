@@ -25,7 +25,7 @@ class SupervisorController extends Controller
                     return;
                 }
                 if (! SecretaryLiveUi::requiredManualAveragesSubmitted($locked, $locked->category)) {
-                    $error = 'DB1 и DA1 ещё не отправили отдельные ручные средние.';
+                    $error = 'Планшеты средней DB и DA ещё не отправили официальные значения.';
 
                     return;
                 }

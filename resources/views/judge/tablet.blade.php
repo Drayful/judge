@@ -10,11 +10,13 @@
     $isAdd = $pKey === 'd';
     $isSubtract = in_array($pKey, ['a', 'e'], true);
     $isPenalty = $pKey === 'penalty';
+    $authUser = auth()->user();
 
     $saved = $myScore?->score !== null ? (float) $myScore->score : null;
-    $alreadySubmitted = $myScore !== null && $myScore->submitted_at !== null;
-    $requiresManualAverage = $alreadySubmitted && in_array($slot, \App\Support\SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true);
-    $manualAverageSubmitted = $requiresManualAverage
+    $isDifficultyAverageTablet = $authUser?->isDifficultyAverageJudge() ?? false;
+    $alreadySubmitted = ! $isDifficultyAverageTablet && $myScore !== null && $myScore->submitted_at !== null;
+    $requiresManualAverage = $isDifficultyAverageTablet && $current && ! $current->isBodyOnlyApparatus();
+    $manualAverageSubmitted = $isDifficultyAverageTablet
         && $myScore?->average_submitted_at !== null
         && $myScore?->average_score !== null;
     $submittedDisplay = $alreadySubmitted && $myScore->score !== null
@@ -25,7 +27,6 @@
     $eBaseFloat = (float) $eBase;
     $panelBase = $pKey === 'e' ? $eBaseFloat : ($pKey === 'a' ? $aBaseFloat : 0.0);
 
-    $authUser = auth()->user();
     $isHeadJudge = $authUser && in_array($authUser->role, ['head_judge', 'superior_jury', 'admin', 'super_admin'], true);
     $ageMin = $category->age_min;
     $ageMax = $category->age_max;
@@ -101,6 +102,13 @@
                         <p class="mt-2 text-sm text-amber-100/80">Секретарь должен запустить выступление. Ввод открывается только для статуса <code class="text-amber-300">performing</code>.</p>
                     </div>
                 </div>
+            @elseif($isDifficultyAverageTablet && $current->isBodyOnlyApparatus())
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div class="judge-state-card rounded-3xl p-8 text-center max-w-lg">
+                        <h2 class="text-2xl font-bold text-cyan-100">БП: отдельная средняя не требуется</h2>
+                        <p class="mt-3 text-sm text-slate-300">Для выступления без предмета официальный D по-прежнему рассчитывается объединённой бригадой DB1, DB2, DA1 и DA2.</p>
+                    </div>
+                </div>
             @elseif($requiresManualAverage && ! $manualAverageSubmitted)
                 <div class="flex-1 min-h-0 grid place-items-center">
                     <div
@@ -146,9 +154,9 @@
                         }"
                         class="judge-state-card w-full max-w-2xl rounded-3xl p-8 text-center"
                     >
-                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Второй этап · финальный · {{ $slot }}</div>
-                        <h2 class="mt-3 text-3xl font-bold text-white">Введите ручную среднюю {{ $slot === 'DB1' ? 'DB' : 'DA' }}</h2>
-                        <p class="mt-2 text-sm text-slate-400">Основная оценка {{ $submittedDisplay }} уже сохранена. Введите согласованную среднюю подпанели отдельным значением.</p>
+                        <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Официальная итоговая оценка · {{ $slot }}</div>
+                        <h2 class="mt-3 text-3xl font-bold text-white">Введите среднюю {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }}</h2>
+                        <p class="mt-2 text-sm text-slate-400">Это значение сразу станет официальной оценкой {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} и войдёт в итоговый D. Индивидуальные оценки судей остаются в Live и истории.</p>
 
                         <form class="mt-7" @submit.prevent="submitAverage()">
                             <input
@@ -170,7 +178,26 @@
                             </button>
                         </form>
 
+                        <button type="button"
+                            onclick="returnDifficultyPanel(@js((string) $tournament->id), @js((string) $current->id), @js(route('judge.return-difficulty-panel')), @js(route('judge.tournament.tablet', $tournament)), @js($slot === 'DB_AVG' ? 'DB' : 'DA'))"
+                            class="mt-4 w-full rounded-lg border border-amber-700 bg-amber-950/50 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-900/60">
+                            ↩ Вернуть всю бригаду {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} на доработку
+                        </button>
+
                         <div x-cloak x-show="error" class="mt-4 rounded-lg border border-rose-700 bg-rose-950/60 px-4 py-3 text-sm text-rose-100" x-text="error"></div>
+                    </div>
+                </div>
+            @elseif($isDifficultyAverageTablet && $manualAverageSubmitted)
+                <div class="flex-1 min-h-0 grid place-items-center">
+                    <div class="judge-state-card rounded-3xl p-10 text-center w-full max-w-2xl">
+                        <div class="text-xs uppercase tracking-widest text-emerald-300/80">Официальная средняя {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} отправлена</div>
+                        <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ number_format((float) $myScore->average_score, 3, '.', '') }}</div>
+                        <p class="mt-4 text-sm text-emerald-100/80">Значение уже участвует в итоговой оценке. Дождитесь следующей гимнастки.</p>
+                        <button type="button"
+                            onclick="returnDifficultyPanel(@js((string) $tournament->id), @js((string) $current->id), @js(route('judge.return-difficulty-panel')), @js(route('judge.tournament.tablet', $tournament)), @js($slot === 'DB_AVG' ? 'DB' : 'DA'))"
+                            class="mt-5 w-full rounded-lg border border-amber-700 bg-amber-950/50 px-5 py-3 text-sm font-bold text-amber-100 hover:bg-amber-900/60">
+                            ↩ Вернуть всю бригаду {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} на доработку
+                        </button>
                     </div>
                 </div>
             @elseif($alreadySubmitted)
@@ -178,10 +205,6 @@
                     <div class="judge-state-card rounded-3xl p-10 text-center">
                         <div class="text-xs uppercase tracking-widest text-emerald-300/80">Оценка {{ $slot }} отправлена</div>
                         <div class="mt-3 text-8xl font-bold tabular-nums text-emerald-100">{{ $submittedDisplay }}</div>
-                        @if($manualAverageSubmitted)
-                            <div class="mt-4 text-sm uppercase tracking-wider text-cyan-300">Ручная средняя</div>
-                            <div class="mt-1 font-mono text-4xl font-bold tabular-nums text-cyan-100">{{ number_format((float) $myScore->average_score, 3, '.', '') }}</div>
-                        @endif
                         <p class="mt-4 text-sm text-emerald-100/80">Дождитесь следующей гимнастки.</p>
                     </div>
                 </div>
@@ -191,7 +214,7 @@
                         БП (без предмета): планшет трудности тела — оценка войдёт в общий расчёт D вместе с DB1 и DB2.
                     </div>
                 @endif
-                @if($myScore && $myScore->submitted_at === null && is_array($myScore->entries) && count($myScore->entries) > 0)
+                @if($myScore && ! $isDifficultyAverageTablet && $myScore->submitted_at === null)
                     <div class="shrink-0 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-100">
                         Оценка возвращена на доработку — исправьте при необходимости и отправьте снова.
                     </div>
@@ -217,6 +240,38 @@
 
 @push('body-scripts')
     <script>
+        async function returnDifficultyPanel(tournamentId, performanceId, url, redirectUrl, panelLabel) {
+            if (! window.confirm('Вернуть всю бригаду ' + panelLabel + ' на доработку? Индивидуальные оценки судей будут открыты повторно.')) return;
+            const csrfToken = document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+            const body = new FormData();
+            body.append('_token', csrfToken);
+            body.append('tournament_id', tournamentId);
+            body.append('performance_id', performanceId);
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'Accept': 'application/json',
+                    },
+                    body,
+                });
+                const data = await response.json().catch(() => ({}));
+                if (! response.ok || data.ok === false) {
+                    throw new Error(data.error || data.message || ('Ошибка ' + response.status));
+                }
+                if (window.JudgeAsync) {
+                    await window.JudgeAsync.refresh(data.redirect_url || redirectUrl, { force: true, silent: true });
+                } else {
+                    window.location.href = data.redirect_url || redirectUrl;
+                }
+            } catch (error) {
+                window.alert(error?.message || 'Не удалось вернуть бригаду на доработку.');
+            }
+        }
+
         function judgeTablet(opts) {
             return {
                 // Конфиг панели

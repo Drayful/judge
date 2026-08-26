@@ -232,7 +232,7 @@ class Performance extends Model
         }
 
         // ТЗ / FIG-подобно:
-        // - D = сумма компонент: среднее по судьям DB + среднее по DA (при одном судье на слот — как DB1+DA1)
+        // - D = официальная DB с отдельного планшета средней + официальная DA с отдельного планшета средней
         // - A & E: judges enter final A/E points (0..10). Drop high+low, average middle two.
         // - Penalties: sum of submitted penalties (line/time/music/etc)
         // - Storage precision 0.001; display/rounding can be configured later.
@@ -263,34 +263,18 @@ class Performance extends Model
         if ($this->isBodyOnlyApparatus()) {
             $d = $this->calculateBodyOnlyDScore();
         } else {
-            $dDb = $scores->where('panel', 'd')->where('subpanel', 'db')->pluck('score')->filter($notNull)->values();
-            $dDa = $scores->where('panel', 'd')->where('subpanel', 'da')->pluck('score')->filter($notNull)->values();
-
-            $activeDbSlots = collect(['DB1', 'DB2'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
-            $activeDaSlots = collect(['DA1', 'DA2'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
-
-            $db = $dDb->count() ? (float) $dDb->avg() : null;
-            $da = $dDa->count() ? (float) $dDa->avg() : null;
-
-            // DB1 и DA1 после своей основной оценки отдельно вводят согласованную
-            // ручную среднюю. Она является официальным значением подпанели;
-            // автоматическая средняя сохраняется ниже отдельно для контроля.
-            $rows = SecretaryLiveUi::scoreRowsBySlot($this, $this->category);
-            $dbLeader = $rows['DB1'] ?? null;
-            $daLeader = $rows['DA1'] ?? null;
-            $dbManual = $dbLeader?->average_submitted_at !== null && $dbLeader?->average_score !== null
-                ? (float) $dbLeader->average_score
+            // Оценки DB1/DB2 и DA1/DA2 сохраняются для Live, истории и контроля
+            // расхождений, но официальный D больше от них не рассчитывается.
+            $averageRows = SecretaryLiveUi::difficultyAverageRows($this);
+            $dbRow = $averageRows['DB_AVG'] ?? null;
+            $daRow = $averageRows['DA_AVG'] ?? null;
+            $db = $dbRow?->average_submitted_at !== null && $dbRow?->average_score !== null
+                ? (float) $dbRow->average_score
                 : null;
-            $daManual = $daLeader?->average_submitted_at !== null && $daLeader?->average_score !== null
-                ? (float) $daLeader->average_score
+            $da = $daRow?->average_submitted_at !== null && $daRow?->average_score !== null
+                ? (float) $daRow->average_score
                 : null;
-            if ($activeDbSlots->isEmpty() && $activeDaSlots->isEmpty()) {
-                $d = null;
-            } else {
-                $dbForTotal = $activeDbSlots->isEmpty() ? 0.0 : ($dbManual ?? $db);
-                $daForTotal = $activeDaSlots->isEmpty() ? 0.0 : ($daManual ?? $da);
-                $d = ($dbForTotal !== null && $daForTotal !== null) ? ($dbForTotal + $daForTotal) : null;
-            }
+            $d = ($db !== null && $da !== null) ? $db + $da : null;
         }
 
         $this->db_average = isset($db) && $db !== null ? round($db, $round) : null;

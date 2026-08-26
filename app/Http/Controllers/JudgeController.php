@@ -326,9 +326,7 @@ class JudgeController extends Controller
         ]);
     }
 
-    /**
-     * Второй этап для DB1/DA1: ручной ввод согласованной средней подпанели.
-     */
+    /** Официальное значение DB/DA с независимого планшета средней. */
     public function submitAverageAjax(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -356,19 +354,19 @@ class JudgeController extends Controller
         $panel = $user->judgePanel();
         $slot = strtoupper((string) ($user->isAdmin() ? ($data['slot'] ?? '') : ($user->slot ?? '')));
         if (! in_array($slot, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true)) {
-            abort(403, 'Ручную среднюю могут выставлять только DB1 и DA1.');
+            abort(403, 'Официальную среднюю могут выставлять только планшеты DB и DA средней.');
         }
-        if (! $user->isAdmin() && SecretaryLiveUi::isSlotInactive($category, $slot)) {
-            abort(422, 'Ваш судейский слот отключён секретарём для этого потока.');
-        }
-        if (! $user->isAdmin() && (($panel['panel'] ?? null) !== 'd')) {
+        if (! $user->isAdmin() && (! $user->isDifficultyAverageJudge() || ($panel['panel'] ?? null) !== 'd')) {
             abort(403);
+        }
+        if ($current->isBodyOnlyApparatus()) {
+            return response()->json(['ok' => false, 'error' => 'Для БП отдельные средние DB/DA не используются.'], 422);
         }
 
         if ($user->isAdmin()) {
             $panel = [
                 'panel' => 'd',
-                'subpanel' => $slot === 'DB1' ? 'db' : 'da',
+                'subpanel' => $slot === 'DB_AVG' ? 'db' : 'da',
                 'penalty_type' => null,
                 'slot' => $slot,
             ];
@@ -378,19 +376,49 @@ class JudgeController extends Controller
 
         $score = null;
         $moved = null;
-        DB::transaction(function () use (&$current, &$score, &$moved, $user, $panel, $data) {
+        DB::transaction(function () use (&$current, &$score, &$moved, $user, $panel, $data, $tournament) {
+            $lockedTournament = Tournament::query()->lockForUpdate()->findOrFail($tournament->id);
             $current = Performance::query()->lockForUpdate()->findOrFail($current->id);
-            $score = $this->findMyScore($current, $user, $panel);
-            if ($score === null || $score->submitted_at === null) {
-                abort(422, 'Сначала отправьте основную оценку.');
+            $existing = JudgeScore::query()
+                ->where('performance_id', $current->id)
+                ->where('judge_id', $user->id)
+                ->where('panel', 'd')
+                ->where('subpanel', $panel['subpanel'])
+                ->whereNull('penalty_type')
+                ->first();
+            if ($existing?->average_submitted_at !== null) {
+                abort(422, 'Официальная средняя уже отправлена. Для изменения сначала верните бригаду на доработку.');
+            }
+            $isReturnedForRevision = $existing !== null && $existing->average_submitted_at === null;
+            if (! $isReturnedForRevision) {
+                if ((int) ($lockedTournament->active_category_id ?? 0) !== (int) $current->category_id
+                    || $this->normalizedSessionId($lockedTournament->active_stream_session_id)
+                        !== $this->normalizedSessionId($current->stream_session_id)) {
+                    abort(409, 'Активный поток или сессия уже изменились. Обновите планшет.');
+                }
+                if ($current->status !== 'performing') {
+                    abort(422, 'Среднюю можно отправить только для текущего выступления.');
+                }
             }
             if ($current->finalized_at !== null || $current->approved_at !== null || $current->published_at !== null) {
                 abort(422, 'Зафиксированный результат нельзя изменять без возврата на доработку.');
             }
 
-            $score->average_score = round((float) $data['average_score'], 3);
-            $score->average_submitted_at = now();
-            $score->save();
+            $score = JudgeScore::query()->updateOrCreate(
+                [
+                    'performance_id' => $current->id,
+                    'judge_id' => $user->id,
+                    'panel' => 'd',
+                    'subpanel' => $panel['subpanel'],
+                    'penalty_type' => null,
+                ],
+                [
+                    'score' => null,
+                    'submitted_at' => null,
+                    'average_score' => round((float) $data['average_score'], 3),
+                    'average_submitted_at' => now(),
+                ],
+            );
 
             $current->unsetRelation('judgeScores');
             $current->load(['judgeScores.judge', 'category']);
@@ -401,7 +429,7 @@ class JudgeController extends Controller
 
         event(new ScoreUpdated($current->id, $current->category_id));
 
-        $message = 'Ручная средняя '.$slot.' сохранена.';
+        $message = 'Официальная средняя '.($slot === 'DB_AVG' ? 'DB' : 'DA').' сохранена.';
         if ($moved !== null) {
             $message .= $moved
                 ? ' Автопереход: вызвана следующая гимнастка.'
@@ -412,6 +440,76 @@ class JudgeController extends Controller
             'ok' => true,
             'message' => $message,
             'average_score' => (float) $score->average_score,
+            'redirect_url' => route('judge.tournament.tablet', $tournament),
+        ]);
+    }
+
+    /** Средний судья возвращает всю свою DB/DA-панель на доработку. */
+    public function returnDifficultyPanel(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'tournament_id' => ['required', 'integer'],
+            'performance_id' => ['required', 'integer'],
+        ]);
+        $user = $request->user();
+        if (! $user->isDifficultyAverageJudge()) {
+            abort(403);
+        }
+
+        $panel = $user->judgePanel();
+        $subpanel = $panel['subpanel'];
+        $tournament = Tournament::query()->findOrFail($data['tournament_id']);
+        $performance = null;
+        $returned = 0;
+
+        DB::transaction(function () use ($data, $tournament, $subpanel, &$performance, &$returned) {
+            $lockedTournament = Tournament::query()->lockForUpdate()->findOrFail($tournament->id);
+            $performance = Performance::query()->lockForUpdate()->findOrFail($data['performance_id']);
+            if ((int) $performance->category_id !== (int) ($lockedTournament->active_category_id ?? 0)
+                || $this->normalizedSessionId($performance->stream_session_id)
+                    !== $this->normalizedSessionId($lockedTournament->active_stream_session_id)
+                || $performance->status !== 'performing') {
+                abort(409, 'Выступление уже сменилось. Обновите планшет.');
+            }
+
+            $rows = JudgeScore::query()
+                ->with('judge')
+                ->where('performance_id', $performance->id)
+                ->where('panel', 'd')
+                ->where('subpanel', $subpanel)
+                ->lockForUpdate()
+                ->get();
+            foreach ($rows as $row) {
+                if ($row->judge?->isDifficultyAverageJudge()) {
+                    $row->average_score = null;
+                    $row->average_submitted_at = null;
+                } else {
+                    if ($row->submitted_at !== null) {
+                        $returned++;
+                    }
+                    $row->submitted_at = null;
+                    $row->average_score = null;
+                    $row->average_submitted_at = null;
+                }
+                $row->save();
+            }
+
+            $performance->unsetRelation('judgeScores');
+            $performance->load(['judgeScores.judge', 'category']);
+            $performance->recalculateTotals();
+            $performance->finalized_at = null;
+            $performance->approved_at = null;
+            $performance->published_at = null;
+            $performance->scoreboard_accepted_at = null;
+            $performance->scoreboard_accepted_by = null;
+            $performance->save();
+        });
+
+        event(new ScoreUpdated($performance->id, $performance->category_id));
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Бригада '.strtoupper($subpanel).' возвращена на доработку ('.$returned.' оценок).',
             'redirect_url' => route('judge.tournament.tablet', $tournament),
         ]);
     }
@@ -506,6 +604,10 @@ class JudgeController extends Controller
     {
         $user = $request->user();
         $panel = $user->judgePanel();
+
+        if ($user->isDifficultyAverageJudge()) {
+            abort(403, 'Этот планшет отправляет только официальную среднюю DB/DA.');
+        }
 
         if (! $panel && ! $user->isAdmin()) {
             abort(403);
@@ -619,8 +721,8 @@ class JudgeController extends Controller
 
         $performance->refresh();
         $performance->load(['judgeScores', 'category']);
-        // DB1/DA1 и последующие оценки сразу пересчитывают и сохраняют средние.
-        // На табло этот промежуточный результат не попадёт: он ждёт двух подтверждений.
+        // Индивидуальные DB/DA сразу попадают в Live и историю, но официальный D
+        // рассчитывается только после отдельных средних DB и DA.
         $performance->recalculateTotals();
         $performance->save();
 
@@ -694,7 +796,7 @@ class JudgeController extends Controller
 
         if (! SecretaryLiveUi::requiredManualAveragesSubmitted($performance, $performance->category)) {
             return back()->withErrors([
-                'finalize' => 'DB1 и DA1 ещё не отправили отдельные ручные средние.',
+                'finalize' => 'Планшеты средней DB и DA ещё не отправили официальные значения.',
             ]);
         }
 
@@ -743,13 +845,13 @@ class JudgeController extends Controller
 
     /**
      * Возвращённая конкретному судье оценка имеет приоритет над текущим выходом.
-     * Для DB1/DA1 доработка остаётся активной и на втором шаге ручной средней.
+     * Для планшетов средней доработка остаётся активной до повторной отправки DB/DA.
      */
     private function resolveJudgePerformance(Category $category, $user, ?int $sessionId): ?Performance
     {
         if ($user !== null && ! $user->isAdmin()) {
             $slot = strtoupper((string) ($user->slot ?? ''));
-            $needsManualAverage = in_array($slot, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS, true);
+            $needsManualAverage = $user->isDifficultyAverageJudge();
 
             if ($slot === 'TIME') {
                 $timerRevision = Performance::query()
@@ -770,12 +872,10 @@ class JudgeController extends Controller
                 ->whereHas('judgeScores', function ($query) use ($user, $needsManualAverage) {
                     $query->where('judge_id', $user->id)
                         ->where(function ($state) use ($needsManualAverage) {
-                            $state->whereNull('submitted_at');
                             if ($needsManualAverage) {
-                                $state->orWhere(function ($average) {
-                                    $average->whereNotNull('submitted_at')
-                                        ->whereNull('average_submitted_at');
-                                });
+                                $state->whereNull('average_submitted_at');
+                            } else {
+                                $state->whereNull('submitted_at');
                             }
                         });
                 })
@@ -865,6 +965,7 @@ class JudgeController extends Controller
 
         $myScore = $current ? $this->findMyScore($current, $user, $panel) : null;
         $slotInactive = ! $user->isAdmin()
+            && ! $user->isDifficultyAverageJudge()
             && ! empty($panel['slot'])
             && SecretaryLiveUi::isSlotInactive($category, (string) $panel['slot']);
 
@@ -894,6 +995,7 @@ class JudgeController extends Controller
     {
         if (($panel['panel'] ?? null) === 'd'
             && ($panel['subpanel'] ?? null) === 'da'
+            && ! in_array(($panel['slot'] ?? null), SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true)
             && $performance->isBodyOnlyApparatus()) {
             return array_merge($panel, ['subpanel' => 'db']);
         }

@@ -33,8 +33,10 @@ class SecretaryLiveUi
     /** Слоты D-бригады для расчёта итога. */
     public const D_JUDGE_SLOTS = ['DB1', 'DB2', 'DA1', 'DA2'];
 
-    /** DB1 и DA1 после основной оценки отдельно вводят согласованную среднюю. */
-    public const MANUAL_AVERAGE_SLOTS = ['DB1', 'DA1'];
+    /** Независимые планшеты, которые вводят официальные значения DB и DA. */
+    public const MANUAL_AVERAGE_SLOTS = ['DB_AVG', 'DA_AVG'];
+
+    public const DIFFICULTY_AVERAGE_SLOTS = ['DB_AVG', 'DA_AVG'];
 
     /**
      * Панели для проверки разброса: при БП DB+DA объединяются в одну четвёрку.
@@ -151,6 +153,11 @@ class SecretaryLiveUi
                 continue;
             }
             $slot = $s->judge?->slot;
+            if (in_array($slot, self::DIFFICULTY_AVERAGE_SLOTS, true)) {
+                $placedScoreIds[] = $s->id;
+
+                continue;
+            }
             if ($slot && $s->submitted_at !== null) {
                 $slotMap[$slot] = true;
                 $placedScoreIds[] = $s->id;
@@ -228,11 +235,9 @@ class SecretaryLiveUi
         $inactive = self::inactiveSlots($category);
         $slots = self::judgeSlots($perf, $category);
 
-        $requiredPanelGroups = [
-            self::D_JUDGE_SLOTS,
-            ['A1', 'A2', 'A3', 'A4'],
-            ['E1', 'E2', 'E3', 'E4'],
-        ];
+        $requiredPanelGroups = $perf->isBodyOnlyApparatus()
+            ? [self::D_JUDGE_SLOTS, ['A1', 'A2', 'A3', 'A4'], ['E1', 'E2', 'E3', 'E4']]
+            : [['A1', 'A2', 'A3', 'A4'], ['E1', 'E2', 'E3', 'E4']];
         foreach ($requiredPanelGroups as $panelSlots) {
             if (collect($panelSlots)->every(fn (string $slot) => in_array($slot, $inactive, true))) {
                 return false;
@@ -255,7 +260,7 @@ class SecretaryLiveUi
     }
 
     /**
-     * Оба руководителя D-подпанелей закончили второй ручной ввод средней.
+     * Оба независимых планшета средней отправили официальные DB и DA.
      */
     public static function requiredManualAveragesSubmitted(?Performance $perf, ?Category $category = null): bool
     {
@@ -269,21 +274,36 @@ class SecretaryLiveUi
             return true;
         }
 
-        $category = $category ?? $perf->category;
-        $inactive = self::inactiveSlots($category);
-        $rows = self::scoreRowsBySlot($perf, $category);
+        $rows = self::difficultyAverageRows($perf);
         foreach (self::MANUAL_AVERAGE_SLOTS as $slot) {
-            if (in_array($slot, $inactive, true)) {
-                continue;
-            }
-
             $row = $rows[$slot] ?? null;
-            if ($row === null || $row->submitted_at === null || $row->average_submitted_at === null || $row->average_score === null) {
+            if ($row === null || $row->average_submitted_at === null || $row->average_score === null) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * @return array{DB_AVG: ?JudgeScore, DA_AVG: ?JudgeScore}
+     */
+    public static function difficultyAverageRows(?Performance $perf): array
+    {
+        $rows = array_fill_keys(self::DIFFICULTY_AVERAGE_SLOTS, null);
+        if (! $perf) {
+            return $rows;
+        }
+
+        $perf->loadMissing('judgeScores.judge');
+        foreach ($perf->judgeScores as $score) {
+            $slot = strtoupper((string) ($score->judge?->slot ?? ''));
+            if (array_key_exists($slot, $rows)) {
+                $rows[$slot] = $score;
+            }
+        }
+
+        return $rows;
     }
 
     /**
@@ -623,6 +643,11 @@ class SecretaryLiveUi
                 continue;
             }
             $slot = $s->judge?->slot;
+            if (in_array($slot, self::DIFFICULTY_AVERAGE_SLOTS, true)) {
+                $excludedScoreIds[] = $s->id;
+
+                continue;
+            }
             if ($slot && array_key_exists($slot, $rows)) {
                 $excludedScoreIds[] = $s->id;
                 if (! in_array($slot, $inactive, true) && $rows[$slot] === null) {

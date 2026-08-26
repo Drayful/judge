@@ -20,11 +20,27 @@ use Carbon\Carbon;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 class LiveResultWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_difficulty_average_accounts_are_created_by_migration(): void
+    {
+        $dbAverage = User::query()->where('email', 'db-average@local.test')->firstOrFail();
+        $daAverage = User::query()->where('email', 'da-average@local.test')->firstOrFail();
+
+        $this->assertSame('judge_db_average', $dbAverage->role);
+        $this->assertSame('DB_AVG', $dbAverage->slot);
+        $this->assertSame('judge_da_average', $daAverage->role);
+        $this->assertSame('DA_AVG', $daAverage->slot);
+        $this->assertTrue(Hash::check('password', $dbAverage->password));
+        $this->assertTrue(Hash::check('password', $daAverage->password));
+        $this->actingAs($dbAverage)->get(route('judge.tournaments'))->assertOk();
+        $this->actingAs($daAverage)->get(route('judge.tournaments'))->assertOk();
+    }
 
     public function test_duration_is_saved_for_the_performance_and_deducted_per_second(): void
     {
@@ -425,7 +441,7 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('initial: 8.2', false);
     }
 
-    public function test_db_and_da_averages_are_persisted_when_scores_arrive(): void
+    public function test_individual_db_and_da_scores_do_not_create_official_averages(): void
     {
         $performance = $this->performance();
         $dbJudge = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
@@ -451,17 +467,19 @@ class LiveResultWorkflowTest extends TestCase
         $performance->recalculateTotals();
         $performance->save();
 
-        $this->assertSame(4.2, (float) $performance->fresh()->db_average);
-        $this->assertSame(3.4, (float) $performance->fresh()->da_average);
+        $this->assertNull($performance->fresh()->db_average);
+        $this->assertNull($performance->fresh()->da_average);
+        $this->assertNull($performance->fresh()->d_score);
     }
 
-    public function test_db1_gets_a_second_manual_average_step_visible_to_secretary(): void
+    public function test_independent_db_average_tablet_sets_the_official_db_score(): void
     {
         $performance = $this->performance();
         $performance->load('category.tournament');
         $tournament = $performance->category->tournament;
         $tournament->update(['active_category_id' => $performance->category_id]);
         $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+        $dbAverage = User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG']);
 
         $this->actingAs($db1)
             ->postJson(route('judge.submit-score'), [
@@ -470,30 +488,41 @@ class LiveResultWorkflowTest extends TestCase
             ])
             ->assertOk();
 
-        $this->actingAs($db1)
+        $this->actingAs($dbAverage)
             ->get(route('judge.tournament.tablet', $tournament))
             ->assertOk()
-            ->assertSee('Второй этап')
-            ->assertSee('Введите ручную среднюю DB');
+            ->assertSee('Введите среднюю DB')
+            ->assertSee('сразу станет официальной оценкой DB');
 
-        $this->actingAs($db1)
+        $this->actingAs($dbAverage)
             ->postJson(route('judge.submit-average'), [
                 'tournament_id' => $tournament->id,
                 'average_score' => 4.1,
             ])
             ->assertOk()
             ->assertJsonPath('average_score', 4.1);
+        $this->actingAs($dbAverage)
+            ->postJson(route('judge.submit-average'), [
+                'tournament_id' => $tournament->id,
+                'average_score' => 9.9,
+            ])
+            ->assertStatus(422);
 
+        $this->assertDatabaseHas('judge_scores', [
+            'performance_id' => $performance->id,
+            'judge_id' => $dbAverage->id,
+            'average_score' => 4.1,
+        ]);
         $this->assertDatabaseHas('judge_scores', [
             'performance_id' => $performance->id,
             'judge_id' => $db1->id,
             'score' => 4.2,
-            'average_score' => 4.1,
+            'average_score' => null,
         ]);
-        $this->actingAs($db1)
+        $this->actingAs($dbAverage)
             ->getJson(route('judge.tournament.tablet.ping', $tournament))
             ->assertOk()
-            ->assertJsonPath('score_submitted', true)
+            ->assertJsonPath('score_submitted', false)
             ->assertJsonPath('average_submitted', true);
 
         $secretary = User::factory()->create(['role' => 'secretary']);
@@ -504,26 +533,18 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('4.100');
     }
 
-    public function test_db2_and_da2_scores_do_not_reset_submitted_manual_averages(): void
+    public function test_individual_db_and_da_scores_do_not_reset_official_averages(): void
     {
         $performance = $this->performance();
         $tournament = $performance->category->tournament;
         $tournament->update(['active_category_id' => $performance->category_id]);
 
         foreach ([
-            ['judge_d_db', 'DB1', 4.2, 4.1],
-            ['judge_d_da', 'DA1', 3.4, 3.3],
-        ] as [$role, $slot, $score, $average]) {
-            $leader = User::factory()->create(['role' => $role, 'slot' => $slot]);
-
-            $this->actingAs($leader)
-                ->postJson(route('judge.submit-score'), [
-                    'tournament_id' => $tournament->id,
-                    'score' => $score,
-                ])
-                ->assertOk();
-
-            $this->actingAs($leader)
+            ['judge_db_average', 'DB_AVG', 4.1],
+            ['judge_da_average', 'DA_AVG', 3.3],
+        ] as [$role, $slot, $average]) {
+            $averageJudge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+            $this->actingAs($averageJudge)
                 ->postJson(route('judge.submit-average'), [
                     'tournament_id' => $tournament->id,
                     'average_score' => $average,
@@ -532,9 +553,11 @@ class LiveResultWorkflowTest extends TestCase
         }
 
         foreach ([
-            ['judge_d_db', 'DB2', 4.4, 'DB1', 4.1],
-            ['judge_d_da', 'DA2', 3.6, 'DA1', 3.3],
-        ] as [$role, $slot, $score, $leaderSlot, $expectedAverage]) {
+            ['judge_d_db', 'DB1', 4.2, 'DB_AVG', 4.1],
+            ['judge_d_db', 'DB2', 4.4, 'DB_AVG', 4.1],
+            ['judge_d_da', 'DA1', 3.4, 'DA_AVG', 3.3],
+            ['judge_d_da', 'DA2', 3.6, 'DA_AVG', 3.3],
+        ] as [$role, $slot, $score, $averageSlot, $expectedAverage]) {
             $secondJudge = User::factory()->create(['role' => $role, 'slot' => $slot]);
 
             $this->actingAs($secondJudge)
@@ -544,17 +567,93 @@ class LiveResultWorkflowTest extends TestCase
                 ])
                 ->assertOk();
 
-            $leaderScore = SecretaryLiveUi::scoreRowsBySlot(
+            $averageScore = SecretaryLiveUi::difficultyAverageRows(
                 $performance->fresh()->load(['judgeScores.judge', 'category']),
-                $performance->category,
-            )[$leaderSlot];
+            )[$averageSlot];
 
-            $this->assertEqualsWithDelta($expectedAverage, (float) $leaderScore->average_score, 0.0005);
-            $this->assertNotNull($leaderScore->average_submitted_at);
+            $this->assertEqualsWithDelta($expectedAverage, (float) $averageScore->average_score, 0.0005);
+            $this->assertNotNull($averageScore->average_submitted_at);
         }
     }
 
-    public function test_manual_db_and_da_averages_are_official_and_required_for_auto_advance(): void
+    public function test_average_tablets_work_when_all_individual_db_and_da_judges_are_disabled(): void
+    {
+        $performance = $this->performance();
+        $category = $performance->category;
+        $category->update([
+            'inactive_judge_slots' => ['DB1', 'DB2', 'DA1', 'DA2', 'A2', 'A3', 'A4', 'E2', 'E3', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+        $dbAverage = User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG']);
+        $daAverage = User::factory()->create(['role' => 'judge_da_average', 'slot' => 'DA_AVG']);
+
+        $this->actingAs($dbAverage)->postJson(route('judge.submit-average'), [
+            'tournament_id' => $tournament->id,
+            'average_score' => 4.6,
+        ])->assertOk();
+        $this->actingAs($daAverage)->postJson(route('judge.submit-average'), [
+            'tournament_id' => $tournament->id,
+            'average_score' => 3.2,
+        ])->assertOk();
+
+        foreach ([['judge_a', 'A1', 'a', 8.0], ['judge_e', 'E1', 'e', 7.0]] as [$role, $slot, $panel, $score]) {
+            $judge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+            $this->actingAs($judge)->postJson(route('judge.submit-score'), [
+                'tournament_id' => $tournament->id,
+                'score' => $score,
+            ])->assertOk();
+        }
+
+        $performance->refresh()->load(['judgeScores.judge', 'category']);
+        $performance->recalculateTotals();
+
+        $this->assertSame(4.6, (float) $performance->db_average);
+        $this->assertSame(3.2, (float) $performance->da_average);
+        $this->assertSame(7.8, (float) $performance->d_score);
+        $this->assertTrue(SecretaryLiveUi::readyToFinalize($performance, $category));
+    }
+
+    public function test_average_tablet_can_return_its_whole_panel_for_revision(): void
+    {
+        $performance = $this->performance();
+        $category = $performance->category;
+        $tournament = $category->tournament;
+        $tournament->update(['active_category_id' => $category->id]);
+        $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+        $dbAverage = User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG']);
+        $dbScore = JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $db1->id,
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'score' => 4.4,
+            'submitted_at' => now(),
+        ]);
+
+        $this->actingAs($dbAverage)->postJson(route('judge.submit-average'), [
+            'tournament_id' => $tournament->id,
+            'average_score' => 4.3,
+        ])->assertOk();
+
+        $this->actingAs($dbAverage)->postJson(route('judge.return-difficulty-panel'), [
+            'tournament_id' => $tournament->id,
+            'performance_id' => $performance->id,
+        ])->assertOk()->assertJsonPath('ok', true);
+
+        $this->assertNull($dbScore->fresh()->submitted_at);
+        $averageRow = SecretaryLiveUi::difficultyAverageRows(
+            $performance->fresh()->load(['judgeScores.judge', 'category']),
+        )['DB_AVG'];
+        $this->assertNull($averageRow->average_score);
+        $this->assertNull($averageRow->average_submitted_at);
+        $this->actingAs($db1)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('Оценка возвращена на доработку');
+    }
+
+    public function test_independent_db_and_da_averages_are_official_and_required_for_auto_advance(): void
     {
         $performance = $this->performance();
         $performance->category->update([
@@ -562,26 +661,34 @@ class LiveResultWorkflowTest extends TestCase
         ]);
         $db1 = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
         $da1 = User::factory()->create(['role' => 'judge_d_da', 'slot' => 'DA1']);
+        $dbAverageJudge = User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG']);
+        $daAverageJudge = User::factory()->create(['role' => 'judge_da_average', 'slot' => 'DA_AVG']);
         $a1 = User::factory()->create(['role' => 'judge_a', 'slot' => 'A1']);
         $e1 = User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
 
-        $dbScore = JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $performance->id,
             'judge_id' => $db1->id,
             'panel' => 'd',
             'subpanel' => 'db',
             'score' => 4.2,
-            'average_score' => 4.0,
             'submitted_at' => now(),
-            'average_submitted_at' => now(),
         ]);
-        $daScore = JudgeScore::create([
+        JudgeScore::create([
             'performance_id' => $performance->id,
             'judge_id' => $da1->id,
             'panel' => 'd',
             'subpanel' => 'da',
             'score' => 3.4,
             'submitted_at' => now(),
+        ]);
+        $dbAverage = JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $dbAverageJudge->id,
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'average_score' => 4.0,
+            'average_submitted_at' => now(),
         ]);
         JudgeScore::create([
             'performance_id' => $performance->id,
@@ -600,18 +707,25 @@ class LiveResultWorkflowTest extends TestCase
 
         $performance->load(['judgeScores.judge', 'category']);
         $performance->recalculateTotals();
-        $this->assertSame(4.2, (float) $performance->db_average);
-        $this->assertSame(3.4, (float) $performance->da_average);
-        $this->assertSame(7.4, (float) $performance->d_score);
+        $this->assertSame(4.0, (float) $performance->db_average);
+        $this->assertNull($performance->da_average);
+        $this->assertNull($performance->d_score);
         $this->assertFalse(SecretaryLiveUi::readyToFinalize($performance, $performance->category));
 
-        $daScore->update(['average_score' => 3.1, 'average_submitted_at' => now()]);
+        JudgeScore::create([
+            'performance_id' => $performance->id,
+            'judge_id' => $daAverageJudge->id,
+            'panel' => 'd',
+            'subpanel' => 'da',
+            'average_score' => 3.1,
+            'average_submitted_at' => now(),
+        ]);
         $performance->refresh()->load(['judgeScores.judge', 'category']);
         $performance->recalculateTotals();
 
         $this->assertSame(7.1, (float) $performance->d_score);
         $this->assertTrue(SecretaryLiveUi::readyToFinalize($performance, $performance->category));
-        $this->assertNotNull($dbScore->fresh()->average_submitted_at);
+        $this->assertNotNull($dbAverage->fresh()->average_submitted_at);
     }
 
     public function test_panel_spread_warning_does_not_block_auto_advance(): void
@@ -626,11 +740,11 @@ class LiveResultWorkflowTest extends TestCase
         $tournament->update(['active_category_id' => $category->id]);
 
         foreach ([
-            ['judge_d_db', 'DB1', 'd', 'db', 4.2, 4.1],
-            ['judge_d_da', 'DA1', 'd', 'da', 3.4, 3.3],
-            ['judge_a', 'A1', 'a', null, 9.0, null],
-            ['judge_e', 'E1', 'e', null, 7.0, null],
-        ] as [$role, $slot, $panel, $subpanel, $score, $average]) {
+            ['judge_d_db', 'DB1', 'd', 'db', 4.2],
+            ['judge_d_da', 'DA1', 'd', 'da', 3.4],
+            ['judge_a', 'A1', 'a', null, 9.0],
+            ['judge_e', 'E1', 'e', null, 7.0],
+        ] as [$role, $slot, $panel, $subpanel, $score]) {
             $judge = User::factory()->create(['role' => $role, 'slot' => $slot]);
             JudgeScore::create([
                 'performance_id' => $performance->id,
@@ -638,9 +752,21 @@ class LiveResultWorkflowTest extends TestCase
                 'panel' => $panel,
                 'subpanel' => $subpanel,
                 'score' => $score,
-                'average_score' => $average,
                 'submitted_at' => now(),
-                'average_submitted_at' => $average !== null ? now() : null,
+            ]);
+        }
+        foreach ([
+            ['judge_db_average', 'DB_AVG', 'db', 4.1],
+            ['judge_da_average', 'DA_AVG', 'da', 3.3],
+        ] as [$role, $slot, $subpanel, $average]) {
+            $judge = User::factory()->create(['role' => $role, 'slot' => $slot]);
+            JudgeScore::create([
+                'performance_id' => $performance->id,
+                'judge_id' => $judge->id,
+                'panel' => 'd',
+                'subpanel' => $subpanel,
+                'average_score' => $average,
+                'average_submitted_at' => now(),
             ]);
         }
 

@@ -51,6 +51,8 @@ class DemoSeeder extends Seeder
             ['email' => 'db2@local.test',   'name' => 'Judge DB2', 'role' => 'judge_d_db', 'slot' => 'DB2'],
             ['email' => 'da1@local.test',   'name' => 'Judge DA1', 'role' => 'judge_d_da', 'slot' => 'DA1'],
             ['email' => 'da2@local.test',   'name' => 'Judge DA2', 'role' => 'judge_d_da', 'slot' => 'DA2'],
+            ['email' => 'db-average@local.test', 'name' => 'Средняя DB', 'role' => 'judge_db_average', 'slot' => 'DB_AVG'],
+            ['email' => 'da-average@local.test', 'name' => 'Средняя DA', 'role' => 'judge_da_average', 'slot' => 'DA_AVG'],
             ['email' => 'a1@local.test',    'name' => 'Judge A1',  'role' => 'judge_a',    'slot' => 'A1'],
             ['email' => 'a2@local.test',    'name' => 'Judge A2',  'role' => 'judge_a',    'slot' => 'A2'],
             ['email' => 'a3@local.test',    'name' => 'Judge A3',  'role' => 'judge_a',    'slot' => 'A3'],

@@ -95,6 +95,7 @@ class ScoringSystemTest extends TestCase
         $this->addScore($perf, 'd', 5.4, 'db', null, 'DB2');
         $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
         $this->addScore($perf, 'd', 2.4, 'da', null, 'DA2');
+        $this->submitRequiredManualAverages($perf);
 
         // A panel: 8.0, 8.2, 8.4, 9.5 -> drop 8.0 & 9.5, avg(8.2, 8.4)=8.3
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
@@ -133,6 +134,7 @@ class ScoringSystemTest extends TestCase
         $this->addScore($perf, 'd', 0.0, 'db', null, 'DB2');
         $this->addScore($perf, 'd', 0.0, 'da', null, 'DA1');
         $this->addScore($perf, 'd', 0.0, 'da', null, 'DA2');
+        $this->submitRequiredManualAverages($perf);
 
         // A: 0.0, 5.0, 5.0, 10.0 -> drop 0 и 10, avg(5,5)=5
         $this->addScore($perf, 'a', 0.0, null, null, 'A1');
@@ -161,6 +163,7 @@ class ScoringSystemTest extends TestCase
         // Только D присутствует, A и E нет.
         $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1');
         $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
+        $this->submitRequiredManualAverages($perf);
 
         $perf->load('judgeScores', 'category');
         $perf->recalculateTotals();
@@ -196,6 +199,7 @@ class ScoringSystemTest extends TestCase
 
         $this->addScore($perf, 'd', 4.0, 'db', null, 'DB1');
         $this->addScore($perf, 'd', 3.0, 'da', null, 'DA1');
+        $this->submitRequiredManualAverages($perf);
 
         // Только 3 судьи A -> среднее без отбрасывания: (8+8.6+9.1)/3 = 8.5667
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
@@ -358,7 +362,7 @@ class ScoringSystemTest extends TestCase
         @unlink($tmp);
     }
 
-    public function test_total_uses_zero_for_fully_inactive_da_panel(): void
+    public function test_official_da_average_still_counts_when_da_judges_are_fully_inactive(): void
     {
         // Сценарий: секретарь выключил DA-слоты (только сложность тела).
         $category = $this->makeCategory([
@@ -367,9 +371,11 @@ class ScoringSystemTest extends TestCase
         ]);
         $perf = $this->makePerformance($category);
 
-        // Заполнены только активные слоты: DB, A, E. DA нет (выключены).
+        // Обычные DA-судьи выключены, но независимый планшет средней DA работает.
         $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1');
         $this->addScore($perf, 'd', 5.0, 'db', null, 'DB2');
+        $this->addOfficialDifficultyAverage($perf, 'db', 5.0);
+        $this->addOfficialDifficultyAverage($perf, 'da', 2.0);
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
         $this->addScore($perf, 'a', 8.0, null, null, 'A2');
         $this->addScore($perf, 'a', 8.0, null, null, 'A3');
@@ -385,11 +391,10 @@ class ScoringSystemTest extends TestCase
         $ready = SecretaryLiveUi::scoresCompleteForAutoAdvance($perf, $category);
         $this->assertTrue($ready, 'автопереход считает готовым: DA выключены');
 
-        // Выключенная целиком подпанель даёт нулевой вклад, а не ломает итог.
         $perf->recalculateTotals();
 
-        $this->assertSame(5.0, (float) $perf->d_score);
-        $this->assertSame(20.0, (float) $perf->total);
+        $this->assertSame(7.0, (float) $perf->d_score);
+        $this->assertSame(22.0, (float) $perf->total);
     }
 
     public function test_total_ok_when_one_judge_per_panel_disabled(): void
@@ -404,6 +409,7 @@ class ScoringSystemTest extends TestCase
         // Остаются: DB1, DA1, A1..A3, E1..E3.
         $this->addScore($perf, 'd', 5.0, 'db', null, 'DB1'); // DB avg = 5.0
         $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1'); // DA avg = 2.0 -> D = 7.0
+        $this->submitRequiredManualAverages($perf);
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
         $this->addScore($perf, 'a', 8.3, null, null, 'A2');
         $this->addScore($perf, 'a', 8.7, null, null, 'A3'); // 3 судьи -> avg 8.333
@@ -442,6 +448,8 @@ class ScoringSystemTest extends TestCase
         foreach (['E1', 'E2', 'E3', 'E4'] as $slot) {
             $this->addScore($perf, 'e', 7.0, null, null, $slot);
         }
+        $this->addOfficialDifficultyAverage($perf, 'db', 5.0);
+        $this->addOfficialDifficultyAverage($perf, 'da', 2.0);
 
         $perf->load(['judgeScores.judge', 'category']);
         $perf->recalculateTotals();
@@ -676,10 +684,14 @@ class ScoringSystemTest extends TestCase
 
     private function submitRequiredManualAverages(Performance $perf): void
     {
+        if ($perf->isBodyOnlyApparatus()) {
+            return;
+        }
+
         $perf->unsetRelation('judgeScores');
         $rows = SecretaryLiveUi::scoreRowsBySlot($perf, $perf->category);
 
-        foreach ([['DB1', 'DB2'], ['DA1', 'DA2']] as [$leaderSlot, $secondSlot]) {
+        foreach ([['db', 'DB1', 'DB2'], ['da', 'DA1', 'DA2']] as [$subpanel, $leaderSlot, $secondSlot]) {
             $leader = $rows[$leaderSlot] ?? null;
             if ($leader === null) {
                 continue;
@@ -688,11 +700,25 @@ class ScoringSystemTest extends TestCase
             $values = collect([$leader, $rows[$secondSlot] ?? null])
                 ->filter()
                 ->pluck('score');
-            $leader->update([
-                'average_score' => $values->avg(),
-                'average_submitted_at' => now(),
-            ]);
+            $this->addOfficialDifficultyAverage($perf, $subpanel, (float) $values->avg());
         }
+    }
+
+    private function addOfficialDifficultyAverage(Performance $perf, string $subpanel, float $score): void
+    {
+        $isDb = $subpanel === 'db';
+        $judge = User::factory()->create([
+            'role' => $isDb ? 'judge_db_average' : 'judge_da_average',
+            'slot' => $isDb ? 'DB_AVG' : 'DA_AVG',
+        ]);
+        JudgeScore::create([
+            'performance_id' => $perf->id,
+            'judge_id' => $judge->id,
+            'panel' => 'd',
+            'subpanel' => $subpanel,
+            'average_score' => $score,
+            'average_submitted_at' => now(),
+        ]);
     }
 
     private function fillAeScores(Performance $perf): void
@@ -745,6 +771,7 @@ class ScoringSystemTest extends TestCase
         $this->addScore($ball, 'd', 5.0, 'db', null, 'DB2');
         $this->addScore($ball, 'd', 2.0, 'da', null, 'DA1');
         $this->addScore($ball, 'd', 2.0, 'da', null, 'DA2');
+        $this->submitRequiredManualAverages($ball);
         $ball->load('judgeScores', 'category');
         $ball->recalculateTotals();
         $this->assertEqualsWithDelta(7.0, $ball->d_score, 0.0005, 'Мяч: avg(DB)+avg(DA)');

@@ -74,6 +74,8 @@ class User extends Authenticatable
             // D panel split (два планшета: сложность тела / аппарата)
             'judge_d_db' => ['panel' => 'd', 'subpanel' => 'db'],
             'judge_d_da' => ['panel' => 'd', 'subpanel' => 'da'],
+            'judge_db_average' => ['panel' => 'd', 'subpanel' => 'db', 'average_only' => true],
+            'judge_da_average' => ['panel' => 'd', 'subpanel' => 'da', 'average_only' => true],
 
             // Penalties
             'line_judge' => ['panel' => 'penalty', 'subpanel' => null, 'penalty_type' => 'line'],
@@ -98,6 +100,8 @@ class User extends Authenticatable
         return match ($this->role) {
             'judge_d', 'judge_d_db' => 'DB1',
             'judge_d_da' => 'DA1',
+            'judge_db_average' => 'DB_AVG',
+            'judge_da_average' => 'DA_AVG',
             'judge_a', 'judge' => 'A1',
             'judge_e' => 'E1',
             'line_judge' => 'LINE1',
@@ -115,5 +119,10 @@ class User extends Authenticatable
         }
 
         return $this->judgePanel() !== null || $this->isAdmin();
+    }
+
+    public function isDifficultyAverageJudge(): bool
+    {
+        return in_array($this->role, ['judge_db_average', 'judge_da_average'], true);
     }
 }

@@ -55,11 +55,8 @@
                 @php
                     $history = $scoreHistoryByPerformance[$performance->id] ?? ['slots' => [], 'spread' => []];
                     $violating = $history['spread']['violating_slots'] ?? [];
-                    $reviewRows = \App\Support\SecretaryLiveUi::scoreRowsBySlot($performance, $category, true);
-                    $reviewDb1 = $reviewRows['DB1'] ?? null;
-                    $reviewDa1 = $reviewRows['DA1'] ?? null;
-                    $reviewDb = $reviewDb1?->average_submitted_at !== null ? $reviewDb1?->average_score : $performance->db_average;
-                    $reviewDa = $reviewDa1?->average_submitted_at !== null ? $reviewDa1?->average_score : $performance->da_average;
+                    $reviewDb = $performance->db_average;
+                    $reviewDa = $performance->da_average;
                 @endphp
                 <article class="rounded-xl border {{ $performance->status === 'performing' ? 'border-orange-500/80 bg-orange-950/30' : 'border-slate-800 bg-slate-950/50' }} p-4">
                     <div class="flex flex-wrap items-start justify-between gap-3">

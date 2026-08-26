@@ -378,6 +378,19 @@
                         </button>
                     @endforeach
                 </div>
+                <div class="mt-4 border-t border-slate-800 pt-3">
+                    <div class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-300">Независимые итоговые планшеты</div>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach($difficultyAverageSlots as $averageSlot)
+                            <span class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold {{ $averageSlot['ok'] ? 'border-cyan-700 bg-cyan-950/50 text-cyan-100' : 'border-amber-800 bg-amber-950/35 text-amber-100' }}">
+                                <span class="h-2 w-2 rounded-full {{ $averageSlot['ok'] ? 'bg-cyan-400' : 'bg-amber-400' }}"></span>
+                                {{ $averageSlot['label'] }}:
+                                <span class="font-mono">{{ $averageSlot['ok'] ? number_format((float) $averageSlot['value'], 3, '.', '') : 'ждём' }}</span>
+                            </span>
+                        @endforeach
+                    </div>
+                    <p class="mt-2 text-[10px] text-slate-500">Эти два планшета не отключаются вместе с DB1/DB2/DA1/DA2 и напрямую задают итоговые DB и DA.</p>
+                </div>
                 <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                     <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>оценка пришла</span>
                     <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-amber-400"></span>ждём</span>
@@ -392,7 +405,7 @@
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
                     <h2 class="text-base font-semibold text-white">Оценки (текущая гимнастка)</h2>
-                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. Автопереход срабатывает после всех активных слотов, ручных средних DB1/DA1 и завершения официального таймера. Ненужные слоты LINE/TIME/RESP следует отключить в составе бригады. Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
+                    <p class="mt-1 text-xs text-slate-500">Судьи вводят оценки в своей панели. Автопереход срабатывает после всех активных слотов, независимых средних DB/DA и завершения официального таймера. Ненужные слоты LINE/TIME/RESP следует отключить в составе бригады. Разброс внутри панели A/E/DB/DA не должен превышать <span class="text-slate-300">{{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}</span>.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <span class="inline-flex items-center gap-2 rounded-lg border border-emerald-600/80 bg-emerald-950/50 px-2.5 py-1.5 font-medium text-emerald-100">
@@ -429,7 +442,7 @@
                         @endforeach
                     </ul>
                     @if(! $manualAveragesReady)
-                        <div class="mt-3 text-xs text-amber-200">Ожидаются отдельные ручные средние от DB1 и DA1.</div>
+                        <div class="mt-3 text-xs text-amber-200">Ожидаются официальные средние с планшетов DB и DA.</div>
                     @elseif($canApproveFinal)
                         <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="mt-3"
                               onsubmit="return confirm('Подтвердить итог несмотря на расхождение оценок?');">
@@ -445,18 +458,15 @@
             @endif
 
             @php
-                $manualAverageRows = $currentPerformance
-                    ? \App\Support\SecretaryLiveUi::scoreRowsBySlot($currentPerformance, $category)
-                    : [];
-                $db1ManualAverage = $manualAverageRows['DB1'] ?? null;
-                $da1ManualAverage = $manualAverageRows['DA1'] ?? null;
+                $manualAverageRows = \App\Support\SecretaryLiveUi::difficultyAverageRows($currentPerformance);
+                $db1ManualAverage = $manualAverageRows['DB_AVG'] ?? null;
+                $da1ManualAverage = $manualAverageRows['DA_AVG'] ?? null;
             @endphp
             <div class="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div class="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-center">
                     <div class="text-xs text-slate-500 uppercase">D</div>
                     <div class="mt-1 text-2xl font-semibold text-white font-mono">{{ \App\Support\SecretaryLiveUi::formatScore($d !== null ? (float) $d : null) }}</div>
-                    <div class="mt-1 text-[10px] text-slate-500">Авто: DB {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->db_average !== null ? (float) $currentPerformance->db_average : null) }} · DA {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->da_average !== null ? (float) $currentPerformance->da_average : null) }}</div>
-                    <div class="mt-1 text-[10px] font-semibold text-cyan-300">Ручные: DB1 {{ \App\Support\SecretaryLiveUi::formatScore($db1ManualAverage?->average_submitted_at !== null ? (float) $db1ManualAverage->average_score : null) }} · DA1 {{ \App\Support\SecretaryLiveUi::formatScore($da1ManualAverage?->average_submitted_at !== null ? (float) $da1ManualAverage->average_score : null) }}</div>
+                    <div class="mt-1 text-[10px] font-semibold text-cyan-300">Официальные: DB {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->db_average !== null ? (float) $currentPerformance->db_average : null) }} · DA {{ \App\Support\SecretaryLiveUi::formatScore($currentPerformance?->da_average !== null ? (float) $currentPerformance->da_average : null) }}</div>
                 </div>
                 <div class="rounded-xl border border-slate-700 bg-slate-950/60 p-4 text-center">
                     <div class="text-xs text-slate-500 uppercase">A</div>
@@ -491,8 +501,8 @@
                         <span>D {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->d_score !== null ? (float) $lastCompletedPerformance->d_score : null) }}</span>
                         <span>A {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->a_score !== null ? (float) $lastCompletedPerformance->a_score : null) }}</span>
                         <span>E {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->e_score !== null ? (float) $lastCompletedPerformance->e_score : null) }}</span>
-                        <span class="text-cyan-200">DB1 ср. {{ \App\Support\SecretaryLiveUi::formatScore($lastDb1?->average_submitted_at !== null ? (float) $lastDb1->average_score : null) }}</span>
-                        <span class="text-cyan-200">DA1 ср. {{ \App\Support\SecretaryLiveUi::formatScore($lastDa1?->average_submitted_at !== null ? (float) $lastDa1->average_score : null) }}</span>
+                        <span class="text-cyan-200">DB {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->db_average !== null ? (float) $lastCompletedPerformance->db_average : null) }}</span>
+                        <span class="text-cyan-200">DA {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->da_average !== null ? (float) $lastCompletedPerformance->da_average : null) }}</span>
                         <span class="font-semibold text-white">Итого {{ \App\Support\SecretaryLiveUi::formatScore($lastCompletedPerformance->total !== null ? (float) $lastCompletedPerformance->total : null) }}</span>
                     </div>
                 </div>
@@ -581,8 +591,8 @@
 
                     <div class="mt-3 grid gap-2 sm:grid-cols-2">
                         @foreach([
-                            ['slot' => 'DB1', 'label' => 'Ручная средняя DB', 'row' => $db1ManualAverage],
-                            ['slot' => 'DA1', 'label' => 'Ручная средняя DA', 'row' => $da1ManualAverage],
+                            ['slot' => 'DB_AVG', 'label' => 'Официальная средняя DB', 'row' => $db1ManualAverage],
+                            ['slot' => 'DA_AVG', 'label' => 'Официальная средняя DA', 'row' => $da1ManualAverage],
                         ] as $averageItem)
                             @php
                                 $averageRow = $averageItem['row'];
@@ -664,7 +674,7 @@
                         </form>
                         @if($currentPerformance->approved_at === null && \App\Support\SecretaryLiveUi::requiredScoresSubmitted($currentPerformance, $category))
                             @if(! $manualAveragesReady)
-                                <span class="ml-auto text-xs text-amber-200">Ожидаются ручные средние DB1 и DA1</span>
+                                <span class="ml-auto text-xs text-amber-200">Ожидаются официальные средние DB и DA</span>
                             @elseif($canApproveFinal)
                                 <form method="POST" action="{{ route('secretary.performance.confirmScore', $currentPerformance) }}" class="inline ml-auto"
                                       onsubmit="return confirm('Подтвердить и зафиксировать итог?');">
@@ -769,15 +779,8 @@
                     @php
                         $isCurrentHistoryPerformance = $currentPerformance && $currentPerformance->id === $p->id;
                         $historySpread = $scoreHistoryByPerformance[$p->id]['spread'] ?? null;
-                        $historyRows = \App\Support\SecretaryLiveUi::scoreRowsBySlot($p, $category, true);
-                        $historyDb1 = $historyRows['DB1'] ?? null;
-                        $historyDa1 = $historyRows['DA1'] ?? null;
-                        $historyDb = $historyDb1?->average_submitted_at !== null
-                            ? $historyDb1?->average_score
-                            : $p->db_average;
-                        $historyDa = $historyDa1?->average_submitted_at !== null
-                            ? $historyDa1?->average_score
-                            : $p->da_average;
+                        $historyDb = $p->db_average;
+                        $historyDa = $p->da_average;
                     @endphp
                     <article class="rounded-xl border p-3 sm:p-4 {{ $isCurrentHistoryPerformance ? 'border-orange-600/70 bg-orange-950/30 ring-1 ring-orange-500/20' : 'border-slate-800 bg-slate-950/45' }}">
                         <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">

@@ -310,15 +310,8 @@ class ScoreboardUi
         $isVisibleOnBoard = $perf->published_at !== null;
         $inq = $perf->inquiries->sortByDesc('id')->first();
         $isBodyOnly = $perf->isBodyOnlyApparatus();
-        $scoreRows = SecretaryLiveUi::scoreRowsBySlot($perf, $category, true);
-        $dbLeader = $scoreRows['DB1'] ?? null;
-        $daLeader = $scoreRows['DA1'] ?? null;
-        $officialDb = $dbLeader?->average_submitted_at !== null && $dbLeader?->average_score !== null
-            ? (float) $dbLeader->average_score
-            : ($perf->db_average !== null ? (float) $perf->db_average : null);
-        $officialDa = $daLeader?->average_submitted_at !== null && $daLeader?->average_score !== null
-            ? (float) $daLeader->average_score
-            : ($perf->da_average !== null ? (float) $perf->da_average : null);
+        $officialDb = $perf->db_average !== null ? (float) $perf->db_average : null;
+        $officialDa = $perf->da_average !== null ? (float) $perf->da_average : null;
         $judgeSlots = SecretaryLiveUi::judgeSlots($perf, $category);
         $mainSlots = collect($judgeSlots)->filter(
             fn ($s) => in_array($s['label'], SecretaryLiveUi::AUTO_ADVANCE_REQUIRED_LABELS, true) && ! $s['inactive']

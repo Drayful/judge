@@ -198,6 +198,22 @@ class ScoreboardTest extends TestCase
         ]);
         JudgeScore::create([
             'performance_id' => $live->id,
+            'judge_id' => User::factory()->create(['role' => 'judge_db_average', 'slot' => 'DB_AVG'])->id,
+            'panel' => 'd',
+            'subpanel' => 'db',
+            'average_score' => 7.5,
+            'average_submitted_at' => now(),
+        ]);
+        JudgeScore::create([
+            'performance_id' => $live->id,
+            'judge_id' => User::factory()->create(['role' => 'judge_da_average', 'slot' => 'DA_AVG'])->id,
+            'panel' => 'd',
+            'subpanel' => 'da',
+            'average_score' => 4.5,
+            'average_submitted_at' => now(),
+        ]);
+        JudgeScore::create([
+            'performance_id' => $live->id,
             'judge_id' => User::factory()->create(['slot' => 'A1'])->id,
             'panel' => 'a',
             'score' => 8.5,

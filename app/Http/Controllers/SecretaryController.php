@@ -1756,6 +1756,20 @@ class SecretaryController extends Controller
             ->first();
         $streamStatus = SecretaryLiveUi::streamStatus($currentPerformance);
         $judgeSlots = SecretaryLiveUi::judgeSlots($currentPerformance, $category);
+        $difficultyAverageRows = SecretaryLiveUi::difficultyAverageRows($currentPerformance);
+        $difficultyAverageSlots = collect([
+            'DB_AVG' => 'Средняя DB',
+            'DA_AVG' => 'Средняя DA',
+        ])->map(function (string $label, string $slot) use ($difficultyAverageRows) {
+            $row = $difficultyAverageRows[$slot] ?? null;
+
+            return [
+                'slot' => $slot,
+                'label' => $label,
+                'ok' => $row?->average_submitted_at !== null && $row?->average_score !== null,
+                'value' => $row?->average_score,
+            ];
+        })->values()->all();
         $scoreMatrix = SecretaryLiveUi::fixedScoreMatrix($currentPerformance, $category);
         $panelSpread = SecretaryLiveUi::panelSpreadReport($currentPerformance, $category);
         $waitingJudges = collect($judgeSlots)->filter(fn ($s) => ! $s['ok'] && ! ($s['inactive'] ?? false))->count();
@@ -1942,6 +1956,7 @@ class SecretaryController extends Controller
             'lastCompletedPerformance' => $lastCompletedPerformance,
             'streamStatus' => $streamStatus,
             'judgeSlots' => $judgeSlots,
+            'difficultyAverageSlots' => $difficultyAverageSlots,
             'scoreMatrix' => $scoreMatrix,
             'panelSpread' => $panelSpread,
             'waitingJudges' => $waitingJudges,
@@ -1971,7 +1986,7 @@ class SecretaryController extends Controller
             }
 
             if (! SecretaryLiveUi::requiredManualAveragesSubmitted($performance, $category)) {
-                return back()->withErrors(['confirm' => 'DB1 и DA1 ещё не отправили отдельные ручные средние.']);
+                return back()->withErrors(['confirm' => 'Планшеты средней DB и DA ещё не отправили официальные значения.']);
             }
 
             if (! SecretaryLiveUi::requiredPenaltyInputsSubmitted($performance, $category)) {
@@ -2102,12 +2117,17 @@ class SecretaryController extends Controller
                 ]);
 
                 if (in_array($key, ['db', 'da', 'all'], true)) {
-                    $performance->loadMissing(['judgeScores.judge', 'category']);
-                    $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
-                    $leaders = $key === 'all' ? ['DB1', 'DA1'] : [strtoupper($key).'1'];
-                    foreach ($leaders as $leaderSlot) {
-                        $rows[$leaderSlot]?->update(['average_score' => null, 'average_submitted_at' => null]);
+                    $averageQuery = JudgeScore::query()
+                        ->where('performance_id', $performance->id)
+                        ->where('panel', 'd')
+                        ->whereNotNull('average_submitted_at');
+                    if ($key !== 'all') {
+                        $averageQuery->where('subpanel', $key);
                     }
+                    $returned += $averageQuery->update([
+                        'average_score' => null,
+                        'average_submitted_at' => null,
+                    ]);
                 }
 
                 if (in_array($key, ['penalty', 'all'], true)) {
