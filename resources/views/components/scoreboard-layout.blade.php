@@ -10,6 +10,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="font-sans antialiased sb-bg overflow-hidden">
+    <x-application-logo class="pointer-events-none fixed right-4 top-3 z-[100] h-6 w-auto text-white opacity-80" />
     {{ $slot }}
 </body>
 </html>

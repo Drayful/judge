@@ -32,7 +32,7 @@
                 <div id="emptyState" class="{{ $perf ? 'hidden' : '' }} py-16 text-center">
                     <div class="mb-6 text-6xl opacity-25">◎</div>
                     <h2 class="text-2xl font-semibold text-white sm:text-3xl">Ожидание участницы</h2>
-                    <p class="mt-2 text-slate-500">Выступление появится автоматически</p>
+                    <p class="mt-2 text-slate-500">Гимнастка появится после выбора оператора табло</p>
                 </div>
 
                 <div id="liveContent" class="{{ $perf ? '' : 'hidden' }} flex flex-col items-center gap-6 sm:gap-8">

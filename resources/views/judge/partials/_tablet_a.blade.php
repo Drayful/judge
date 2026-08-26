@@ -168,6 +168,7 @@
                     </div>
                     <div class="mt-1 text-[10px] text-slate-500">{{ number_format((float) $base, 2, '.', '') }} − сбавка · максимум 10.00</div>
                 </div>
+                @include('judge.partials._tablet_center_logo')
                 <button type="button" @click="submit()" :disabled="busy" class="judge-submit-button shrink-0 rounded-2xl border py-3 text-lg font-bold text-white disabled:cursor-wait disabled:opacity-50 active:scale-[0.99]">ОТПРАВИТЬ</button>
             </div>
 

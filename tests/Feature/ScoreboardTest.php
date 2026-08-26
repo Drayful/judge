@@ -107,7 +107,7 @@ class ScoreboardTest extends TestCase
         $this->assertNotSame($first->id, $active->id);
     }
 
-    public function test_performance_live_returns_current_athlete(): void
+    public function test_performance_board_waits_for_operator_instead_of_following_current_athlete(): void
     {
         $tournament = Tournament::create(['name' => 'Live Cup', 'is_published' => true]);
         $category = Category::create([
@@ -132,9 +132,8 @@ class ScoreboardTest extends TestCase
         $response = $this->getJson(route('scoreboard.performance.live', $category));
 
         $response->assertOk();
-        $response->assertJsonPath('phase', 'performing');
-        $response->assertJsonPath('performance.athlete', 'Тестова Алина');
-        $response->assertJsonPath('performance.start_number', 5);
+        $response->assertJsonPath('phase', 'empty');
+        $response->assertJsonPath('performance', null);
     }
 
     public function test_performance_live_includes_place_when_total_set(): void
@@ -270,7 +269,7 @@ class ScoreboardTest extends TestCase
         ]);
 
         // На табло результат и место видны только после принятия результата.
-        $live->update(['published_at' => now()]);
+        $live->update(['published_at' => now(), 'scoreboard_accepted_at' => now()]);
 
         $this->getJson(route('scoreboard.performance.live', $category))
             ->assertOk()
@@ -326,6 +325,7 @@ class ScoreboardTest extends TestCase
         Performance::create([
             'category_id' => $category->id, 'athlete_id' => $c->id, 'order_index' => 3,
             'status' => 'performing', 'is_counted' => true, 'published_at' => now(),
+            'scoreboard_accepted_at' => now(),
         ]);
 
         // place_of = опубликованные (без снятых) + 1 = 1 + 1 = 2
@@ -383,7 +383,7 @@ class ScoreboardTest extends TestCase
             'category_id' => $stream1->id, 'athlete_id' => $live->id, 'order_index' => 1,
             'status' => 'performing', 'is_counted' => true,
             'scores_overridden' => true, 'd_score' => 8, 'a_score' => 8.5, 'e_score' => 8.5, 'total' => 25.0,
-            'published_at' => now(),
+            'published_at' => now(), 'scoreboard_accepted_at' => now(),
         ]);
 
         // Место 2 (лидер из другого потока учтён), «из 2».
@@ -435,6 +435,7 @@ class ScoreboardTest extends TestCase
             'e_score' => 9.0,
             'a_score' => 7.0,
             'published_at' => now(),
+            'scoreboard_accepted_at' => now(),
         ]);
 
         $this->getJson(route('scoreboard.performance.live', $category))
@@ -524,6 +525,7 @@ class ScoreboardTest extends TestCase
             'total' => 15.0,
             'scores_overridden' => true,
             'published_at' => now(),
+            'scoreboard_accepted_at' => now(),
             'is_counted' => true,
         ]);
 
@@ -621,7 +623,7 @@ class ScoreboardTest extends TestCase
             ->assertSeeInOrder(['Оценка Ранняя', 'Оценка Поздняя']);
     }
 
-    public function test_operator_selected_result_temporarily_overrides_current_athlete(): void
+    public function test_operator_selected_result_is_shown_for_thirty_seconds_without_following_live_queue(): void
     {
         Carbon::setTestNow('2026-08-24 12:00:00');
         $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
@@ -651,11 +653,26 @@ class ScoreboardTest extends TestCase
             ->assertJsonPath('performance.athlete', 'Оценка Показанная')
             ->assertJsonPath('performance.score_visible', true);
 
+        $currentPerformance = $activeCategory->performances()->where('athlete_id', $currentAthlete->id)->firstOrFail();
+        $currentPerformance->update(['status' => 'done']);
+        $nextAthlete = Athlete::create(['first_name' => 'Следующая', 'last_name' => 'Гимнастка']);
+        Performance::create([
+            'category_id' => $activeCategory->id,
+            'athlete_id' => $nextAthlete->id,
+            'status' => 'performing',
+        ]);
+
         Carbon::setTestNow(now()->addSeconds(13));
         $this->getJson(route('scoreboard.performance.live', $activeCategory))
             ->assertOk()
-            ->assertJsonPath('performance.athlete', 'Гимнастка Текущая')
-            ->assertJsonPath('performance.score_visible', false);
+            ->assertJsonPath('performance.athlete', 'Оценка Показанная')
+            ->assertJsonPath('performance.score_visible', true);
+
+        Carbon::setTestNow(now()->addSeconds(18));
+        $this->getJson(route('scoreboard.performance.live', $activeCategory))
+            ->assertOk()
+            ->assertJsonPath('phase', 'empty')
+            ->assertJsonPath('performance', null);
 
         Carbon::setTestNow();
     }
@@ -697,7 +714,7 @@ class ScoreboardTest extends TestCase
         Performance::create([
             'category_id' => $category->id, 'athlete_id' => $current->id,
             'status' => 'performing', 'scores_overridden' => true,
-            'total' => 10, 'published_at' => now(), 'is_counted' => true,
+            'total' => 10, 'published_at' => now(), 'scoreboard_accepted_at' => now(), 'is_counted' => true,
         ]);
 
         $this->getJson(route('scoreboard.performance.live', $category))

@@ -10,7 +10,7 @@
             <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <div class="font-semibold text-slate-100">Очередь одобренных оценок</div>
-                    <p class="mt-1 text-sm text-slate-400">Сверху — результат, который одобрили раньше. Кнопка показывает его на публичном табло на {{ \App\Support\ScoreboardUi::RESULT_HOLD_SECONDS }} секунд.</p>
+                    <p class="mt-1 text-sm text-slate-400">Сверху — результат, который одобрили раньше. Кнопка выводит выбранную гимнастку на публичное табло на {{ \App\Support\ScoreboardUi::RESULT_HOLD_SECONDS }} секунд.</p>
                 </div>
                 <a href="{{ route('scoreboard.index') }}" target="_blank" rel="noopener"
                    class="rounded-lg border border-cyan-700 bg-cyan-950/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/50">

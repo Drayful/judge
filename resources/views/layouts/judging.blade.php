@@ -310,6 +310,24 @@
             margin-top: auto;
         }
 
+        .judge-center-logo {
+            display: flex;
+            flex: 1 1 0;
+            min-height: 3rem;
+            align-items: center;
+            justify-content: center;
+            padding: clamp(.5rem, 2vh, 1.25rem) 1.5rem;
+            opacity: .52;
+        }
+
+        .judge-workspace > div:has(> .judge-score-stage) > .judge-center-logo + .judge-submit-button {
+            margin-top: 0;
+        }
+
+        body:has(.judge-center-logo) > .judge-layout-logo {
+            display: none;
+        }
+
         .judge-workspace button[class*="bg-rose"],
         .judge-workspace button[class*="#6f1d2e"],
         .judge-workspace button[class*="#5a1d28"],
@@ -370,6 +388,7 @@
     </style>
 </head>
 <body class="font-sans antialiased bg-[#07090d] text-slate-100 h-screen overflow-hidden">
+    <x-application-logo class="judge-layout-logo pointer-events-none fixed bottom-2 right-3 z-[90] h-5 w-auto text-white opacity-60" />
     <div id="app-async-page" data-async-page class="h-screen overflow-hidden">
         @yield('content')
         @stack('body-scripts')

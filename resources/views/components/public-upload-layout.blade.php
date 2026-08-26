@@ -13,6 +13,7 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased">
+        <x-application-logo class="pointer-events-none fixed right-4 top-4 z-50 h-6 w-auto text-white opacity-80" />
         <main id="app-async-page" data-async-page class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4 py-10 sm:px-6 sm:py-16">
             <div class="mx-auto w-full max-w-3xl">
                 {{ $slot }}

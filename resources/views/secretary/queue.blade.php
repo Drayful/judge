@@ -602,7 +602,7 @@
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <div class="text-[10px] font-semibold uppercase tracking-wider {{ $averageReady ? 'text-cyan-300' : 'text-amber-300' }}">{{ $averageItem['label'] }} · {{ $averageItem['slot'] }}</div>
-                                        <div class="mt-0.5 text-xs text-slate-500">Второй ручной ввод после основной оценки</div>
+                                        <div class="mt-0.5 text-xs text-slate-500">Независимый планшет · значение без дополнительного округления</div>
                                     </div>
                                     <div class="font-mono text-2xl font-bold tabular-nums {{ $averageReady ? 'text-cyan-100' : 'text-amber-200' }}">
                                         {{ $averageReady ? number_format((float) $averageRow->average_score, 3, '.', '') : 'ожидание' }}

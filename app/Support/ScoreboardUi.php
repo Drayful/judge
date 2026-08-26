@@ -11,7 +11,7 @@ class ScoreboardUi
 {
     private const PLACE_PRECISION = 3;
 
-    public const RESULT_HOLD_SECONDS = 12;
+    public const RESULT_HOLD_SECONDS = 30;
 
     /**
      * @return array<string, string>
@@ -65,20 +65,20 @@ class ScoreboardUi
     }
 
     /**
-     * Что именно должен показывать экран в зале:
-     * недавно выбранный оператором результат имеет краткий приоритет,
-     * затем табло возвращается к активной гимнастке турнира.
+     * Экран в зале меняется только по явному выбору оператора табло.
+     * Live-очередь и переход секретаря к следующей гимнастке на него не влияют.
      */
     public static function boardPerformance(Category $fallbackCategory): ?Performance
     {
         $fallbackCategory->loadMissing('tournament');
         $tournament = $fallbackCategory->tournament;
         if ($tournament === null) {
-            return self::livePerformance($fallbackCategory);
+            return null;
         }
 
         $relations = ['athlete.members', 'category.tournament', 'judgeScores.judge', 'inquiries'];
-        $selectedResult = Performance::query()
+
+        return Performance::query()
             ->with($relations)
             ->whereHas('category', fn ($query) => $query->where('tournament_id', $tournament->id))
             ->whereNotNull('published_at')
@@ -88,19 +88,6 @@ class ScoreboardUi
             ->latest('scoreboard_accepted_at')
             ->latest('id')
             ->first();
-
-        if ($selectedResult !== null) {
-            return $selectedResult;
-        }
-
-        $activeCategory = $tournament->active_category_id !== null
-            ? Category::query()
-                ->with('tournament')
-                ->where('tournament_id', $tournament->id)
-                ->find($tournament->active_category_id)
-            : null;
-
-        return self::livePerformance($activeCategory ?? $fallbackCategory);
     }
 
     public static function performancePhase(?Performance $perf): string
@@ -324,10 +311,6 @@ class ScoreboardUi
         $overallTotal = $ranking['overall_total'] ?? null;
         $notPerformed = $isVisibleOnBoard && $overallTotal !== null && abs($overallTotal) < 0.0005;
 
-        $displayUntil = $perf->scoreboard_accepted_at
-            ?->copy()
-            ?->addSeconds(self::RESULT_HOLD_SECONDS);
-
         $rev = md5(implode('|', [
             $perf->id, $perf->status, $phase,
             $perf->d_score, $perf->a_score, $perf->e_score, $perf->penalty, $perf->total, $overallTotal,
@@ -376,7 +359,6 @@ class ScoreboardUi
                 'inquiry_status' => $inq?->status,
                 'inquiry_panel' => $inq?->subpanel ? strtoupper($inq->subpanel) : strtoupper((string) ($inq?->panel ?? '')),
                 'inquiry_active' => in_array($inq?->status, ['submitted', 'under_review'], true),
-                'scoreboard_display_until' => $displayUntil?->toIso8601String(),
             ],
             'phase' => $phase,
             'phase_label' => self::phaseLabel($phase),

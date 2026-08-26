@@ -497,10 +497,10 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($dbAverage)
             ->postJson(route('judge.submit-average'), [
                 'tournament_id' => $tournament->id,
-                'average_score' => 4.1,
+                'average_score' => 4.125,
             ])
             ->assertOk()
-            ->assertJsonPath('average_score', 4.1);
+            ->assertJsonPath('average_score', 4.125);
         $this->actingAs($dbAverage)
             ->postJson(route('judge.submit-average'), [
                 'tournament_id' => $tournament->id,
@@ -511,7 +511,7 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertDatabaseHas('judge_scores', [
             'performance_id' => $performance->id,
             'judge_id' => $dbAverage->id,
-            'average_score' => 4.1,
+            'average_score' => 4.125,
         ]);
         $this->assertDatabaseHas('judge_scores', [
             'performance_id' => $performance->id,
@@ -530,7 +530,7 @@ class LiveResultWorkflowTest extends TestCase
             ->get(route('secretary.queue', $performance->category))
             ->assertOk()
             ->assertSee('DB')
-            ->assertSee('4.100');
+            ->assertSee('4.125');
     }
 
     public function test_individual_db_and_da_scores_do_not_reset_official_averages(): void

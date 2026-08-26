@@ -43,6 +43,8 @@
         </div>
     </div>
 
+    @include('judge.partials._tablet_center_logo')
+
     <button type="button" @click="submit()" :disabled="busy"
         class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
         ОТПРАВИТЬ

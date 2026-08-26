@@ -156,7 +156,7 @@
                     >
                         <div class="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Официальная итоговая оценка · {{ $slot }}</div>
                         <h2 class="mt-3 text-3xl font-bold text-white">Введите среднюю {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }}</h2>
-                        <p class="mt-2 text-sm text-slate-400">Это значение сразу станет официальной оценкой {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} и войдёт в итоговый D. Индивидуальные оценки судей остаются в Live и истории.</p>
+                        <p class="mt-2 text-sm text-slate-400">Это значение без дополнительного округления сразу станет официальной оценкой {{ $slot === 'DB_AVG' ? 'DB' : 'DA' }} и войдёт в итоговый D. Индивидуальные оценки судей остаются в Live и истории.</p>
 
                         <form class="mt-7" @submit.prevent="submitAverage()">
                             <input

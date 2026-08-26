@@ -28,8 +28,7 @@
         <div class="flex flex-col w-full">
             <div class="h-16 px-4 flex items-center border-b border-slate-800">
                 <a href="{{ route('dashboard') }}" class="flex items-center gap-2">
-                    <x-application-logo class="block h-9 w-auto fill-current text-emerald-400" />
-                    <span class="font-semibold text-slate-100">Judge</span>
+                    <x-application-logo class="block h-7 w-auto text-white" />
                 </a>
             </div>
 
@@ -70,8 +69,7 @@
         <div class="h-dvh flex flex-col">
             <div class="h-14 px-4 flex items-center justify-between border-b border-slate-800">
                 <a href="{{ route('dashboard') }}" class="flex items-center gap-2">
-                    <x-application-logo class="block h-8 w-auto fill-current text-emerald-400" />
-                    <span class="font-semibold text-slate-100">Judge</span>
+                    <x-application-logo class="block h-6 w-auto text-white" />
                 </a>
                 <button class="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800" @click="open = false">
                     <svg class="h-6 w-6" stroke="currentColor" fill="none" viewBox="0 0 24 24">

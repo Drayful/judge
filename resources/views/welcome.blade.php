@@ -22,7 +22,7 @@
             {{-- Шапка --}}
             <header class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
-                    <x-application-logo class="h-9 w-auto fill-current text-emerald-400" />
+                    <x-application-logo class="h-8 w-auto text-white" />
                     <div class="leading-tight">
                         <div class="font-semibold text-slate-100">{{ config('app.name', 'Judge') }}</div>
                         <div class="text-sm text-slate-400">Веб-судейство и живое табло</div>
