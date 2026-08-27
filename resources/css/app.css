@@ -235,58 +235,58 @@
     /* Текст табло должен читаться с расстояния на большом экране. */
     @media (min-width: 1280px) and (min-height: 700px) {
         .sb-bg .text-xs {
-            font-size: 1rem !important;
-            line-height: 1.4rem !important;
+            font-size: 0.875rem !important;
+            line-height: 1.2rem !important;
         }
 
         .sb-bg .text-sm {
-            font-size: 1.25rem !important;
-            line-height: 1.7rem !important;
+            font-size: 1rem !important;
+            line-height: 1.35rem !important;
         }
 
         .sb-bg .text-base {
-            font-size: 1.375rem !important;
-            line-height: 1.85rem !important;
+            font-size: 1.125rem !important;
+            line-height: 1.5rem !important;
         }
 
         .sb-bg .text-lg {
-            font-size: 1.625rem !important;
-            line-height: 2.1rem !important;
+            font-size: 1.25rem !important;
+            line-height: 1.65rem !important;
         }
 
         .sb-bg .text-xl {
-            font-size: 2rem !important;
-            line-height: 2.4rem !important;
+            font-size: 1.5rem !important;
+            line-height: 1.85rem !important;
         }
 
         .sb-bg .text-2xl {
-            font-size: 2.5rem !important;
-            line-height: 2.8rem !important;
+            font-size: 1.875rem !important;
+            line-height: 2.15rem !important;
         }
 
         .sb-bg .text-3xl {
-            font-size: 3rem !important;
-            line-height: 1 !important;
+            font-size: 2.25rem !important;
+            line-height: 1.1 !important;
         }
 
         .sb-place,
         .sb-medal {
-            font-size: 1.25rem;
+            font-size: 1rem;
         }
 
         .sb-total {
-            font-size: 2rem;
+            font-size: 1.75rem;
         }
 
         .sb-footer,
         .sb-score-label {
-            font-size: 1.125rem;
-            line-height: 1.5rem;
+            font-size: 0.875rem;
+            line-height: 1.2rem;
         }
 
         .sb-btn {
-            font-size: 1.25rem;
-            line-height: 1.75rem;
+            font-size: 1rem;
+            line-height: 1.35rem;
         }
     }
 
