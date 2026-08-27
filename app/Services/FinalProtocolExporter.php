@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Category;
+use App\Models\StreamSession;
 use App\Models\Tournament;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -36,6 +38,88 @@ class FinalProtocolExporter
     {
         $spreadsheet = new Spreadsheet;
         $this->renderTeamSheet($spreadsheet->getActiveSheet(), $tournament, $data);
+
+        return $spreadsheet;
+    }
+
+    /**
+     * Выгрузка текущего экрана просмотра потока.
+     *
+     * @param  list<array{number:int|string|null, name:string, apparatus:string, score:?float, place:?int}>  $rows
+     */
+    public function buildStreamReview(
+        Tournament $tournament,
+        Category $category,
+        ?StreamSession $session,
+        array $rows,
+    ): Spreadsheet {
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Просмотр потока');
+
+        $sheet->mergeCells('A1:E1');
+        $sheet->setCellValue('A1', $tournament->name);
+        $sheet->mergeCells('A2:E2');
+        $sheet->setCellValue('A2', $category->name);
+        $sheet->mergeCells('A3:E3');
+        $sessionLabel = $session === null
+            ? 'Поток без отдельной сессии'
+            : collect([
+                $session->title,
+                $session->scheduled_on?->format('d.m.Y'),
+                $session->starts_at ? substr((string) $session->starts_at, 0, 5) : null,
+            ])->filter()->implode(' · ');
+        $sheet->setCellValue('A3', $sessionLabel);
+
+        $headers = ['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место в пуле'];
+        foreach ($headers as $index => $header) {
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($index + 1).'5', $header);
+        }
+
+        $rowNumber = 6;
+        foreach ($rows as $row) {
+            $sheet->setCellValue('A'.$rowNumber, $row['number']);
+            $sheet->setCellValue('B'.$rowNumber, $row['name']);
+            $sheet->setCellValue('C'.$rowNumber, $row['apparatus']);
+            if ($row['score'] !== null) {
+                $sheet->setCellValue('D'.$rowNumber, round($row['score'], 3));
+            }
+            if ($row['place'] !== null) {
+                $sheet->setCellValue('E'.$rowNumber, $row['place']);
+            }
+            $rowNumber++;
+        }
+
+        foreach (['A1', 'A2', 'A3'] as $cell) {
+            $sheet->getStyle($cell)->getAlignment()
+                ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+                ->setVertical(Alignment::VERTICAL_CENTER);
+        }
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(12);
+        $sheet->getStyle('A3')->getFont()->setSize(11);
+        $sheet->getStyle('A5:E5')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A5:E5')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('0F766E');
+        $sheet->getStyle('A5:E5')->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getRowDimension(1)->setRowHeight(28);
+        $sheet->getRowDimension(2)->setRowHeight(24);
+        $sheet->getRowDimension(5)->setRowHeight(25);
+
+        $lastDataRow = max(5, $rowNumber - 1);
+        $sheet->getStyle("A5:E{$lastDataRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        $sheet->getStyle("A6:A{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("C6:E{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("D6:D{$lastDataRow}")->getNumberFormat()->setFormatCode('0.000');
+        $sheet->getColumnDimension('A')->setWidth(9);
+        $sheet->getColumnDimension('B')->setWidth(34);
+        $sheet->getColumnDimension('C')->setWidth(20);
+        $sheet->getColumnDimension('D')->setWidth(14);
+        $sheet->getColumnDimension('E')->setWidth(18);
+        $sheet->freezePane('A6');
+        $sheet->setAutoFilter("A5:E{$lastDataRow}");
+        $sheet->getPageSetup()->setFitToWidth(1)->setFitToHeight(0);
 
         return $spreadsheet;
     }

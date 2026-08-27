@@ -1656,6 +1656,47 @@ class SecretaryController extends Controller
         return view('secretary.stream-review', $this->queueViewData($category, $session));
     }
 
+    public function downloadQueueReview(
+        Request $request,
+        Category $category,
+        FinalProtocolService $protocols,
+        FinalProtocolExporter $exporter,
+    ): StreamedResponse {
+        $category->loadMissing('tournament');
+        $tournament = $category->tournament;
+        abort_unless($tournament !== null, 404);
+        $session = $this->requestedStreamSession($request, $category);
+        $poolResults = $protocols->poolAthletesById($category);
+        $performances = Performance::query()
+            ->with('athlete')
+            ->where('category_id', $category->id)
+            ->when(
+                $session !== null,
+                fn ($query) => $query->where('stream_session_id', $session->id),
+                fn ($query) => $query->whereNull('stream_session_id'),
+            )
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get();
+        $ordered = SecretaryLiveUi::orderedPerformances($performances);
+        $rows = $ordered->map(function (Performance $performance) use ($poolResults): array {
+            return [
+                'number' => $performance->start_number,
+                'name' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
+                'apparatus' => trim((string) ($performance->apparatus ?? '')),
+                'score' => $performance->total !== null ? (float) $performance->total : null,
+                'place' => $poolResults[(int) $performance->athlete_id]['place'] ?? null,
+            ];
+        })->all();
+
+        $fileName = 'stream_'.$category->id.($session ? '_session_'.$session->id : '').'_results.xlsx';
+
+        return $this->downloadSpreadsheet(
+            $exporter->buildStreamReview($tournament, $category, $session, $rows),
+            $fileName,
+        );
+    }
+
     /**
      * Лёгкий опрос для автообновления Live/очереди (оценки судей без WebSocket).
      */
@@ -1809,6 +1850,7 @@ class SecretaryController extends Controller
         $category->loadMissing('tournament');
 
         $tournament = $category->tournament;
+        $poolResultsByAthlete = app(FinalProtocolService::class)->poolAthletesById($category);
         $tournamentCategories = $tournament
             ? Category::query()
                 ->where('tournament_id', $tournament->id)
@@ -1995,6 +2037,7 @@ class SecretaryController extends Controller
             'athletes' => $athletes,
             'scoreHistory' => $scoreHistory,
             'scoreHistoryByPerformance' => $scoreHistoryByPerformance,
+            'poolResultsByAthlete' => $poolResultsByAthlete,
             'historyJudgeColumns' => SecretaryLiveUi::ALL_JUDGE_SLOTS,
             'liveJudgeActions' => $liveJudgeActions,
             'queueRev' => $this->queuePing(request(), $category)->getData(true)['rev'] ?? null,

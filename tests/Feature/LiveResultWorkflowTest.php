@@ -22,6 +22,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class LiveResultWorkflowTest extends TestCase
@@ -1406,6 +1407,65 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('не меняет активный поток');
 
         $this->assertSame($first->category_id, $tournament->fresh()->active_category_id);
+    }
+
+    public function test_stream_review_shows_pool_places_and_downloads_them_to_excel(): void
+    {
+        $first = $this->performance();
+        $first->athlete->update(['last_name' => 'Лидер', 'first_name' => 'Алина']);
+        $first->update([
+            'status' => 'done',
+            'apparatus' => 'Мяч',
+            'start_number' => 11,
+            'total' => 18.75,
+            'e_score' => 8.5,
+            'a_score' => 8.0,
+            'is_counted' => true,
+        ]);
+        $secondAthlete = Athlete::create(['last_name' => 'Вторая', 'first_name' => 'Диана']);
+        Performance::create([
+            'category_id' => $first->category_id,
+            'athlete_id' => $secondAthlete->id,
+            'status' => 'done',
+            'apparatus' => 'Мяч',
+            'start_number' => 12,
+            'order_index' => 2,
+            'total' => 17.5,
+            'e_score' => 8.0,
+            'a_score' => 7.5,
+            'is_counted' => true,
+        ]);
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue.review', $first->category))
+            ->assertOk()
+            ->assertSee('Скачать Excel')
+            ->assertSee('Место в пуле 1')
+            ->assertSee('Место в пуле 2');
+
+        $this->actingAs($secretary)
+            ->get(route('secretary.queue', $first->category))
+            ->assertOk()
+            ->assertSee('Место в пуле')
+            ->assertSee('>1</div>', false)
+            ->assertSee('>2</div>', false);
+
+        $response = $this->actingAs($secretary)
+            ->get(route('secretary.queue.review.excel', $first->category));
+        $response->assertOk();
+
+        $tmp = tempnam(sys_get_temp_dir(), 'stream_review_').'.xlsx';
+        file_put_contents($tmp, $response->streamedContent());
+        $sheet = IOFactory::createReader('Xlsx')->load($tmp)->getActiveSheet();
+        $this->assertSame(['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место в пуле'], $sheet->rangeToArray('A5:E5')[0]);
+        $this->assertSame('Лидер Алина', $sheet->getCell('B6')->getValue());
+        $this->assertEqualsWithDelta(18.75, (float) $sheet->getCell('D6')->getValue(), 0.0005);
+        $this->assertSame(1, (int) $sheet->getCell('E6')->getValue());
+        $this->assertSame('Вторая Диана', $sheet->getCell('B7')->getValue());
+        $this->assertSame(2, (int) $sheet->getCell('E7')->getValue());
+        $this->assertSame('0.000', $sheet->getStyle('D6')->getNumberFormat()->getFormatCode());
+        @unlink($tmp);
     }
 
     public function test_disabled_judge_slots_are_saved_for_the_whole_tournament(): void

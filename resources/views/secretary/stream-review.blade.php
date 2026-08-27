@@ -5,10 +5,16 @@
                 <div class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Независимый просмотр</div>
                 <div class="text-lg font-semibold text-white">{{ $category->name }}</div>
             </div>
-            <a href="{{ route('secretary.tournament.live', ['tournament' => $category->tournament_id, 'category' => $category->id, 'session' => $streamSession?->id]) }}"
-               class="rounded-lg border border-emerald-700/70 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-900/50">
-                Открыть как активный Live
-            </a>
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ route('secretary.queue.review.excel', ['category' => $category->id, 'session' => $streamSession?->id]) }}"
+                   class="rounded-lg border border-sky-600/70 bg-sky-950/45 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-900/60">
+                    Скачать Excel
+                </a>
+                <a href="{{ route('secretary.tournament.live', ['tournament' => $category->tournament_id, 'category' => $category->id, 'session' => $streamSession?->id]) }}"
+                   class="rounded-lg border border-emerald-700/70 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-900/50">
+                    Открыть как активный Live
+                </a>
+            </div>
         </div>
     </x-slot>
 
@@ -57,6 +63,7 @@
                     $violating = $history['spread']['violating_slots'] ?? [];
                     $reviewDb = $performance->db_average;
                     $reviewDa = $performance->da_average;
+                    $reviewPlace = $poolResultsByAthlete[(int) $performance->athlete_id]['place'] ?? null;
                 @endphp
                 <article class="rounded-xl border {{ $performance->status === 'performing' ? 'border-orange-500/80 bg-orange-950/30' : 'border-slate-800 bg-slate-950/50' }} p-4">
                     <div class="flex flex-wrap items-start justify-between gap-3">
@@ -68,6 +75,7 @@
                             @foreach([['DB', $reviewDb], ['DA', $reviewDa], ['A', $performance->a_score], ['E', $performance->e_score], ['Сбавка', $performance->penalty], ['Итого', $performance->total]] as [$label, $value])
                                 <span class="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200">{{ $label }} {{ \App\Support\SecretaryLiveUi::formatScore($value !== null ? (float) $value : null) }}</span>
                             @endforeach
+                            <span class="rounded-md border border-violet-700/70 bg-violet-950/40 px-2 py-1 text-violet-100">Место в пуле {{ $reviewPlace ?? '—' }}</span>
                         </div>
                     </div>
                     <div class="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">

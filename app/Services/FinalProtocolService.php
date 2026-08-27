@@ -282,6 +282,18 @@ class FinalProtocolService
      */
     public function publishedAthletesById(Category $category): array
     {
+        return $this->poolAthletesById($category, true);
+    }
+
+    /**
+     * Текущие места по полному Excel-пулу категории. Для Live и просмотра
+     * потока учитываются все уже рассчитанные результаты, независимо от того,
+     * успел ли оператор табло опубликовать гимнастку.
+     *
+     * @return array<int, array{athlete_id:int, place:int, name:string, club:string, total:float, vidi:list<float>}>
+     */
+    public function poolAthletesById(Category $category, bool $publishedOnly = false): array
+    {
         $category->loadMissing('tournament');
         $tournament = $category->tournament;
         if ($tournament === null) {
@@ -293,7 +305,7 @@ class FinalProtocolService
             $tournament,
             $category->resolvedBirthYear(),
             $category->resolvedDivision(),
-            true,
+            $publishedOnly,
             $pool['athlete_ids'],
             $category->program,
         );
