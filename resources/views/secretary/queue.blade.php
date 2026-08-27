@@ -782,6 +782,7 @@
                         $historyDb = $p->db_average;
                         $historyDa = $p->da_average;
                         $historyPoolPlace = $poolResultsByAthlete[(int) $p->athlete_id]['place'] ?? null;
+                        $historyPoolPlaceOf = $poolResultsByAthlete[(int) $p->athlete_id]['place_of'] ?? null;
                     @endphp
                     <article class="rounded-xl border p-3 sm:p-4 {{ $isCurrentHistoryPerformance ? 'border-orange-600/70 bg-orange-950/30 ring-1 ring-orange-500/20' : 'border-slate-800 bg-slate-950/45' }}">
                         <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -818,8 +819,8 @@
                                         </div>
                                     @endforeach
                                     <div class="min-w-0 rounded-lg border border-violet-800/80 bg-violet-950/45 px-1.5 py-2 text-center">
-                                        <div class="truncate text-[9px] font-semibold uppercase tracking-wide text-violet-300">Место в пуле</div>
-                                        <div class="mt-0.5 truncate font-mono text-xs font-bold text-violet-100 sm:text-sm">{{ $historyPoolPlace ?? '—' }}</div>
+                                        <div class="truncate text-[9px] font-semibold uppercase tracking-wide text-violet-300">Место</div>
+                                        <div class="mt-0.5 truncate font-mono text-xs font-bold text-violet-100 sm:text-sm">{{ $historyPoolPlace !== null && $historyPoolPlaceOf !== null ? $historyPoolPlace.'/'.$historyPoolPlaceOf : '—' }}</div>
                                     </div>
                                 </div>
 

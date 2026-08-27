@@ -1679,13 +1679,14 @@ class SecretaryController extends Controller
             ->orderBy('id')
             ->get();
         $ordered = SecretaryLiveUi::orderedPerformances($performances);
-        $rows = $ordered->map(function (Performance $performance) use ($poolResults): array {
+        $rows = $ordered->map(function (Performance $performance) use ($poolResults, $ordered): array {
             return [
                 'number' => $performance->start_number,
                 'name' => trim(($performance->athlete?->last_name ?? '').' '.($performance->athlete?->first_name ?? '')),
                 'apparatus' => trim((string) ($performance->apparatus ?? '')),
                 'score' => $performance->total !== null ? (float) $performance->total : null,
                 'place' => $poolResults[(int) $performance->athlete_id]['place'] ?? null,
+                'place_of' => $poolResults[(int) $performance->athlete_id]['place_of'] ?? $ordered->unique('athlete_id')->count(),
             ];
         })->all();
 

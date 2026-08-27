@@ -45,7 +45,7 @@ class FinalProtocolExporter
     /**
      * Выгрузка текущего экрана просмотра потока.
      *
-     * @param  list<array{number:int|string|null, name:string, apparatus:string, score:?float, place:?int}>  $rows
+     * @param  list<array{number:int|string|null, name:string, apparatus:string, score:?float, place:?int, place_of:int}>  $rows
      */
     public function buildStreamReview(
         Tournament $tournament,
@@ -71,7 +71,7 @@ class FinalProtocolExporter
             ])->filter()->implode(' · ');
         $sheet->setCellValue('A3', $sessionLabel);
 
-        $headers = ['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место в пуле'];
+        $headers = ['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место'];
         foreach ($headers as $index => $header) {
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($index + 1).'5', $header);
         }
@@ -85,7 +85,7 @@ class FinalProtocolExporter
                 $sheet->setCellValue('D'.$rowNumber, round($row['score'], 3));
             }
             if ($row['place'] !== null) {
-                $sheet->setCellValue('E'.$rowNumber, $row['place']);
+                $sheet->setCellValue('E'.$rowNumber, $row['place'].'/'.$row['place_of']);
             }
             $rowNumber++;
         }

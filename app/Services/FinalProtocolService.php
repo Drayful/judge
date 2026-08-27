@@ -278,7 +278,7 @@ class FinalProtocolService
     }
 
     /**
-     * @return array<int, array{athlete_id:int, place:int, name:string, club:string, total:float, vidi:list<float>}>
+     * @return array<int, array{athlete_id:int, place:int, place_of:int, name:string, club:string, total:float, vidi:list<float>}>
      */
     public function publishedAthletesById(Category $category): array
     {
@@ -290,7 +290,7 @@ class FinalProtocolService
      * потока учитываются все уже рассчитанные результаты, независимо от того,
      * успел ли оператор табло опубликовать гимнастку.
      *
-     * @return array<int, array{athlete_id:int, place:int, name:string, club:string, total:float, vidi:list<float>}>
+     * @return array<int, array{athlete_id:int, place:int, place_of:int, name:string, club:string, total:float, vidi:list<float>}>
      */
     public function poolAthletesById(Category $category, bool $publishedOnly = false): array
     {
@@ -309,9 +309,20 @@ class FinalProtocolService
             $pool['athlete_ids'],
             $category->program,
         );
+        $poolSize = $pool['athlete_ids'] !== null
+            ? count($pool['athlete_ids'])
+            : Performance::query()
+                ->whereIn('category_id', $tournament->categories()->get()
+                    ->filter(fn (Category $candidate) => $candidate->resolvedBirthYear() === $category->resolvedBirthYear()
+                        && $candidate->resolvedDivision() === $category->resolvedDivision()
+                        && $candidate->program === $category->program)
+                    ->pluck('id'))
+                ->distinct('athlete_id')
+                ->count('athlete_id');
 
         $map = [];
         foreach ($data['rows'] as $row) {
+            $row['place_of'] = $poolSize;
             $map[$row['athlete_id']] = $row;
         }
 

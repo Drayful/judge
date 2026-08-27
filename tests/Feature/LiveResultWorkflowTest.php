@@ -1435,21 +1435,32 @@ class LiveResultWorkflowTest extends TestCase
             'a_score' => 7.5,
             'is_counted' => true,
         ]);
+        foreach (range(3, 20) as $position) {
+            $athlete = Athlete::create(['last_name' => 'Участница', 'first_name' => (string) $position]);
+            Performance::create([
+                'category_id' => $first->category_id,
+                'athlete_id' => $athlete->id,
+                'status' => 'scheduled',
+                'apparatus' => 'Мяч',
+                'start_number' => 10 + $position,
+                'order_index' => $position,
+            ]);
+        }
         $secretary = User::factory()->create(['role' => 'secretary']);
 
         $this->actingAs($secretary)
             ->get(route('secretary.queue.review', $first->category))
             ->assertOk()
             ->assertSee('Скачать Excel')
-            ->assertSee('Место в пуле 1')
-            ->assertSee('Место в пуле 2');
+            ->assertSee('Место 1/20')
+            ->assertSee('Место 2/20');
 
         $this->actingAs($secretary)
             ->get(route('secretary.queue', $first->category))
             ->assertOk()
-            ->assertSee('Место в пуле')
-            ->assertSee('>1</div>', false)
-            ->assertSee('>2</div>', false);
+            ->assertSee('Место')
+            ->assertSee('>1/20</div>', false)
+            ->assertSee('>2/20</div>', false);
 
         $response = $this->actingAs($secretary)
             ->get(route('secretary.queue.review.excel', $first->category));
@@ -1458,12 +1469,12 @@ class LiveResultWorkflowTest extends TestCase
         $tmp = tempnam(sys_get_temp_dir(), 'stream_review_').'.xlsx';
         file_put_contents($tmp, $response->streamedContent());
         $sheet = IOFactory::createReader('Xlsx')->load($tmp)->getActiveSheet();
-        $this->assertSame(['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место в пуле'], $sheet->rangeToArray('A5:E5')[0]);
+        $this->assertSame(['№', 'ФИО гимнастки', 'Предмет', 'Оценка', 'Место'], $sheet->rangeToArray('A5:E5')[0]);
         $this->assertSame('Лидер Алина', $sheet->getCell('B6')->getValue());
         $this->assertEqualsWithDelta(18.75, (float) $sheet->getCell('D6')->getValue(), 0.0005);
-        $this->assertSame(1, (int) $sheet->getCell('E6')->getValue());
+        $this->assertSame('1/20', $sheet->getCell('E6')->getValue());
         $this->assertSame('Вторая Диана', $sheet->getCell('B7')->getValue());
-        $this->assertSame(2, (int) $sheet->getCell('E7')->getValue());
+        $this->assertSame('2/20', $sheet->getCell('E7')->getValue());
         $this->assertSame('0.000', $sheet->getStyle('D6')->getNumberFormat()->getFormatCode());
         @unlink($tmp);
     }
