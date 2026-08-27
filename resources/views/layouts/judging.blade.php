@@ -125,11 +125,19 @@
         }
 
         .judge-back-button,
-        .judge-meta-chip {
+        .judge-meta-chip,
+        .judge-fullscreen-button {
             border: 1px solid rgb(255 255 255 / .08);
             background: rgb(255 255 255 / .035);
             box-shadow: inset 0 1px rgb(255 255 255 / .04);
             color: rgb(203 213 225);
+        }
+
+        .judge-fullscreen-button:hover,
+        .judge-fullscreen-button[data-fullscreen-active="1"] {
+            border-color: rgb(56 189 248 / .55);
+            background: rgb(14 116 144 / .24);
+            color: rgb(207 250 254);
         }
 
         .judge-slot-chip {
@@ -393,5 +401,43 @@
         @yield('content')
         @stack('body-scripts')
     </div>
+    <script>
+    (() => {
+        const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+        const updateFullscreenButtons = () => {
+            const active = !! fullscreenElement();
+            document.querySelectorAll('[data-judge-fullscreen]').forEach((button) => {
+                button.dataset.fullscreenActive = active ? '1' : '0';
+                button.title = active ? 'Выйти из полноэкранного режима' : 'На весь экран';
+                button.setAttribute('aria-label', button.title);
+                const label = button.querySelector('[data-fullscreen-label]');
+                if (label) label.textContent = active ? 'Выйти' : 'Весь экран';
+            });
+        };
+
+        document.addEventListener('click', async (event) => {
+            const button = event.target.closest('[data-judge-fullscreen]');
+            if (! button) return;
+            try {
+                if (fullscreenElement()) {
+                    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+                    if (exit) await exit.call(document);
+                } else {
+                    const root = document.documentElement;
+                    const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+                    if (! enter) throw new Error('fullscreen-not-supported');
+                    await enter.call(root);
+                }
+            } catch (error) {
+                button.title = 'Полноэкранный режим не поддерживается этим браузером';
+            }
+            updateFullscreenButtons();
+        });
+        document.addEventListener('fullscreenchange', updateFullscreenButtons);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenButtons);
+        window.addEventListener('judge:page-updated', updateFullscreenButtons);
+        updateFullscreenButtons();
+    })();
+    </script>
 </body>
 </html>

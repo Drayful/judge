@@ -100,17 +100,29 @@
 
         <div class="col-span-4 min-h-0 flex flex-col gap-2">
             <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-cyan-700/40 bg-[#0e3d4a] p-2 text-white">
-                <button type="button" @click="add(0.3, 'dance')" :disabled="!can('dance')" :class="can('dance') ? 'hover:brightness-110' : 'cursor-not-allowed opacity-50'" class="flex-1 min-h-0 p-1 text-left active:scale-[0.98]">
-                    <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">S выполнена</span><span class="rounded bg-black/30 px-2 py-1 font-mono" x-text="cat.dance + '/' + catMax.dance"></span></div>
-                    <div class="mt-2 text-sm text-cyan-100/80">За каждую выполненную комбинацию танцевальных шагов</div>
-                    <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dance').toFixed(2)"></div>
+                <button type="button" @click="add(0.3, 'dance')" :disabled="!can('dance')"
+                    :class="can('dance') ? 'hover:brightness-110' : 'cursor-default ring-2 ring-inset ring-emerald-300/80'"
+                    class="relative flex-1 min-h-0 overflow-hidden rounded-xl p-3 text-left active:scale-[0.98]">
+                    <span aria-hidden="true" class="absolute inset-x-0 bottom-0 bg-emerald-500/50 transition-[height] duration-300"
+                          :style="{ height: ((cat.dance / catMax.dance) * 100) + '%' }"></span>
+                    <div class="relative z-10 flex h-full flex-col justify-center">
+                        <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">S выполнена</span><span class="rounded bg-black/40 px-3 py-1 font-mono text-xl font-black" x-text="cat.dance + '/' + catMax.dance"></span></div>
+                        <div class="mt-2 text-sm text-cyan-50">За каждую выполненную комбинацию танцевальных шагов</div>
+                        <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dance').toFixed(2)"></div>
+                    </div>
                 </button>
             </div>
             <div class="flex-1 min-h-0 flex flex-col rounded-2xl border border-amber-700/40 bg-[#7a4a1f] p-2 text-white">
-                <button type="button" @click="add(0.3, 'dynamic')" :disabled="!can('dynamic')" :class="can('dynamic') ? 'hover:brightness-110' : 'cursor-not-allowed opacity-50'" class="flex-1 min-h-0 p-1 text-left active:scale-[0.98]">
-                    <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">Дин./эффект выполнен</span><span class="rounded bg-black/30 px-2 py-1 font-mono" x-text="cat.dynamic + '/' + catMax.dynamic"></span></div>
-                    <div class="mt-2 text-sm text-amber-100/80">За каждое выполненное динамическое изменение или эффект</div>
-                    <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dynamic').toFixed(2)"></div>
+                <button type="button" @click="add(0.3, 'dynamic')" :disabled="!can('dynamic')"
+                    :class="can('dynamic') ? 'hover:brightness-110' : 'cursor-default ring-2 ring-inset ring-emerald-300/80'"
+                    class="relative flex-1 min-h-0 overflow-hidden rounded-xl p-3 text-left active:scale-[0.98]">
+                    <span aria-hidden="true" class="absolute inset-x-0 bottom-0 bg-emerald-500/50 transition-[height] duration-300"
+                          :style="{ height: ((cat.dynamic / catMax.dynamic) * 100) + '%' }"></span>
+                    <div class="relative z-10 flex h-full flex-col justify-center">
+                        <div class="flex items-center justify-between"><span class="text-3xl font-extrabold">Дин./эффект выполнен</span><span class="rounded bg-black/40 px-3 py-1 font-mono text-xl font-black" x-text="cat.dynamic + '/' + catMax.dynamic"></span></div>
+                        <div class="mt-2 text-sm text-amber-50">За каждое выполненное динамическое изменение или эффект</div>
+                        <div class="mt-2 text-xl font-bold" x-text="'Остаток сбавки: −' + blockPenalty('dynamic').toFixed(2)"></div>
+                    </div>
                 </button>
             </div>
         </div>
@@ -197,9 +209,14 @@
             <div class="mb-1 flex items-center justify-between text-[9px] uppercase tracking-wider text-slate-400"><span>Полная история сбавок</span><span x-text="actions.length + ' действий'"></span></div>
             <div class="flex gap-1 overflow-x-auto pb-1">
                 <template x-for="(a, i) in actions.slice().reverse()" :key="i">
-                    <div class="shrink-0 max-w-44 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-[10px] text-slate-100">
+                    <button type="button" data-selectable-score-history @click="toggleActionSelection(a)"
+                        :data-selected-score="isActionSelected(a) ? 'true' : 'false'"
+                        class="min-h-10 shrink-0 max-w-56 rounded-md border px-3 py-2 text-sm text-slate-100 transition active:scale-[0.98]"
+                        :class="['border-slate-700 bg-slate-800/70', historySelectionClass(a)]"
+                        :aria-pressed="isActionSelected(a) ? 'true' : 'false'"
+                        aria-label="Выбрать оценку для удаления">
                         <span class="font-mono font-bold" x-text="(a.combo ? '+' : '−') + Number(a.v).toFixed(2)"></span><span class="ml-1 text-slate-400" x-text="a.label || 'Без категории'"></span>
-                    </div>
+                    </button>
                 </template>
                 <div x-show="actions.length === 0" class="text-[10px] text-slate-600">Сбавок пока нет</div>
             </div>

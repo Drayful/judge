@@ -266,6 +266,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/scoreboard-judge', [ScoreboardJudgeController::class, 'index'])
         ->middleware('role:scoreboard_judge,admin,super_admin')
         ->name('scoreboard-judge.index');
+    Route::get('/scoreboard-judge/live', [ScoreboardJudgeController::class, 'live'])
+        ->middleware('role:scoreboard_judge,admin,super_admin')
+        ->name('scoreboard-judge.live');
     Route::post('/scoreboard-judge/performances/{performance}/accept', [ScoreboardJudgeController::class, 'accept'])
         ->middleware('role:scoreboard_judge,admin,super_admin')
         ->name('scoreboard-judge.accept');

@@ -11,7 +11,7 @@ class ScoreboardUi
 {
     private const PLACE_PRECISION = 3;
 
-    public const RESULT_HOLD_SECONDS = 30;
+    public const RESULT_HOLD_SECONDS = 60;
 
     /**
      * @return array<string, string>

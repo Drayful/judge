@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Models\Entry;
 use App\Models\Performance;
 use App\Models\Tournament;
 use App\Support\CompetitionPool;
@@ -28,13 +29,14 @@ class FinalProtocolService
     /**
      * Доступные группы протоколов в турнире: по (год, категория).
      *
-     * @return Collection<int, array{birth_year:?int, division:?string, key:string, label:string, athletes:int}>
+     * @return Collection<int, array{program:string, birth_year:?int, division:?string, group_sheet:?string, key:string, label:string, athletes:int}>
      */
     public function groups(Tournament $tournament): Collection
     {
         $categories = $tournament->categories()->get();
 
-        return $categories
+        $individual = $categories
+            ->where('program', '!=', 'group')
             ->groupBy(fn (Category $c) => $this->key($c->resolvedBirthYear(), $c->resolvedDivision()))
             ->map(function (Collection $cats) {
                 /** @var Category $first */
@@ -51,18 +53,198 @@ class FinalProtocolService
                     ->count('athlete_id');
 
                 return [
+                    'program' => 'individual',
                     'birth_year' => $year,
                     'division' => $division,
-                    'key' => $this->key($year, $division),
+                    'group_sheet' => null,
+                    'key' => 'individual|'.$this->key($year, $division),
                     'label' => $this->label($year, $division),
                     'athletes' => $athletes,
                 ];
+            });
+
+        $groupEntries = Entry::query()
+            ->with('athlete.members')
+            ->where('tournament_id', $tournament->id)
+            ->where('program', 'group')
+            ->get();
+        $completedTeamIds = Performance::query()
+            ->whereIn('category_id', $categories->where('program', 'group')->pluck('id'))
+            ->whereNotNull('total')
+            ->where('is_counted', true)
+            ->whereNull('withdrawn_at')
+            ->pluck('athlete_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique();
+
+        $group = $groupEntries
+            ->groupBy(function (Entry $entry): string {
+                $sheet = $entry->importSheet();
+
+                return $sheet !== null
+                    ? 'sheet|'.$sheet
+                    : 'fallback|'.$this->key($entry->birth_year, $entry->division);
             })
+            ->map(function (Collection $entries, string $key) use ($completedTeamIds) {
+                /** @var Entry $first */
+                $first = $entries->first();
+                $sheet = $first->importSheet();
+                $years = $entries
+                    ->flatMap(function (Entry $entry) {
+                        $memberYears = $entry->athlete?->members
+                            ?->map(fn ($member) => $member->birthdate?->year)
+                            ->filter()
+                            ->values() ?? collect();
+
+                        return $memberYears->isNotEmpty() ? $memberYears : collect([$entry->birth_year])->filter();
+                    })
+                    ->map(fn ($year) => (int) $year)
+                    ->unique()
+                    ->sort()
+                    ->values();
+                $teamIds = $entries->pluck('athlete_id')->map(fn ($id) => (int) $id)->unique();
+
+                return [
+                    'program' => 'group',
+                    'birth_year' => $sheet === null ? $first->birth_year : null,
+                    'division' => $sheet === null ? $first->division : null,
+                    'group_sheet' => $sheet,
+                    'key' => 'group|'.$key,
+                    'label' => $this->groupLabel($years, $sheet),
+                    'athletes' => $teamIds->intersect($completedTeamIds)->count(),
+                ];
+            });
+
+        return $individual
+            ->concat($group)
             ->sortBy([
+                fn ($a, $b) => ($a['program'] === 'individual' ? 0 : 1) <=> ($b['program'] === 'individual' ? 0 : 1),
                 fn ($a, $b) => ($a['birth_year'] ?? 0) <=> ($b['birth_year'] ?? 0),
-                fn ($a, $b) => (string) ($a['division'] ?? '') <=> (string) ($b['division'] ?? ''),
+                fn ($a, $b) => (string) $a['label'] <=> (string) $b['label'],
             ])
             ->values();
+    }
+
+    /**
+     * Групповой итоговый протокол: одна рейтинговая строка на команду и ростер
+     * участниц под ней. Импортированный Excel-лист образует единый пул, даже если
+     * команды были разнесены по нескольким системным группам и потокам.
+     *
+     * @return array{title:string, program:string, birth_year:?int, division:?string, group_sheet:?string, max_vidi:int, rows:list<array{athlete_id:int, place:?int, status:string, name:string, club:string, members:list<array{name:string, year:?int}>, vidi:list<?float>, total:float}>}
+     */
+    public function buildTeams(
+        Tournament $tournament,
+        ?int $birthYear,
+        ?string $division,
+        ?string $groupSheet = null,
+    ): array {
+        $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
+        $groupSheet = $groupSheet !== null && trim($groupSheet) !== '' ? trim($groupSheet) : null;
+
+        $entries = Entry::query()
+            ->with('athlete.members')
+            ->where('tournament_id', $tournament->id)
+            ->where('program', 'group')
+            ->get()
+            ->filter(function (Entry $entry) use ($birthYear, $division, $groupSheet): bool {
+                if ($groupSheet !== null) {
+                    return $entry->importSheet() === $groupSheet;
+                }
+
+                return $entry->birth_year === $birthYear
+                    && $this->normalizedDivision($entry->division) === $division;
+            })
+            ->values();
+
+        $teamIds = $entries->pluck('athlete_id')->map(fn ($id) => (int) $id)->unique()->values();
+        $categories = $tournament->categories()->where('program', 'group')->get();
+        if ($teamIds->isEmpty() && $groupSheet === null) {
+            $categories = $categories->filter(
+                fn (Category $category) => $category->resolvedBirthYear() === $birthYear
+                    && $category->resolvedDivision() === $division
+            );
+            $teamIds = Performance::query()
+                ->whereIn('category_id', $categories->pluck('id'))
+                ->pluck('athlete_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values();
+        }
+
+        $performances = Performance::query()
+            ->with('athlete.members')
+            ->whereIn('category_id', $categories->pluck('id'))
+            ->whereIn('athlete_id', $teamIds)
+            ->whereNotNull('total')
+            ->where('is_counted', true)
+            ->whereNull('withdrawn_at')
+            ->orderBy('order_index')
+            ->orderBy('id')
+            ->get();
+
+        $apparatus = $performances
+            ->pluck('apparatus')
+            ->map(fn ($label) => trim((string) $label))
+            ->filter()
+            ->unique()
+            ->values();
+        $entryByAthlete = $entries->keyBy('athlete_id');
+        $rows = [];
+
+        foreach ($performances->groupBy('athlete_id') as $athleteId => $perfs) {
+            /** @var Performance $firstPerformance */
+            $firstPerformance = $perfs->first();
+            $team = $firstPerformance->athlete;
+            if ($team === null) {
+                continue;
+            }
+
+            $scoresByApparatus = $perfs->keyBy(fn (Performance $performance) => trim((string) $performance->apparatus));
+            $vidi = $apparatus->map(function (string $label) use ($scoresByApparatus): ?float {
+                $performance = $scoresByApparatus->get($label);
+
+                return $performance !== null ? round((float) $performance->total, 3) : null;
+            })->all();
+            $entry = $entryByAthlete->get((int) $athleteId);
+            $members = $team->members->map(fn ($member) => [
+                'name' => trim(($member->last_name ?? '').' '.($member->first_name ?? '')),
+                'year' => $member->birthdate?->year,
+            ])->values()->all();
+
+            $rows[] = [
+                'athlete_id' => (int) $athleteId,
+                'name' => $this->teamName($team->last_name, $team->first_name),
+                'year' => null,
+                'club' => trim((string) ($team->club ?: $entry?->club ?: '')),
+                'members' => $members,
+                'vidi' => $vidi,
+                'total' => round(array_sum(array_filter($vidi, fn ($score) => $score !== null)), 3),
+                '_e_tiebreak' => round($perfs->sum(fn (Performance $performance) => (float) ($performance->e_score ?? 0)), 3),
+                '_a_tiebreak' => round($perfs->sum(fn (Performance $performance) => (float) ($performance->a_score ?? 0)), 3),
+            ];
+        }
+
+        $this->sortAndAssignPlaces($rows, 'total');
+        $years = collect($rows)
+            ->flatMap(fn (array $row) => collect($row['members'])->pluck('year'))
+            ->filter()
+            ->map(fn ($year) => (int) $year)
+            ->unique()
+            ->sort()
+            ->values();
+        if ($years->isEmpty()) {
+            $years = $entries->pluck('birth_year')->filter()->map(fn ($year) => (int) $year)->unique()->sort()->values();
+        }
+
+        return [
+            'title' => $this->groupProtocolTitle($years),
+            'program' => 'group',
+            'birth_year' => $birthYear,
+            'division' => $division,
+            'group_sheet' => $groupSheet,
+            'max_vidi' => max(1, $apparatus->count()),
+            'rows' => $rows,
+        ];
     }
 
     /**
@@ -73,6 +255,16 @@ class FinalProtocolService
     public function build(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly = false): array
     {
         return $this->buildGroup($tournament, $birthYear, $division, $publishedOnly);
+    }
+
+    /**
+     * Итоговый протокол с явным разделением личной и групповой программы.
+     *
+     * @return array{title:string, birth_year:?int, division:?string, max_vidi:int, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, vidi:list<float>, total:float}>}
+     */
+    public function buildForProgram(Tournament $tournament, ?int $birthYear, ?string $division, string $program): array
+    {
+        return $this->buildGroup($tournament, $birthYear, $division, false, null, $program);
     }
 
     /**
@@ -103,6 +295,7 @@ class FinalProtocolService
             $category->resolvedDivision(),
             true,
             $pool['athlete_ids'],
+            $category->program,
         );
 
         $map = [];
@@ -122,12 +315,14 @@ class FinalProtocolService
         ?string $division,
         bool $publishedOnly,
         ?array $athleteIds = null,
+        ?string $program = null,
     ): array {
         $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
 
         $categories = $tournament->categories()->get()->filter(
             fn (Category $c) => $c->resolvedBirthYear() === $birthYear
                 && $c->resolvedDivision() === $division
+                && ($program === null || $c->program === $program)
         );
 
         $performances = Performance::query()
@@ -191,13 +386,19 @@ class FinalProtocolService
      *
      * @return array{title:string, birth_year:?int, division:?string, apparatus:list<array{label:string, rows:list<array{athlete_id:int, place:int, name:string, year:?int, club:string, score:float}>}>}
      */
-    public function buildByApparatus(Tournament $tournament, ?int $birthYear, ?string $division, bool $publishedOnly = false): array
-    {
+    public function buildByApparatus(
+        Tournament $tournament,
+        ?int $birthYear,
+        ?string $division,
+        bool $publishedOnly = false,
+        ?string $program = null,
+    ): array {
         $division = $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
 
         $categories = $tournament->categories()->get()->filter(
             fn (Category $c) => $c->resolvedBirthYear() === $birthYear
                 && $c->resolvedDivision() === $division
+                && ($program === null || $c->program === $program)
         );
 
         $performances = Performance::query()
@@ -336,5 +537,44 @@ class FinalProtocolService
         $divPart = $division ? ' — категория '.$division : '';
 
         return $yearPart.$divPart;
+    }
+
+    private function normalizedDivision(?string $division): ?string
+    {
+        return $division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null;
+    }
+
+    private function teamName(?string $lastName, ?string $firstName): string
+    {
+        $firstName = trim((string) $firstName);
+        if ($firstName === '—' || $firstName === '-') {
+            $firstName = '';
+        }
+
+        return trim(trim((string) $lastName).' '.$firstName);
+    }
+
+    /** @param  Collection<int, int>  $years */
+    private function groupProtocolTitle(Collection $years): string
+    {
+        if ($years->isEmpty()) {
+            return 'Групповые';
+        }
+
+        $from = (int) $years->min();
+        $to = (int) $years->max();
+        $range = $from === $to ? (string) $from : $from.'-'.$to;
+
+        return $range.' г.р. Групповые';
+    }
+
+    /** @param  Collection<int, int>  $years */
+    private function groupLabel(Collection $years, ?string $sheet): string
+    {
+        if ($years->isNotEmpty()) {
+            return $this->groupProtocolTitle($years);
+        }
+
+        return $sheet !== null ? $sheet : 'Групповые';
     }
 }

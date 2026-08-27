@@ -34,10 +34,15 @@
         <div class="mt-1 text-xs text-slate-500">{{ $slot }}: финал E = {{ number_format((float) $base, 2, '.', '') }} − сбавка</div>
         <div class="text-3xl md:text-4xl font-extrabold leading-none text-emerald-300 font-mono tabular-nums" x-text="finalScore().toFixed(2)"></div>
 
-        <div class="mt-2 w-full grid grid-cols-6 gap-1">
-            <template x-for="(a, i) in actions.slice(0, 12)" :key="i">
-                <div class="rounded-md bg-rose-900/40 border border-rose-800/40 text-rose-50 text-[11px] font-mono tabular-nums text-center py-0.5"
-                     x-text="'-' + Number(a.v).toFixed(2)"></div>
+        <div class="mt-2 grid max-h-32 w-full grid-cols-6 gap-1 overflow-y-auto p-1">
+            <template x-for="(a, i) in actions" :key="i">
+                <button type="button" data-selectable-score-history @click="toggleActionSelection(a)"
+                     :data-selected-score="isActionSelected(a) ? 'true' : 'false'"
+                     class="min-h-10 rounded-md border px-1 py-1 text-center font-mono text-sm font-bold tabular-nums transition active:scale-[0.98]"
+                     :class="['bg-rose-900/40 border-rose-800/40 text-rose-50', historySelectionClass(a)]"
+                     :aria-pressed="isActionSelected(a) ? 'true' : 'false'"
+                     aria-label="Выбрать оценку для удаления"
+                     x-text="'-' + Number(a.v).toFixed(2)"></button>
             </template>
             <div x-show="actions.length === 0" class="col-span-6 text-center text-[10px] text-slate-600">История пуста</div>
         </div>
@@ -46,7 +51,7 @@
     @include('judge.partials._tablet_center_logo')
 
     <button type="button" @click="submit()" :disabled="busy"
-        class="judge-submit-button shrink-0 rounded-2xl disabled:opacity-50 disabled:cursor-wait border py-3 text-lg font-bold text-white active:scale-[0.99]">
+        class="judge-submit-button min-h-20 shrink-0 rounded-2xl border py-5 text-2xl font-black tracking-wide text-white active:scale-[0.99] disabled:cursor-wait disabled:opacity-50 md:text-3xl">
         ОТПРАВИТЬ
     </button>
 </div>

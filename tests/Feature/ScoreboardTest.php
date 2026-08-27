@@ -623,7 +623,70 @@ class ScoreboardTest extends TestCase
             ->assertSeeInOrder(['Оценка Ранняя', 'Оценка Поздняя']);
     }
 
-    public function test_operator_selected_result_is_shown_for_thirty_seconds_without_following_live_queue(): void
+    public function test_operator_filters_queue_by_selected_tournament_and_receives_live_updates(): void
+    {
+        $selectedTournament = Tournament::create(['name' => 'Selected Cup']);
+        $selectedCategory = Category::create(['tournament_id' => $selectedTournament->id, 'name' => 'Selected Stream']);
+        $otherTournament = Tournament::create(['name' => 'Other Cup']);
+        $otherCategory = Category::create(['tournament_id' => $otherTournament->id, 'name' => 'Other Stream']);
+        $selectedAthlete = Athlete::create(['first_name' => 'Новая', 'last_name' => 'Выбранная']);
+        $otherAthlete = Athlete::create(['first_name' => 'Чужая', 'last_name' => 'Оценка']);
+        $operator = User::factory()->create(['role' => 'scoreboard_judge']);
+
+        Performance::create([
+            'category_id' => $otherCategory->id,
+            'athlete_id' => $otherAthlete->id,
+            'status' => 'done',
+            'total' => 20,
+            'approved_at' => now(),
+        ]);
+
+        $this->actingAs($operator)
+            ->get(route('scoreboard-judge.index', ['tournament' => $selectedTournament->id]))
+            ->assertOk()
+            ->assertSee('Турнир для табло')
+            ->assertSee('Selected Cup')
+            ->assertDontSee('Оценка Чужая')
+            ->assertSee('обновление автоматически');
+
+        $initialRevision = $this->actingAs($operator)
+            ->getJson(route('scoreboard-judge.live', ['tournament' => $selectedTournament->id]))
+            ->assertOk()
+            ->assertJsonPath('pending_count', 0)
+            ->json('rev');
+
+        $selectedPerformance = Performance::create([
+            'category_id' => $selectedCategory->id,
+            'athlete_id' => $selectedAthlete->id,
+            'status' => 'done',
+            'total' => 21,
+            'approved_at' => now(),
+        ]);
+
+        $live = $this->actingAs($operator)
+            ->getJson(route('scoreboard-judge.live', ['tournament' => $selectedTournament->id]))
+            ->assertOk()
+            ->assertJsonPath('pending_count', 1);
+        $this->assertNotSame($initialRevision, $live->json('rev'));
+        $this->assertStringContainsString('Выбранная Новая', $live->json('html'));
+        $this->assertStringNotContainsString('Оценка Чужая', $live->json('html'));
+
+        $this->actingAs($operator)
+            ->postJson(route('scoreboard-judge.accept', $selectedPerformance), [
+                'tournament_id' => $selectedTournament->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+        $this->assertNotNull($selectedPerformance->fresh()->scoreboard_accepted_at);
+
+        $afterAccept = $this->actingAs($operator)
+            ->getJson(route('scoreboard-judge.live', ['tournament' => $selectedTournament->id]))
+            ->assertOk()
+            ->assertJsonPath('pending_count', 0);
+        $this->assertStringContainsString('Показать ещё раз', $afterAccept->json('html'));
+    }
+
+    public function test_operator_selected_result_is_shown_for_one_minute_without_following_live_queue(): void
     {
         Carbon::setTestNow('2026-08-24 12:00:00');
         $tournament = Tournament::create(['name' => 'Cup', 'is_published' => true]);
@@ -662,13 +725,13 @@ class ScoreboardTest extends TestCase
             'status' => 'performing',
         ]);
 
-        Carbon::setTestNow(now()->addSeconds(13));
+        Carbon::setTestNow(now()->addSeconds(59));
         $this->getJson(route('scoreboard.performance.live', $activeCategory))
             ->assertOk()
             ->assertJsonPath('performance.athlete', 'Оценка Показанная')
             ->assertJsonPath('performance.score_visible', true);
 
-        Carbon::setTestNow(now()->addSeconds(18));
+        Carbon::setTestNow(now()->addSeconds(2));
         $this->getJson(route('scoreboard.performance.live', $activeCategory))
             ->assertOk()
             ->assertJsonPath('phase', 'empty')

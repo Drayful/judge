@@ -97,13 +97,20 @@
             </button>
         </div>
 
-        <div class="mt-2 w-full grid grid-cols-3 gap-1 max-h-24 overflow-y-auto">
-            <template x-for="(a, i) in actions.slice(0, 15)" :key="i">
-                <div class="rounded-md border text-[10px] text-center py-0.5 px-1 truncate"
-                     :class="a.notDone
-                        ? 'bg-rose-900/40 border-rose-800/50 text-rose-100'
-                        : (isCounted(i) ? 'bg-indigo-900/40 border-indigo-800/40 text-indigo-50' : 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through')"
-                     x-text="daHistoryLabel(a)"></div>
+        <div class="mt-2 w-full grid max-h-32 grid-cols-3 gap-1 overflow-y-auto p-1">
+            <template x-for="(a, i) in actions" :key="i">
+                <button type="button" data-selectable-score-history @click="toggleActionSelection(a)"
+                     :data-selected-score="isActionSelected(a) ? 'true' : 'false'"
+                     class="min-h-10 truncate rounded-md border px-2 py-1 text-center text-sm font-bold transition active:scale-[0.98]"
+                     :class="[
+                        a.notDone
+                            ? 'bg-rose-900/40 border-rose-800/50 text-rose-100'
+                            : (isCounted(i) ? 'bg-indigo-900/40 border-indigo-800/40 text-indigo-50' : 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through'),
+                        historySelectionClass(a)
+                     ]"
+                     :aria-pressed="isActionSelected(a) ? 'true' : 'false'"
+                     aria-label="Выбрать оценку для удаления"
+                     x-text="daHistoryLabel(a)"></button>
             </template>
             <div x-show="actions.length === 0" class="col-span-3 text-center text-[10px] text-slate-600">История пуста</div>
         </div>

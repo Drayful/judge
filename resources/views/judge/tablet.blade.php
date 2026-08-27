@@ -76,6 +76,12 @@
                         <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-200">Ответственный</span>
                     </div>
                 @endif
+                <button type="button" data-judge-fullscreen
+                    class="judge-fullscreen-button flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 font-semibold text-slate-200 active:scale-[0.98]"
+                    aria-label="Переключить полноэкранный режим" title="На весь экран">
+                    <span class="text-xl leading-none" aria-hidden="true">⛶</span>
+                    <span data-fullscreen-label class="text-[10px] uppercase tracking-wider">Весь экран</span>
+                </button>
                 <div class="judge-meta-chip judge-slot-chip rounded-xl px-3 h-10 flex items-center">
                     <span class="text-[9px] uppercase tracking-wider text-slate-400 mr-2">Панель</span>
                     <span class="text-base font-mono font-bold">{{ $slot ?? '—' }}</span>
@@ -253,6 +259,7 @@
                 page: 1,
                 draft: 0,
                 actions: [],                 // [{v, cat, label}] или [{v, symbol, label, notDone}]
+                selectedAction: null,        // запись истории, выбранная для точечного удаления
                 busy: false,
                 error: null,
                 timerBusy: false,
@@ -537,6 +544,7 @@
                 /** Восстановить историю нажатий после возврата на доработку. */
                 restoreFromEntries(entries) {
                     this.actions = [];
+                    this.selectedAction = null;
                     this.resetCats();
                     const reverseLogicV2 = entries.some(e => Number(e.logicVersion || 0) >= 2);
                     const legacyOneTimePenalties = new Set();
@@ -868,13 +876,14 @@
 
                     for (let i = this.actions.length - 1; i >= 0; i--) {
                         const a = this.actions[i];
-                        if (a.notDone) continue;
                         if (a.symbol === 'R') {
                             // В групповых упражнениях риск всегда идёт в зачёт и
                             // не занимает слот DB/DE.
                             risks += 1;
-                            counted.add(i);
-                            total += a.v;
+                            if (! a.notDone) {
+                                counted.add(i);
+                                total += a.v;
+                            }
                             continue;
                         }
 
@@ -888,8 +897,12 @@
                         if (ex === 'db') dbUsed += 1;
                         if (ex === 'de') deUsed += 1;
                         used += 1;
-                        counted.add(i);
-                        total += a.v;
+                        // «Не сделано» остаётся нулевой оценкой, но выбранный тип
+                        // закрывает соответствующую статистику/минимум бригады.
+                        if (! a.notDone) {
+                            counted.add(i);
+                            total += a.v;
+                        }
                     }
 
                     return {
@@ -968,6 +981,9 @@
                         if (a.notDone) {
                             if (used < lim.elementsMax) {
                                 used += 1;
+                                if (sym === 'CC') cc += 1;
+                                else if (sym === 'CR') cr += 1;
+                                else if (this.isDcMulti(sym)) multi += 1;
                             }
                             continue;
                         }
@@ -1091,8 +1107,47 @@
                     this._hintT = setTimeout(() => { if (this.error === msg) this.error = null; }, 1600);
                 },
 
-                /** «ОТМЕНА» — удаляет последнее действие (или снимает выбор символа/акробатики). */
+                toggleActionSelection(action) {
+                    this.selectedAction = this.selectedAction === action ? null : action;
+                },
+
+                isActionSelected(action) {
+                    return this.selectedAction === action;
+                },
+
+                historySelectionClass(action) {
+                    return this.isActionSelected(action)
+                        ? '!bg-red-600 !border-red-200 !text-white ring-4 ring-red-500/70 shadow-lg shadow-red-950/70'
+                        : '';
+                },
+
+                removeAction(action) {
+                    const index = this.actions.indexOf(action);
+                    if (index < 0) {
+                        this.selectedAction = null;
+                        return false;
+                    }
+
+                    const [removed] = this.actions.splice(index, 1);
+                    this.selectedAction = null;
+                    if (removed.cat && this.cat[removed.cat] !== undefined) {
+                        this.cat[removed.cat] = Math.max(0, this.cat[removed.cat] - 1);
+                    }
+                    // D пересчитывается из истории. Для A/E и штрафов сохраняем
+                    // прежний способ уменьшения черновой суммы.
+                    if (removed.inTotal) {
+                        this.draft = this.round3(this.draft - removed.v);
+                        if (this.draft < 0) this.draft = 0;
+                    }
+
+                    return true;
+                },
+
+                /** «ОТМЕНА» — удаляет выбранное действие, иначе сохраняет прежнюю отмену последнего. */
                 cancel() {
+                    if (this.selectedAction && this.removeAction(this.selectedAction)) {
+                        return;
+                    }
                     // DB: символ выбран, но значение не присвоено — снимаем выбор.
                     if (this.symbolFlow && this.pendingSymbol) {
                         this.pendingSymbol = null;
@@ -1108,21 +1163,14 @@
                         return;
                     }
                     if (this.actions.length === 0) return;
-                    const last = this.actions.shift();
-                    if (last.cat && this.cat[last.cat] !== undefined) {
-                        this.cat[last.cat] = Math.max(0, this.cat[last.cat] - 1);
-                    }
-                    // Вычитаем из суммы только то, что в неё попадало (для D итог считается из истории).
-                    if (last.inTotal) {
-                        this.draft = this.round3(this.draft - last.v);
-                        if (this.draft < 0) this.draft = 0;
-                    }
+                    this.removeAction(this.actions[0]);
                 },
 
                 /** Полный сброс (вешается на отдельную «X (0.0)» кнопку). */
                 clearAll() {
                     this.draft = 0;
                     this.actions = [];
+                    this.selectedAction = null;
                     this.resetCats();
                     this.acroPending = false;
                     this.pendingDc = null;

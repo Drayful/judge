@@ -196,15 +196,43 @@ class SecretaryController extends Controller
         $data = $request->validate([
             'birth_year' => ['nullable', 'integer'],
             'division' => ['nullable', 'string', 'max:16'],
+            'program' => ['nullable', 'string', 'in:individual,group'],
+            'group_sheet' => ['nullable', 'string', 'max:255'],
             'mode' => ['nullable', 'string', 'in:all_around,by_apparatus'],
         ]);
 
         $birthYear = isset($data['birth_year']) ? (int) $data['birth_year'] : null;
         $division = $data['division'] ?? null;
+        $program = $data['program'] ?? null;
+        $groupSheet = isset($data['group_sheet']) && trim($data['group_sheet']) !== ''
+            ? trim($data['group_sheet'])
+            : null;
         $mode = $data['mode'] ?? 'all_around';
 
-        if ($mode === 'by_apparatus') {
-            $built = $protocols->buildByApparatus($tournament, $birthYear, $division);
+        if ($groupSheet !== null) {
+            $program = 'group';
+        }
+        if ($program === null) {
+            $matchingPrograms = $tournament->categories()->get()
+                ->filter(fn (Category $category) => $category->resolvedBirthYear() === $birthYear
+                    && $category->resolvedDivision() === ($division !== null && trim($division) !== '' ? strtoupper(trim($division)) : null))
+                ->pluck('program')
+                ->unique()
+                ->values();
+            if ($matchingPrograms->count() === 1) {
+                $program = $matchingPrograms->first();
+            }
+        }
+
+        if ($program === 'group') {
+            $built = $protocols->buildTeams($tournament, $birthYear, $division, $groupSheet);
+            if ($built['rows'] === []) {
+                abort(404, 'Нет завершённых результатов команд для этого группового протокола.');
+            }
+            $spreadsheet = $exporter->buildTeams($tournament, $built);
+            $suffix = '_group';
+        } elseif ($mode === 'by_apparatus') {
+            $built = $protocols->buildByApparatus($tournament, $birthYear, $division, false, 'individual');
             $hasRows = collect($built['apparatus'])->contains(fn ($a) => $a['rows'] !== []);
             if (! $hasRows) {
                 abort(404, 'Нет завершённых результатов по видам для этой категории.');
@@ -212,7 +240,9 @@ class SecretaryController extends Controller
             $spreadsheet = $exporter->buildByApparatus($tournament, $built);
             $suffix = '_vidy';
         } else {
-            $built = $protocols->build($tournament, $birthYear, $division);
+            $built = $program === 'individual'
+                ? $protocols->buildForProgram($tournament, $birthYear, $division, 'individual')
+                : $protocols->build($tournament, $birthYear, $division);
             if ($built['rows'] === []) {
                 abort(404, 'Нет завершённых результатов для этой категории.');
             }

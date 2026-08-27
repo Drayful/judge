@@ -291,7 +291,17 @@ class LiveResultWorkflowTest extends TestCase
             ->assertOk()
             ->assertSee('Риски всегда в зачёте')
             ->assertSee('junior: { elements: 6, dbMax: 3, deMax: 3, dbMin: 0, deMin: 3 }', false)
-            ->assertSee('senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4 }', false);
+            ->assertSee('senior: { elements: 9, dbMax: 5, deMax: 5, dbMin: 4, deMin: 4 }', false)
+            ->assertSee('if (! a.notDone)', false);
+
+        $daJudge = User::factory()->create(['role' => 'judge_d_da', 'slot' => 'DA1']);
+        $this->actingAs($daJudge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('DC:')
+            ->assertSee("if (sym === 'CC') cc += 1;", false)
+            ->assertSee("else if (sym === 'CR') cr += 1;", false)
+            ->assertSee('else if (this.isDcMulti(sym)) multi += 1;', false);
     }
 
     public function test_individual_db_risks_do_not_use_regular_element_slots(): void
@@ -348,16 +358,21 @@ class LiveResultWorkflowTest extends TestCase
         $this->actingAs($eJudge)
             ->get(route('judge.tournament.tablet', $tournament))
             ->assertOk()
+            ->assertSee('data-judge-fullscreen', false)
+            ->assertSee('Весь экран')
             ->assertSee('data-e-large-athlete-name', false)
             ->assertSee('data-e-large-controls', false)
-            ->assertSee('text-7xl md:text-8xl xl:text-9xl', false);
+            ->assertSee('text-7xl md:text-8xl xl:text-9xl', false)
+            ->assertSee('min-h-20', false);
 
         $aJudge = User::query()->where('role', 'judge_a')->firstOrFail();
         $this->actingAs($aJudge)
             ->get(route('judge.tournament.tablet', $tournament))
             ->assertOk()
             ->assertDontSee('data-e-large-athlete-name', false)
-            ->assertDontSee('data-e-large-controls', false);
+            ->assertDontSee('data-e-large-controls', false)
+            ->assertSee('height: ((cat.dance / catMax.dance) * 100)', false)
+            ->assertSee('height: ((cat.dynamic / catMax.dynamic) * 100)', false);
     }
 
     public function test_individual_a_tablet_contains_every_fig_artistry_penalty(): void
@@ -1576,6 +1591,32 @@ class LiveResultWorkflowTest extends TestCase
             ->assertSee('acro: isAcro', false)
             ->assertSee("label: isAcro ? 'Акробатика' : 'Элемент'", false)
             ->assertSee("acroPending ? 'акробатика не сделана · 0' : 'элемент не сделан · 0'", false);
+    }
+
+    public function test_judge_can_select_a_specific_history_entry_for_removal_and_db_stops_at_two_points(): void
+    {
+        $performance = $this->performance();
+        $tournament = $performance->category->tournament;
+        $tournament->update(['active_category_id' => $performance->category_id]);
+        $judge = User::factory()->create(['role' => 'judge_d_db', 'slot' => 'DB1']);
+
+        $this->actingAs($judge)
+            ->get(route('judge.tournament.tablet', $tournament))
+            ->assertOk()
+            ->assertSee('data-db-score-limit="2.0"', false)
+            ->assertSee('data-selectable-score-history', false)
+            ->assertSee('x-for="(a, i) in actions"', false)
+            ->assertSee('toggleActionSelection(a)', false)
+            ->assertSee('historySelectionClass(a)', false)
+            ->assertSee('!bg-red-600', false)
+            ->assertSee('this.removeAction(this.actions[0])', false)
+            ->assertDontSee('assignValue(2.1)', false)
+            ->assertDontSee('assignValue(2.5)', false);
+
+        foreach (['_tablet_a', '_tablet_da', '_tablet_da_group', '_tablet_d_group', '_tablet_e'] as $partial) {
+            $markup = file_get_contents(resource_path("views/judge/partials/{$partial}.blade.php"));
+            $this->assertStringContainsString('data-selectable-score-history', $markup);
+        }
     }
 
     public function test_secretary_can_return_to_previous_participant_without_reordering_queue(): void

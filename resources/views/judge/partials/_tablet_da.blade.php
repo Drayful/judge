@@ -91,18 +91,26 @@
         </div>
 
         {{-- Лента шагов: акробатика / простое значение; тусклые — не в зачёте --}}
-        <div class="mt-2 w-full grid grid-cols-3 gap-1">
-            <template x-for="(a, i) in actions.slice(0, 12)" :key="i">
-                <div class="rounded-md border text-[11px] text-center py-0.5 px-1"
-                     :class="a.notDone
-                        ? 'bg-rose-900/50 border-rose-800/60 text-rose-100'
-                        : (! isCounted(i)
-                            ? 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through'
-                            : (a.acro ? 'bg-indigo-900/50 border-indigo-700/50 text-indigo-100' : 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50'))">
+        <div class="mt-2 w-full grid max-h-32 grid-cols-3 gap-1 overflow-y-auto p-1">
+            <template x-for="(a, i) in actions" :key="i">
+                <button type="button" data-selectable-score-history @click="toggleActionSelection(a)"
+                     :data-selected-score="isActionSelected(a) ? 'true' : 'false'"
+                     class="min-h-10 rounded-md border px-2 py-1 text-center text-sm font-bold transition active:scale-[0.98]"
+                     :class="[
+                        a.notDone
+                            ? 'bg-rose-900/50 border-rose-800/60 text-rose-100'
+                            : (! isCounted(i)
+                                ? 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through'
+                                : (a.acro ? 'bg-indigo-900/50 border-indigo-700/50 text-indigo-100' : 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50')),
+                        historySelectionClass(a)
+                     ]"
+                     :aria-pressed="isActionSelected(a) ? 'true' : 'false'"
+                     aria-label="Выбрать оценку для удаления"
+                >
                     <span x-show="a.acro" class="font-black">A</span>
                     <span class="font-mono tabular-nums" x-text="a.notDone ? ' Х·0' : ' ' + Number(a.v).toFixed(1)"></span>
                     <span x-show="!a.notDone && !isCounted(i)" class="text-[9px] text-rose-300"> ⃠</span>
-                </div>
+                </button>
             </template>
             <div x-show="actions.length === 0" class="col-span-3 text-center text-[10px] text-slate-600">История пуста</div>
         </div>

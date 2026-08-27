@@ -3,74 +3,139 @@
         <h2 class="font-semibold text-xl text-slate-100 leading-tight">Оператор табло</h2>
     </x-slot>
 
-    <div class="py-8 max-w-6xl mx-auto space-y-5">
+    <div class="mx-auto max-w-6xl space-y-5 py-8">
         <x-flash />
 
         <x-card>
-            <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <div class="font-semibold text-slate-100">Очередь одобренных оценок</div>
-                    <p class="mt-1 text-sm text-slate-400">Сверху — результат, который одобрили раньше. Кнопка выводит выбранную гимнастку на публичное табло на {{ \App\Support\ScoreboardUi::RESULT_HOLD_SECONDS }} секунд.</p>
-                </div>
-                <a href="{{ route('scoreboard.index') }}" target="_blank" rel="noopener"
-                   class="rounded-lg border border-cyan-700 bg-cyan-950/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/50">
-                    Открыть табло ↗
-                </a>
-            </div>
+            <div class="flex flex-wrap items-end justify-between gap-4">
+                <form method="GET" action="{{ route('scoreboard-judge.index') }}" class="w-full sm:w-96">
+                    <label for="scoreboard-tournament" class="block text-xs font-semibold uppercase tracking-wider text-slate-400">Турнир для табло</label>
+                    <select id="scoreboard-tournament" name="tournament" onchange="this.form.submit()"
+                            class="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base font-semibold text-white focus:border-cyan-500 focus:ring-cyan-500">
+                        @forelse($tournaments as $tournament)
+                            <option value="{{ $tournament->id }}" @selected($selectedTournament?->id === $tournament->id)>{{ $tournament->name }}</option>
+                        @empty
+                            <option value="">Нет турниров</option>
+                        @endforelse
+                    </select>
+                </form>
 
-            <div class="mt-4 divide-y divide-slate-800">
-                @forelse($pendingPerformances as $performance)
-                    @php($isTeam = $performance->category?->program === 'group' || $performance->athlete?->is_team)
-                    <div class="py-4 flex flex-wrap items-center justify-between gap-3">
-                        <div class="min-w-0">
-                            <div class="text-xs text-slate-500">
-                                Одобрено {{ $performance->approved_at?->format('H:i:s') }} · {{ $performance->category?->tournament?->name }} · {{ $performance->category?->name }}
-                            </div>
-                            <div class="mt-1 text-lg font-semibold text-slate-100">
-                                {{ $performance->athlete?->last_name }}@if(! $isTeam) {{ $performance->athlete?->first_name }}@endif
-                            </div>
-                            <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                                <span class="text-slate-300">{{ $performance->apparatus ?? '—' }}</span>
-                                <span class="font-mono text-cyan-200">DB {{ $performance->db_average !== null ? number_format((float) $performance->db_average, 3) : '—' }}</span>
-                                <span class="font-mono text-cyan-200">DA {{ $performance->da_average !== null ? number_format((float) $performance->da_average, 3) : '—' }}</span>
-                                <span class="font-mono font-bold text-emerald-300">Итог {{ number_format((float) $performance->total, 3) }}</span>
-                            </div>
-                        </div>
-                        <form method="POST" action="{{ route('scoreboard-judge.accept', $performance) }}">
-                            @csrf
-                            <button class="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-950/30 hover:bg-emerald-500">
-                                ▶ Показать на табло
-                            </button>
-                        </form>
-                    </div>
-                @empty
-                    <div class="py-8 text-sm text-slate-400">Нет новых одобренных оценок.</div>
-                @endforelse
+                <div class="flex flex-wrap items-center gap-3">
+                    <span id="scoreboard-operator-status" class="text-xs text-slate-500">Live · обновление автоматически</span>
+                    @if($selectedTournament)
+                        <a href="{{ route('scoreboard.index', ['tournament' => $selectedTournament->id]) }}" target="_blank" rel="noopener"
+                           class="rounded-lg border border-cyan-700 bg-cyan-950/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-900/50">
+                            Открыть табло ↗
+                        </a>
+                    @endif
+                </div>
             </div>
         </x-card>
 
-        @if($shownPerformances->isNotEmpty())
+        @if($selectedTournament)
+            <div id="scoreboard-operator-queues" class="space-y-5">
+                @include('scoreboard-judge.partials.queues', [
+                    'tournament' => $selectedTournament,
+                    'pendingPerformances' => $pendingPerformances,
+                    'shownPerformances' => $shownPerformances,
+                ])
+            </div>
+        @else
             <x-card>
-                <div class="font-semibold text-slate-100">Недавно показанные</div>
-                <p class="mt-1 text-sm text-slate-400">Результат можно повторно вывести на табло.</p>
-                <div class="mt-4 divide-y divide-slate-800">
-                    @foreach($shownPerformances as $performance)
-                        <div class="flex flex-wrap items-center justify-between gap-3 py-3">
-                            <div>
-                                <div class="text-xs text-slate-500">Показано {{ $performance->scoreboard_accepted_at?->format('H:i:s') }} · {{ $performance->category?->name }}</div>
-                                <div class="mt-1 font-medium text-slate-100">
-                                    {{ $performance->athlete?->last_name }} {{ $performance->athlete?->first_name }}
-                                    <span class="ml-2 font-mono text-emerald-300">{{ number_format((float) $performance->total, 3) }}</span>
-                                </div>
-                            </div>
-                            <form method="POST" action="{{ route('scoreboard-judge.accept', $performance) }}">
-                                @csrf
-                                <button class="rounded-lg border border-slate-600 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">↻ Показать ещё раз</button>
-                            </form>
-                        </div>
-                    @endforeach
-                </div>
+                <div class="py-10 text-center text-slate-400">Сначала создайте турнир и его потоки.</div>
             </x-card>
         @endif
     </div>
+
+    @if($selectedTournament)
+        <script>
+        (() => {
+            const root = document.getElementById('scoreboard-operator-queues');
+            const status = document.getElementById('scoreboard-operator-status');
+            const liveUrl = @json(route('scoreboard-judge.live', ['tournament' => $selectedTournament->id]));
+            let revision = @json($queueRevision);
+            let requestInFlight = false;
+            let pointerDown = false;
+            let interactionLockedUntil = 0;
+
+            if (! root) return;
+
+            const lockInteraction = (milliseconds = 800) => {
+                interactionLockedUntil = Math.max(interactionLockedUntil, Date.now() + milliseconds);
+            };
+            const interactionIsBusy = () => pointerDown || Date.now() < interactionLockedUntil;
+            root.addEventListener('pointerdown', () => {
+                pointerDown = true;
+                lockInteraction();
+            });
+            const finishPointer = () => {
+                if (! pointerDown) return;
+                pointerDown = false;
+                lockInteraction(900);
+            };
+            document.addEventListener('pointerup', finishPointer);
+            document.addEventListener('pointercancel', finishPointer);
+            window.addEventListener('blur', finishPointer);
+
+            async function refreshQueues(force = false) {
+                if (requestInFlight || (! force && interactionIsBusy()) || document.hidden) return;
+                requestInFlight = true;
+                try {
+                    const response = await fetch(liveUrl, {
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                    });
+                    if (! response.ok) throw new Error('HTTP ' + response.status);
+                    const data = await response.json();
+                    if (! force && data.rev === revision) {
+                        status.textContent = 'Live · обновлено';
+                        return;
+                    }
+                    if (interactionIsBusy()) return;
+
+                    const scrollX = window.scrollX;
+                    const scrollY = window.scrollY;
+                    root.innerHTML = data.html;
+                    revision = data.rev;
+                    requestAnimationFrame(() => window.scrollTo({ left: scrollX, top: scrollY, behavior: 'auto' }));
+                    status.textContent = 'Live · очередь обновлена';
+                } catch (error) {
+                    status.textContent = 'Live · ошибка связи';
+                } finally {
+                    requestInFlight = false;
+                }
+            }
+
+            root.addEventListener('submit', async (event) => {
+                const form = event.target.closest('form[data-scoreboard-accept]');
+                if (! form) return;
+                event.preventDefault();
+                const button = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
+                if (button) button.disabled = true;
+                status.textContent = 'Показываю результат…';
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        body: new FormData(form),
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        credentials: 'same-origin',
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (! response.ok || data.ok === false) throw new Error(data.message || 'Не удалось показать результат.');
+                    interactionLockedUntil = 0;
+                    pointerDown = false;
+                    await refreshQueues(true);
+                    status.textContent = data.message || 'Результат показан';
+                } catch (error) {
+                    status.textContent = error?.message || 'Ошибка показа результата';
+                    if (button) button.disabled = false;
+                }
+            });
+
+            setInterval(refreshQueues, 1000);
+            document.addEventListener('visibilitychange', () => { if (! document.hidden) refreshQueues(); });
+        })();
+        </script>
+    @endif
 </x-app-layout>

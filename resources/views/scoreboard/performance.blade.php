@@ -216,7 +216,9 @@
             prev.place = place;
         }
 
-        let lastRev = null;
+        // Не перерисовываем уже показанный сервером результат при первом poll:
+        // это исключает лишнее переключение блоков и визуальный рывок экрана.
+        let lastRev = @json($payload['rev'] ?? null);
         async function tick() {
             try {
                 const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });

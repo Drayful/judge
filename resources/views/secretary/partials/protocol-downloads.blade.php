@@ -29,29 +29,49 @@
         @else
             <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 @foreach($protocolGroups as $g)
+                    @php
+                        $protocolQuery = array_filter([
+                            'program' => $g['program'],
+                            'birth_year' => $g['birth_year'],
+                            'division' => $g['division'],
+                            'group_sheet' => $g['group_sheet'],
+                        ], static fn ($value) => $value !== null && $value !== '');
+                        $protocolUrl = route('secretary.tournament.protocol', $tournament).'?'.http_build_query($protocolQuery);
+                    @endphp
                     <div class="border border-slate-800 rounded-xl p-4 bg-slate-950/40 flex items-center justify-between gap-3">
                         <div class="min-w-0">
-                            <div class="font-medium text-slate-100 truncate">{{ $g['label'] }}</div>
+                            <div class="flex items-center gap-2">
+                                <div class="font-medium text-slate-100 truncate">{{ $g['label'] }}</div>
+                                @if($g['program'] === 'group')
+                                    <x-badge tone="violet">групповые</x-badge>
+                                @endif
+                            </div>
                             <div class="text-xs text-slate-500 mt-1">
-                                {{ $g['athletes'] }} {{ $g['athletes'] === 1 ? 'гимнастка' : 'гимнасток' }} с результатом
+                                @if($g['program'] === 'group')
+                                    {{ $g['athletes'] }} {{ $g['athletes'] === 1 ? 'команда' : 'команд' }} с результатом
+                                @else
+                                    {{ $g['athletes'] }} {{ $g['athletes'] === 1 ? 'гимнастка' : 'гимнасток' }} с результатом
+                                @endif
                             </div>
                         </div>
                         @if($g['athletes'] > 0)
                             <div class="shrink-0 flex flex-col gap-1.5">
                                 <a class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-950/30 hover:bg-emerald-500 transition"
-                                   href="{{ route('secretary.tournament.protocol', $tournament) }}?birth_year={{ $g['birth_year'] }}&division={{ urlencode((string) ($g['division'] ?? '')) }}"
-                                   title="Итоговый протокол (многоборье)">
+                                   href="{{ $protocolUrl }}"
+                                   title="{{ $g['program'] === 'group' ? 'Итоговый протокол групповых выступлений' : 'Итоговый протокол (многоборье)' }}">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                         <path d="M10 2a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L9 11.586V3a1 1 0 0 1 1-1z" />
                                         <path d="M4 16a1 1 0 0 0-1 1 1 1 0 0 0 1 1h12a1 1 0 0 0 1-1 1 1 0 0 0-1-1H4z" />
                                     </svg>
-                                    Многоборье
+                                    {{ $g['program'] === 'group' ? 'Групповой протокол' : 'Многоборье' }}
                                 </a>
-                                <a class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-900/60 transition"
-                                   href="{{ route('secretary.tournament.protocol', $tournament) }}?birth_year={{ $g['birth_year'] }}&division={{ urlencode((string) ($g['division'] ?? '')) }}&mode=by_apparatus"
-                                   title="Протоколы по видам (по каждому предмету)">
-                                    По видам
-                                </a>
+                                @if($g['program'] !== 'group')
+                                    <a class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-900/60 transition"
+                                       href="{{ $protocolUrl }}&mode=by_apparatus"
+                                       title="Протоколы по видам (по каждому предмету)">
+                                        По видам
+                                    </a>
+                                @endif
                             </div>
                         @else
                             <span class="shrink-0 text-xs text-slate-500">нет итогов</span>

@@ -14,7 +14,7 @@
 @endphp
 
 {{-- ====== ЛЕВАЯ ЗОНА ====== --}}
-<div class="col-span-5 grid grid-cols-3 gap-2 h-full min-h-0">
+<div data-db-score-limit="2.0" class="col-span-4 grid grid-cols-3 gap-2 h-full min-h-0">
 
     {{-- Символы элементов (без значений) --}}
     <div class="flex flex-col gap-2 h-full min-h-0">
@@ -31,18 +31,18 @@
         @endforeach
     </div>
 
-    {{-- Значения 1.0..1.7 --}}
+    {{-- Значения 1.0..1.5 --}}
     <div class="flex flex-col gap-2 h-full min-h-0" :class="pendingSymbol ? '' : 'opacity-50'">
-        @foreach ([1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7] as $v)
+        @foreach ([1.0, 1.1, 1.2, 1.3, 1.4, 1.5] as $v)
             <button type="button" @click="assignValue({{ $v }})"
                 class="flex-1 min-h-0 rounded-xl bg-[#13294b] hover:bg-[#1a3865] border border-slate-700 text-white text-2xl xl:text-3xl font-bold shadow-md tabular-nums active:scale-[0.98] flex items-center justify-center">
                 {{ number_format($v, 1) }}
             </button>
         @endforeach
     </div>
-    {{-- Значения 1.8..2.5 --}}
+    {{-- Значения 1.6..2.0; более высокие баллы намеренно убраны с DB-планшета. --}}
     <div class="flex flex-col gap-2 h-full min-h-0" :class="pendingSymbol ? '' : 'opacity-50'">
-        @foreach ([1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] as $v)
+        @foreach ([1.6, 1.7, 1.8, 1.9, 2.0] as $v)
             <button type="button" @click="assignValue({{ $v }})"
                 class="flex-1 min-h-0 rounded-xl bg-[#163057] hover:bg-[#1f3f73] border border-slate-700 text-white text-2xl xl:text-3xl font-bold shadow-md tabular-nums active:scale-[0.98] flex items-center justify-center">
                 {{ number_format($v, 1) }}
@@ -52,7 +52,7 @@
 </div>
 
 {{-- ====== ЦЕНТР ====== --}}
-<div class="col-span-3 flex flex-col gap-2 h-full min-h-0">
+<div class="col-span-4 flex flex-col gap-2 h-full min-h-0">
     {{-- Переключатель возрастной группы: лимиты зачёта элементов --}}
     <div class="shrink-0 grid grid-cols-2 gap-2">
         <button type="button" @click="setAgeGroup('junior')"
@@ -122,17 +122,24 @@
         </div>
 
         {{-- Лента шагов: символ + балл; тусклые — не попали в зачёт (лимит элементов/рисков) --}}
-        <div class="mt-2 w-full grid grid-cols-4 gap-1">
-            <template x-for="(a, i) in actions.slice(0, 12)" :key="i">
-                <div class="rounded-md border text-[11px] text-center py-0.5 px-1"
-                     :class="a.notDone
-                        ? 'bg-rose-900/40 border-rose-800/50 text-rose-100'
-                        : (isCounted(i) ? 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50' : 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through')">
+        <div class="mt-2 w-full grid grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1">
+            <template x-for="(a, i) in actions" :key="i">
+                <button type="button" data-selectable-score-history @click="toggleActionSelection(a)"
+                     :data-selected-score="isActionSelected(a) ? 'true' : 'false'"
+                     class="min-h-12 rounded-lg border px-2 py-2 text-center text-base font-bold transition active:scale-[0.98]"
+                     :class="[
+                        a.notDone
+                            ? 'bg-rose-900/40 border-rose-800/50 text-rose-100'
+                            : (isCounted(i) ? 'bg-cyan-900/40 border-cyan-800/40 text-cyan-50' : 'bg-slate-900/60 border-slate-700/60 text-slate-500 line-through'),
+                        historySelectionClass(a)
+                     ]"
+                     :aria-pressed="isActionSelected(a) ? 'true' : 'false'"
+                     aria-label="Выбрать оценку для удаления">
                     <span class="font-black" x-text="a.symbol"></span>
                     <span class="font-mono tabular-nums" x-text="a.notDone ? ' Х·0' : ' ' + Number(a.v).toFixed(1)"></span>
-                </div>
+                </button>
             </template>
-            <div x-show="actions.length === 0" class="col-span-4 text-center text-[10px] text-slate-600">История пуста</div>
+            <div x-show="actions.length === 0" class="col-span-3 text-center text-[10px] text-slate-600">История пуста</div>
         </div>
     </div>
 
