@@ -86,16 +86,16 @@
                             @endforeach
                         </div>
 
-                        <div class="mx-auto grid max-w-5xl gap-4 md:grid-cols-[1.35fr_1fr_1fr]">
-                            <div class="rounded-3xl border-2 border-cyan-400/70 bg-gradient-to-br from-cyan-950 to-slate-950 px-5 py-5 text-center shadow-2xl shadow-cyan-950/50">
+                        <div class="sb-result-grid">
+                            <div class="sb-result-card border-2 border-cyan-400/70 bg-gradient-to-br from-cyan-950 to-slate-950 shadow-2xl shadow-cyan-950/50">
                                 <div class="text-sm font-bold uppercase tracking-[0.18em] text-cyan-200">За упражнение</div>
                                 <div id="scoreApparatus_score" class="sb-final-score">{{ isset($perf['apparatus_score']) && $perf['apparatus_score'] !== null ? number_format((float) $perf['apparatus_score'], 3) : '—' }}</div>
                             </div>
-                            <div class="rounded-3xl border border-violet-500/60 bg-violet-950/35 px-5 py-5 text-center">
+                            <div class="sb-result-card border border-violet-500/60 bg-violet-950/35">
                                 <div class="text-sm font-bold uppercase tracking-wider text-violet-200">Сумма многоборья</div>
                                 <div id="scoreTotal" class="sb-overall-score">{{ isset($perf['total']) && $perf['total'] !== null ? number_format((float) $perf['total'], 3) : '—' }}</div>
                             </div>
-                            <div id="placeBlock" class="rounded-3xl border border-amber-500/60 bg-amber-950/35 px-5 py-5 text-center {{ ($perf['place'] ?? null) ? '' : 'opacity-40' }}">
+                            <div id="placeBlock" class="sb-result-card border border-amber-500/60 bg-amber-950/35 {{ ($perf['place'] ?? null) ? '' : 'opacity-40' }}">
                                 <div class="text-sm font-bold uppercase tracking-wider text-amber-200">Место в многоборье</div>
                                 <div class="mt-1 flex items-baseline justify-center gap-2">
                                     <span id="placeValue" class="sb-rank-value">{{ $perf['place'] ?? '—' }}</span>

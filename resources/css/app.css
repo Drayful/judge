@@ -96,8 +96,10 @@
     }
 
     .sb-athlete-name {
-        @apply font-black text-white tracking-tight leading-none;
-        font-size: clamp(2.5rem, min(5.8vw, 8vh), 5.75rem);
+        @apply mx-auto max-w-6xl font-black text-white tracking-tight text-balance;
+        font-size: clamp(2.5rem, min(4.6vw, 7vh), 4.75rem);
+        line-height: 1.04;
+        overflow-wrap: anywhere;
     }
 
     .sb-scores {
@@ -132,7 +134,11 @@
 
     .sb-score-value {
         @apply mt-1 font-black tabular-nums text-white leading-none;
-        font-size: clamp(2rem, min(3.8vw, 5.5vh), 4.5rem);
+        font-size: clamp(2rem, min(2.8vw, 4.8vh), 3rem);
+    }
+
+    .sb-scores--body .sb-score-value {
+        font-size: clamp(2rem, min(3.4vw, 5vh), 3.5rem);
     }
 
     .sb-score-value--total {
@@ -145,17 +151,31 @@
 
     .sb-final-score {
         @apply mt-1 font-mono font-black tabular-nums text-white leading-none;
-        font-size: clamp(4.75rem, min(9.5vw, 14vh), 10rem);
+        font-size: clamp(4rem, min(7vw, 11vh), 7rem);
     }
 
     .sb-overall-score {
         @apply mt-2 font-mono font-black tabular-nums text-white leading-none;
-        font-size: clamp(3rem, min(5.5vw, 8vh), 6.5rem);
+        font-size: clamp(3rem, min(4.5vw, 8vh), 5rem);
     }
 
     .sb-rank-value {
         @apply font-black tabular-nums text-white leading-none;
-        font-size: clamp(3.5rem, min(6.5vw, 9vh), 7.5rem);
+        font-size: clamp(3.5rem, min(4.5vw, 8vh), 5rem);
+    }
+
+    .sb-result-grid {
+        @apply mx-auto grid w-full max-w-5xl gap-4;
+    }
+
+    .sb-result-card {
+        @apply flex min-w-0 flex-col items-center justify-center rounded-3xl px-5 py-5 text-center;
+    }
+
+    @media (min-width: 768px) {
+        .sb-result-grid {
+            grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(12rem, 0.72fr);
+        }
     }
 
     .sb-btn {
@@ -230,64 +250,6 @@
     }
     body.scoreboard-tv-mode #liveContent {
         gap: clamp(1rem, 4vh, 3rem);
-    }
-
-    /* Текст табло должен читаться с расстояния на большом экране. */
-    @media (min-width: 1280px) and (min-height: 700px) {
-        .sb-bg .text-xs {
-            font-size: 0.875rem !important;
-            line-height: 1.2rem !important;
-        }
-
-        .sb-bg .text-sm {
-            font-size: 1rem !important;
-            line-height: 1.35rem !important;
-        }
-
-        .sb-bg .text-base {
-            font-size: 1.125rem !important;
-            line-height: 1.5rem !important;
-        }
-
-        .sb-bg .text-lg {
-            font-size: 1.25rem !important;
-            line-height: 1.65rem !important;
-        }
-
-        .sb-bg .text-xl {
-            font-size: 1.5rem !important;
-            line-height: 1.85rem !important;
-        }
-
-        .sb-bg .text-2xl {
-            font-size: 1.875rem !important;
-            line-height: 2.15rem !important;
-        }
-
-        .sb-bg .text-3xl {
-            font-size: 2.25rem !important;
-            line-height: 1.1 !important;
-        }
-
-        .sb-place,
-        .sb-medal {
-            font-size: 1rem;
-        }
-
-        .sb-total {
-            font-size: 1.75rem;
-        }
-
-        .sb-footer,
-        .sb-score-label {
-            font-size: 0.875rem;
-            line-height: 1.2rem;
-        }
-
-        .sb-btn {
-            font-size: 1rem;
-            line-height: 1.35rem;
-        }
     }
 
     .sb-rows::-webkit-scrollbar {
