@@ -420,8 +420,15 @@ class SecretaryLiveUi
                         'max' => $max,
                         'spread' => $spread,
                     ];
-                    foreach ($activeSlots as $slot) {
-                        $violatingSlots[] = $slot;
+                    foreach ($numericScores as $slot => $score) {
+                        $hasDiscrepancy = collect($numericScores)->contains(
+                            fn (float $otherScore, string $otherSlot) => $otherSlot !== $slot
+                                && abs($score - $otherScore) > $maxSpread + 0.0005,
+                        );
+
+                        if ($hasDiscrepancy) {
+                            $violatingSlots[] = $slot;
+                        }
                     }
                 }
             }

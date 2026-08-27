@@ -584,6 +584,9 @@ class ScoringSystemTest extends TestCase
         $this->assertTrue(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
         $this->assertTrue(SecretaryLiveUi::readyToFinalize($perf, $category), 'Расхождение предупреждает, но не блокирует автопереход');
         $this->assertContains('A1', $report['violating_slots']);
+        $this->assertContains('A4', $report['violating_slots']);
+        $this->assertNotContains('A2', $report['violating_slots']);
+        $this->assertNotContains('A3', $report['violating_slots']);
         $this->assertEqualsWithDelta(1.5, $report['violations'][0]['spread'], 0.001);
     }
 
