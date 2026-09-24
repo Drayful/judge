@@ -317,16 +317,27 @@ class FinalProtocolService
             $pool['athlete_ids'],
             $category->program,
         );
-        $poolSize = $pool['athlete_ids'] !== null
-            ? count($pool['athlete_ids'])
-            : Performance::query()
+        $poolSize = $birthYear !== null
+            ? Performance::query()
                 ->whereIn('category_id', $tournament->categories()->get()
                     ->filter(fn (Category $candidate) => $candidate->resolvedBirthYear() === $category->resolvedBirthYear()
                         && $candidate->resolvedDivision() === $category->resolvedDivision()
                         && $candidate->program === $category->program)
                     ->pluck('id'))
+                ->whereHas('athlete', fn ($query) => $query->whereYear('birthdate', $birthYear))
+                ->when($pool['athlete_ids'] !== null, fn ($query) => $query->whereIn('athlete_id', $pool['athlete_ids']))
                 ->distinct('athlete_id')
-                ->count('athlete_id');
+                ->count('athlete_id')
+            : ($pool['athlete_ids'] !== null
+                ? count($pool['athlete_ids'])
+                : Performance::query()
+                    ->whereIn('category_id', $tournament->categories()->get()
+                        ->filter(fn (Category $candidate) => $candidate->resolvedBirthYear() === $category->resolvedBirthYear()
+                            && $candidate->resolvedDivision() === $category->resolvedDivision()
+                            && $candidate->program === $category->program)
+                        ->pluck('id'))
+                    ->distinct('athlete_id')
+                    ->count('athlete_id'));
 
         $map = [];
         foreach ($data['rows'] as $row) {

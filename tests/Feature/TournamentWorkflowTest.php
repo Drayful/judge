@@ -11,6 +11,7 @@ use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Models\User;
+use App\Services\FinalProtocolService;
 use App\Services\StartProtocolExporter;
 use App\Services\StreamAdvanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -209,5 +210,66 @@ class TournamentWorkflowTest extends TestCase
         $this->assertNotNull($row->fresh()->returned_at);
         $this->assertNull($row->fresh()->average_submitted_at);
         $this->assertTrue($p->judgeScoreActions()->where('action', 'like', '%Возврат на доработку: 4.500%')->exists());
+    }
+
+    public function test_programme_puts_award_duration_under_apparatus(): void
+    {
+        $p = $this->performance();
+        $session = StreamSession::create([
+            'category_id' => $p->category_id, 'session_no' => 1,
+            'scheduled_on' => '2026-09-24', 'starts_at' => '09:00',
+            'ends_at' => '10:00', 'apparatus' => [],
+        ]);
+        $session->forceFill(['award_minutes' => 20])->save();
+
+        $sheet = app(StartProtocolExporter::class)->buildProgramme($p->category->tournament)->getSheetByName('2026-09-24');
+        $this->assertNotNull($sheet);
+        $awardRow = collect(range(5, 10))->first(fn (int $row) => $sheet->getCell('C'.$row)->getValue() === 'Награждение');
+        $this->assertNotNull($awardRow);
+        $this->assertSame('20 мин.', $sheet->getCell('F'.$awardRow)->getValue());
+        $this->assertNull($sheet->getCell('G'.$awardRow)->getValue());
+    }
+
+    public function test_birth_year_places_count_only_athletes_in_competition_pool(): void
+    {
+        $p = $this->performance();
+        $p->athlete->update(['birthdate' => '2012-04-01']);
+        $p->forceFill(['total' => 20])->save();
+        $second = Athlete::create(['last_name' => 'Second', 'first_name' => 'Athlete', 'birthdate' => '2012-05-01']);
+        Performance::create(['category_id' => $p->category_id, 'athlete_id' => $second->id, 'total' => 19]);
+        $otherCategory = Category::create(['tournament_id' => $p->category->tournament_id, 'name' => 'Other', 'division' => 'B']);
+        $outsider = Athlete::create(['last_name' => 'Outside', 'first_name' => 'Athlete', 'birthdate' => '2012-06-01']);
+        Performance::create(['category_id' => $otherCategory->id, 'athlete_id' => $outsider->id, 'total' => 18]);
+
+        $places = app(FinalProtocolService::class)->poolAthletesById($p->category, false, 2012);
+        $this->assertSame(2, $places[$p->athlete_id]['place_of']);
+        $this->assertSame(2, $places[$second->id]['place_of']);
+        $this->assertArrayNotHasKey($outsider->id, $places);
+    }
+
+    public function test_roster_requires_binding_before_judging_and_keeps_judge_name(): void
+    {
+        $p = $this->performance();
+        $tournament = $p->category->tournament;
+        $tournament->update(['active_category_id' => $p->category_id]);
+        $rosterId = DB::table('tournament_judges')->insertGetId([
+            'tournament_id' => $tournament->id, 'name' => 'Иванова Анна', 'club' => 'Школа',
+        ]);
+        $judge = User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
+        $this->actingAs($judge)
+            ->postJson(route('judge.submit-score'), ['tournament_id' => $tournament->id, 'score' => 7])
+            ->assertStatus(422);
+        $this->assertSame(0, $p->judgeScores()->count());
+
+        $this->post(route('workflow.judges.bind', $tournament), ['judge_id' => $rosterId])->assertSessionHasNoErrors();
+        $this->postJson(route('judge.submit-score'), ['tournament_id' => $tournament->id, 'score' => 7])->assertOk();
+        $this->assertSame('Иванова Анна', $p->judgeScores()->firstOrFail()->judge_name);
+
+        $otherId = DB::table('tournament_judges')->insertGetId([
+            'tournament_id' => $tournament->id, 'name' => 'Петрова Мария', 'club' => 'Другая школа',
+        ]);
+        $this->post(route('workflow.judges.bind', $tournament), ['judge_id' => $otherId])
+            ->assertSessionHasErrors('judge_id');
+        $this->assertDatabaseHas('tournament_judges', ['id' => $rosterId, 'tablet_user_id' => $judge->id]);
     }
 }

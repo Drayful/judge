@@ -8,6 +8,7 @@ use App\Models\JudgeScore;
 use App\Models\JudgeScoreAction;
 use App\Models\Performance;
 use App\Models\Tournament;
+use App\Models\User;
 use App\Services\StreamAdvanceService;
 use App\Support\SecretaryLiveUi;
 use Illuminate\Http\JsonResponse;
@@ -163,6 +164,7 @@ class JudgeController extends Controller
         // чтобы их длительность не добавлялась к официальному времени.
         $timerActionAt = now();
         $user = $request->user();
+        $this->assertJudgeIdentitySelected($tournament, $user);
         $panel = $user->judgePanel();
 
         if (! $user->isAdmin() && (($panel['panel'] ?? null) !== 'penalty' || ($panel['penalty_type'] ?? null) !== 'time')) {
@@ -337,6 +339,7 @@ class JudgeController extends Controller
         ]);
 
         $tournament = Tournament::query()->findOrFail($data['tournament_id']);
+        $this->assertJudgeIdentitySelected($tournament, $request->user());
         $category = $this->resolveJudgeCategoryForTournament($tournament);
         if ($category === null) {
             return response()->json(['ok' => false, 'error' => 'Поток не выбран секретарём.'], 422);
@@ -462,6 +465,7 @@ class JudgeController extends Controller
         if ($category === null || $category->tournament === null) {
             abort(404);
         }
+        $this->assertJudgeIdentitySelected($category->tournament, $user);
 
         $activeCategory = $this->resolveJudgeCategoryForTournament($category->tournament);
         if ($activeCategory === null || $activeCategory->id !== $category->id) {
@@ -571,6 +575,9 @@ class JudgeController extends Controller
             abort(422, 'Оценка бригад A и E должна быть в диапазоне от 0 до 10 баллов.');
         }
         $performance->loadMissing('category.tournament');
+        if ($performance->category?->tournament) {
+            $this->assertJudgeIdentitySelected($performance->category->tournament, $user);
+        }
         $slot = strtoupper((string) ($panel['slot'] ?? $user->slot ?? ''));
         if (! $user->isAdmin()
             && $slot !== ''
@@ -963,6 +970,18 @@ class JudgeController extends Controller
         return $category->sessions()->whereKey((int) $sessionId)->exists()
             ? (int) $sessionId
             : null;
+    }
+
+    private function assertJudgeIdentitySelected(Tournament $tournament, User $user): void
+    {
+        if ($user->isAdmin()) {
+            return;
+        }
+
+        $roster = DB::table('tournament_judges')->where('tournament_id', $tournament->id);
+        if ($roster->exists() && ! (clone $roster)->where('tablet_user_id', $user->id)->exists()) {
+            abort(422, 'Перед судейством выберите своё ФИО из списка судей на планшете.');
+        }
     }
 
     private function normalizedSessionId(mixed $sessionId): ?int

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Models\JudgeScore;
+use App\Models\JudgeScoreAction;
 use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
@@ -65,6 +67,17 @@ class TournamentWorkflowController extends Controller
             abort_unless($judge, 404);
             if ($judge->tablet_user_id !== null && (int) $judge->tablet_user_id !== $request->user()->id) {
                 throw ValidationException::withMessages(['judge_id' => 'Судья уже закреплён за другим планшетом.']);
+            }
+            $currentJudge = DB::table('tournament_judges')->where('tournament_id', $tournament->id)
+                ->where('tablet_user_id', $request->user()->id)->first();
+            if ($currentJudge !== null && (int) $currentJudge->id !== (int) $judge->id) {
+                $hasJudgingHistory = JudgeScore::query()->where('judge_id', $request->user()->id)
+                    ->whereHas('performance.category', fn ($query) => $query->where('tournament_id', $tournament->id))->exists()
+                    || JudgeScoreAction::query()->where('judge_id', $request->user()->id)
+                        ->whereHas('performance.category', fn ($query) => $query->where('tournament_id', $tournament->id))->exists();
+                if ($hasJudgingHistory) {
+                    throw ValidationException::withMessages(['judge_id' => 'После начала судейства ФИО этого планшета изменить нельзя.']);
+                }
             }
             DB::table('tournament_judges')->where('tournament_id', $tournament->id)
                 ->where('tablet_user_id', $request->user()->id)->update(['tablet_user_id' => null]);

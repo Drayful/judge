@@ -53,7 +53,7 @@ class StartProtocolExporter
                 $this->writeProgrammeRow($sheet, $row++, $block['category'], $session);
                 if ($session && $session->award_minutes > 0 && $session->ends_at) {
                     $start = Carbon::parse($session->ends_at);
-                    $sheet->fromArray([$date, $start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i'), 'Награждение', '', '', $session->award_minutes.' мин.'], null, 'A'.$row++);
+                    $sheet->fromArray([$date, $start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i'), 'Награждение', '', '', $session->award_minutes.' мин.', ''], null, 'A'.$row++);
                 }
             }
             if ($row > 5) {

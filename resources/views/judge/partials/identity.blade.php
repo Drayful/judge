@@ -2,6 +2,9 @@
     $roster = \Illuminate\Support\Facades\DB::table('tournament_judges')->where('tournament_id', $tournament->id)->orderBy('name')->get();
 @endphp
 @if($roster->isNotEmpty())
+@if(! $roster->contains(fn ($person) => (int) $person->tablet_user_id === (int) auth()->id()))
+<p class="text-sm font-semibold text-amber-300">Перед судейством выберите своё ФИО и нажмите «Закрепить».</p>
+@endif
 <form method="POST" action="{{ route('workflow.judges.bind', $tournament) }}" class="flex shrink-0 items-center gap-2 text-sm">
     @csrf
     <label for="judge-identity">Судья</label>
