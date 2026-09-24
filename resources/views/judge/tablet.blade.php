@@ -20,7 +20,7 @@
         && $myScore?->average_submitted_at !== null
         && $myScore?->average_score !== null;
     $submittedDisplay = $alreadySubmitted && $myScore->score !== null
-        ? number_format((float) $myScore->score, 3, '.', '')
+        ? number_format((float) $myScore->score, $pKey === 'e' ? 2 : 3, '.', '')
         : null;
 
     $aBaseFloat = (float) $aBase;
@@ -42,6 +42,7 @@
         <div class="judge-shell w-full max-w-[1600px] mx-auto px-2.5 py-2.5 flex-1 min-h-0 flex flex-col gap-2.5">
 
             {{-- ====== ШАПКА (одна строка) ====== --}}
+            @include('judge.partials.identity')
             <div class="judge-topbar shrink-0 flex h-20 items-center gap-2 px-2">
                 <a href="{{ route('judge.tournaments') }}" class="judge-back-button grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg text-slate-300 hover:text-white" aria-label="Назад к турнирам">←</a>
 

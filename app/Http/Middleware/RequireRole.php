@@ -16,15 +16,35 @@ class RequireRole
     {
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             abort(401);
         }
 
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             abort(403);
         }
 
+        if ($user->isChiefJudge()) {
+            $name = $request->route()?->getName();
+            $scoreRoutes = [
+                'secretary.performance.confirmScore', 'secretary.performance.returnScores',
+                'secretary.performance.updateJudgeScore', 'secretary.performance.setFinalScore',
+                'secretary.performance.clearFinalOverride', 'supervisor.approve',
+                'inquiries.store', 'inquiries.underReview', 'inquiries.decide',
+                'profile.update', 'profile.destroy', 'logout',
+            ];
+            abort_if(in_array($name, ['secretary.queue', 'secretary.queue.ping', 'secretary.tournament.live'], true), 403);
+            abort_if(! $request->isMethod('GET') && ! $request->isMethod('HEAD')
+                && ! in_array($name, $scoreRoutes, true), 403);
+        }
+
         $allowed = false;
+        if ($request->routeIs('secretary.start', 'secretary.callNext')) {
+            $category = $request->route('category') ?? $request->route('performance')?->category;
+            $sessionId = $request->route('performance')?->stream_session_id ?? $request->input('stream_session_id');
+            $state = $sessionId ? $category?->sessions()->findOrFail($sessionId) : $category;
+            abort_if($state?->closed_at !== null, 422, 'Сначала откройте поток.');
+        }
         foreach ($roles as $role) {
             // "Role groups" convenience tokens for routes.
             $allowed = match ($role) {
@@ -42,11 +62,10 @@ class RequireRole
             }
         }
 
-        if (!$allowed) {
+        if (! $allowed) {
             abort(403);
         }
 
         return $next($request);
     }
 }
-

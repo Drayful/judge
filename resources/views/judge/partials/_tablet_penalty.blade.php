@@ -42,6 +42,8 @@
                 <div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Сумма сбавки</div>
                 <div class="mt-1 font-mono text-6xl font-extrabold tabular-nums text-rose-200" x-text="draft.toFixed(2)"></div>
                 <div class="mt-1 text-xs text-slate-500">Нажатий: <span x-text="actions.length"></span></div>
+                <button type="button" @click="cancel()" :disabled="busy || !actions.length"
+                    class="mt-2 rounded-lg border border-rose-500 bg-rose-900 px-5 py-3 font-bold text-white disabled:opacity-40">ОТМЕНА</button>
             </div>
             <button type="button" @click="submit()" :disabled="busy"
                 class="judge-submit-button rounded-lg border px-8 py-5 text-xl font-bold uppercase tracking-wide text-white transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-50">

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Athlete;
 use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Performance;
@@ -292,7 +293,7 @@ class FinalProtocolService
      *
      * @return array<int, array{athlete_id:int, place:int, place_of:int, name:string, club:string, total:float, vidi:list<float>}>
      */
-    public function poolAthletesById(Category $category, bool $publishedOnly = false): array
+    public function poolAthletesById(Category $category, bool $publishedOnly = false, ?int $birthYear = null): array
     {
         $category->loadMissing('tournament');
         $tournament = $category->tournament;
@@ -301,6 +302,13 @@ class FinalProtocolService
         }
 
         $pool = CompetitionPool::resolve($category);
+        if ($birthYear !== null) {
+            $pool['athlete_ids'] = Athlete::query()
+                ->whereYear('birthdate', $birthYear)
+                ->when($pool['athlete_ids'] !== null, fn ($query) => $query->whereIn('id', $pool['athlete_ids']))
+                ->whereHas('performances', fn ($query) => $query->whereHas('category', fn ($categories) => $categories->where('tournament_id', $tournament->id)))
+                ->pluck('id')->all();
+        }
         $data = $this->buildGroup(
             $tournament,
             $category->resolvedBirthYear(),

@@ -359,7 +359,7 @@ class SecretaryLiveUi
     {
         $rules = $category?->scoring_rules ?? [];
 
-        return (float) ($rules['max_panel_spread'] ?? 1.0);
+        return (float) ($category?->tournament?->max_panel_spread ?? $rules['max_panel_spread'] ?? 1.0);
     }
 
     /**
@@ -377,6 +377,7 @@ class SecretaryLiveUi
     {
         $category = $category ?? $perf?->category;
         $maxSpread = self::maxPanelSpread($category);
+        $maxDeviation = $category?->tournament?->max_average_deviation;
         $inactive = self::inactiveSlots($category);
         $scoresBySlot = self::numericScoresBySlot($perf, $category);
         $slotStatus = collect(self::judgeSlots($perf, $category))->keyBy('label');
@@ -410,6 +411,12 @@ class SecretaryLiveUi
                 $max = max($values);
                 $spread = round($max - $min, 3);
                 $violation = $spread > $maxSpread + 0.0005;
+                $average = array_sum($values) / count($values);
+                $deviating = $maxDeviation === null ? [] : array_keys(array_filter(
+                    $numericScores, fn ($value) => abs($value - $average) > (float) $maxDeviation + 0.0005,
+                ));
+                $violation = $violation || $deviating !== [];
+                $violatingSlots = array_merge($violatingSlots, $deviating);
 
                 if ($violation) {
                     $violations[] = [
@@ -615,13 +622,13 @@ class SecretaryLiveUi
         return compact('columns', 'values', 'penalty', 'inactive');
     }
 
-    public static function formatScore(?float $v): string
+    public static function formatScore(?float $v, int $decimals = 3): string
     {
         if ($v === null) {
             return '—';
         }
 
-        return number_format($v, 3, '.', '');
+        return number_format($v, $decimals, '.', '');
     }
 
     /**

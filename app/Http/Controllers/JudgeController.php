@@ -240,9 +240,10 @@ class JudgeController extends Controller
             }
             $current->save();
 
-            if (! $isRevision) {
-                $this->finalizeAndAdvanceIfReady($current);
-            }
+            // Автозавершение после TIME Stop временно отключено; код сохранён.
+            // if (! $isRevision) {
+            //     $this->finalizeAndAdvanceIfReady($current);
+            // }
         });
 
         event(new ScoreUpdated($current->id, $current->category_id));

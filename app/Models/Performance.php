@@ -216,7 +216,8 @@ class Performance extends Model
         if ($this->scores_overridden) {
             $d = $this->d_score;
             $a = $this->a_score;
-            $e = $this->e_score;
+            $e = $this->e_score !== null ? round((float) $this->e_score, 2) : null;
+            $this->e_score = $e;
             // В ручном режиме поле penalty уже является окончательной общей сбавкой.
             // Не прибавляем time_penalty повторно: форма показывает и отправляет
             // текущее общее значение штрафа, куда время уже включено.
@@ -331,7 +332,8 @@ class Performance extends Model
 
         $this->d_score = $d !== null ? round($d, $round) : null;
         $this->a_score = $a !== null ? round($a, $round) : null;
-        $this->e_score = $e !== null ? round($e, $round) : null;
+        $e = $e !== null ? round($e, 2) : null;
+        $this->e_score = $e;
         $this->penalty = $pen !== null ? round($pen, $round) : null;
 
         if ($d !== null && $a !== null && $e !== null) {

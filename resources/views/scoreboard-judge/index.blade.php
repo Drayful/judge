@@ -115,7 +115,7 @@
                 if (button) button.disabled = true;
                 status.textContent = 'Показываю результат…';
                 try {
-                    const response = await fetch(form.action, {
+                    const response = await fetch(event.submitter?.getAttribute('formaction') || form.action, {
                         method: 'POST',
                         body: new FormData(form),
                         headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },

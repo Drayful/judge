@@ -68,7 +68,7 @@
                         @else
                             <span>D {{ $p->d_score !== null ? number_format($p->d_score, 3) : '—' }}</span>
                             <span>A {{ $p->a_score !== null ? number_format($p->a_score, 3) : '—' }}</span>
-                            <span>E {{ $p->e_score !== null ? number_format($p->e_score, 3) : '—' }}</span>
+                            <span>E {{ $p->e_score !== null ? number_format($p->e_score, 2) : '—' }}</span>
                         @endif
                     </div>
                     <div class="sb-total">{{ number_format($p->total, 3) }}</div>
@@ -169,7 +169,7 @@
                         <span>Вид ${esc(r.apparatus ?? '—')}: ${fmt3(r.apparatus_score)}</span>
                         ${(r.vidi && r.vidi.length > 1)
                             ? '<span>Виды: ' + r.vidi.map(fmt3).join(' + ') + '</span>'
-                            : '<span>D ' + fmt3(r.d) + '</span><span>A ' + fmt3(r.a) + '</span><span>E ' + fmt3(r.e) + '</span>'}
+                            : '<span>D ' + fmt3(r.d) + '</span><span>A ' + fmt3(r.a) + '</span><span>E ' + (r.e == null ? '—' : Number(r.e).toFixed(2)) + '</span>'}
                     </div>
                     <div class="sb-total">${totalStr}</div>
                 </div>

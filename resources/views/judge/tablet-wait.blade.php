@@ -3,6 +3,7 @@
 @section('title', 'Ожидание потока')
 
 @section('content')
+    @include('judge.partials.identity')
     <div class="judge-console h-screen overflow-hidden flex flex-col items-center justify-center px-4 text-center gap-5" data-panel="d">
         <a href="{{ route('judge.tournaments') }}" class="judge-back-button rounded-xl px-4 py-2 text-sm text-slate-300 hover:text-white">← Турниры</a>
 

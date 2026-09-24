@@ -72,7 +72,7 @@
                             @foreach(['d' => 'D', 'db' => 'DB', 'da' => 'DA', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
                                 <div class="sb-score-card {{ in_array($key, ['d', 'a', 'e'], true) ? 'sb-score-card--primary' : '' }}">
                                     <div class="sb-score-label">{{ $label }}</div>
-                                    <div id="score{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
+                                    <div id="score{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], $key === 'e' ? 2 : 3) : '—' }}</div>
                                 </div>
                             @endforeach
                         </div>
@@ -81,7 +81,7 @@
                             @foreach(['d' => 'D', 'a' => 'A', 'e' => 'E', 'penalty' => 'Сбавка'] as $key => $label)
                                 <div class="sb-score-card {{ in_array($key, ['d', 'a', 'e'], true) ? 'sb-score-card--primary' : '' }}">
                                     <div class="sb-score-label">{{ $label }}</div>
-                                    <div id="bodyScore{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], 3) : '—' }}</div>
+                                    <div id="bodyScore{{ ucfirst($key) }}" class="sb-score-value {{ $key === 'penalty' ? 'sb-score-value--penalty' : '' }}">{{ isset($perf[$key]) && $perf[$key] !== null ? number_format((float) $perf[$key], $key === 'e' ? 2 : 3) : '—' }}</div>
                                 </div>
                             @endforeach
                         </div>
@@ -157,7 +157,7 @@
 
         function updateScore(key, value, id = null) {
             const elementId = id || ('score' + key.charAt(0).toUpperCase() + key.slice(1));
-            const formatted = fmt3(value);
+            const formatted = key === 'e' && value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : fmt3(value);
             if (prev[key] !== null && prev[key] !== formatted && formatted !== '—') flashEl(elementId);
             setText(elementId, formatted);
             prev[key] = formatted;

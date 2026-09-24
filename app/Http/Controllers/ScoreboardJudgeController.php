@@ -93,6 +93,24 @@ class ScoreboardJudgeController extends Controller
         return back()->with('status', $message);
     }
 
+    public function cancel(Request $request, Performance $performance): JsonResponse|RedirectResponse
+    {
+        DB::transaction(function () use ($performance) {
+            $locked = Performance::query()->lockForUpdate()->findOrFail($performance->id);
+            $locked->published_at = null;
+            $locked->scoreboard_accepted_at = null;
+            $locked->scoreboard_accepted_by = null;
+            if ($locked->status === 'published') {
+                $locked->status = 'done';
+            }
+            $locked->save();
+        });
+
+        return $request->expectsJson()
+            ? response()->json(['ok' => true, 'message' => 'Показ отменён. Оценка сохранена.'])
+            : back()->with('status', 'Показ отменён. Оценка сохранена.');
+    }
+
     /**
      * @return array{0: Collection<int, Performance>, 1: Collection<int, Performance>}
      */

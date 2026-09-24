@@ -33,7 +33,7 @@
             Турниры
         </a>
         <a href="{{ route('secretary.categories') }}" class="{{ (request()->routeIs('secretary.categories') || request()->routeIs('secretary.queue') || request()->routeIs('secretary.tournament.live')) ? $linkActive : $linkIdle }} {{ $linkBase }}">
-            Категории / Очередь
+            Просмотр потоков
         </a>
     @endif
 

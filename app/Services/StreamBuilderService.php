@@ -31,11 +31,11 @@ class StreamBuilderService
      *
      * @param  list<array{start:?string,end:?string,minutes_per_athlete?:int,schedule_chain?:string,schedule_sequence?:int}>  $times  метки времени по индексу потока (0-based)
      */
-    public function generateStreams(Group $group, int $streamSize, array $times = [], string $numberMode = 'per_stream'): void
+    public function generateStreams(Group $group, int $streamSize, array $times = [], string $numberMode = 'per_stream', ?string $scheduledOn = null): void
     {
         $streamSize = max(1, $streamSize);
 
-        DB::transaction(function () use ($group, $streamSize, $times, $numberMode) {
+        DB::transaction(function () use ($group, $streamSize, $times, $numberMode, $scheduledOn) {
             $entries = $group->entries()
                 ->orderBy('order_index')
                 ->orderBy('id')
@@ -76,6 +76,19 @@ class StreamBuilderService
                     ->first();
                 if ($firstCategory !== null) {
                     $this->schedule->recalculate($firstCategory);
+                }
+                if ($scheduledOn !== null) {
+                    foreach ($group->categories()->get() as $category) {
+                        if ($category->sessions()->exists()) {
+                            continue;
+                        }
+                        $session = $category->sessions()->create([
+                            'session_no' => 1, 'scheduled_on' => $scheduledOn,
+                            'starts_at' => $category->starts_at_label, 'ends_at' => $category->ends_at_label,
+                            'apparatus' => $group->apparatusLabels(),
+                        ]);
+                        $category->performances()->whereNull('stream_session_id')->update(['stream_session_id' => $session->id]);
+                    }
                 }
             }
         });

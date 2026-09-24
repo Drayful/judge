@@ -162,11 +162,9 @@ class GroupStreamBuilderTest extends TestCase
 
         $this->assertSame(2, StreamSession::query()->whereIn('category_id', $categories->pluck('id'))->count());
         foreach ($categories as $streamCategory) {
-            $this->assertDatabaseHas('stream_sessions', [
-                'category_id' => $streamCategory->id,
-                'session_no' => 1,
-                'scheduled_on' => '2026-08-20',
-            ]);
+            $this->assertSame('2026-08-20', StreamSession::query()
+                ->where('category_id', $streamCategory->id)->where('session_no', 1)
+                ->firstOrFail()->scheduled_on->format('Y-m-d'));
         }
         foreach ($performances as $performance) {
             $this->assertNotNull($performance->fresh()->stream_session_id);
@@ -181,6 +179,70 @@ class GroupStreamBuilderTest extends TestCase
             $response->getContent(),
         );
         $response->assertSee('применяются сразу ко всем 2 потокам', false);
+    }
+
+    public function test_adding_session_keeps_already_started_performances_in_its_history(): void
+    {
+        $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
+        $group = Group::create([
+            'tournament_id' => $tournament->id,
+            'program' => 'individual',
+            'birth_year' => 2012,
+            'division' => 'A',
+            'name' => '2012 г.р., A',
+            'apparatus' => ['Обруч'],
+        ]);
+        $category = Category::create([
+            'tournament_id' => $tournament->id,
+            'group_id' => $group->id,
+            'name' => '2012 г.р., A — Поток 1',
+            'program' => 'individual',
+            'birth_year' => 2012,
+            'division' => 'A',
+            'stream_no' => 1,
+        ]);
+        $tournament->update(['active_category_id' => $category->id]);
+
+        $performances = collect(['scheduled', 'performing', 'done', 'withdrawn'])
+            ->map(function (string $status, int $index) use ($category) {
+                $athlete = Athlete::create([
+                    'first_name' => 'Имя'.$index,
+                    'last_name' => 'Фамилия'.$index,
+                ]);
+
+                return Performance::create([
+                    'category_id' => $category->id,
+                    'athlete_id' => $athlete->id,
+                    'apparatus' => 'Обруч',
+                    'order_index' => $index + 1,
+                    'status' => $status,
+                    'd_score' => $status === 'done' ? 6.0 : null,
+                    'total' => $status === 'done' ? 20.0 : null,
+                    'withdrawn_at' => $status === 'withdrawn' ? now() : null,
+                ]);
+            });
+
+        $this->actingAs($this->secretary())
+            ->post(route('secretary.tournament.categories.sessions.store', [$tournament, $category]), [
+                'scheduled_on' => '2026-08-22',
+                'starts_at' => '18:15',
+                'ends_at' => '19:19',
+                'apparatus' => ['Обруч'],
+            ])
+            ->assertRedirect();
+
+        $session = $category->sessions()->firstOrFail();
+        foreach ($performances as $performance) {
+            $performance->refresh();
+            $this->assertSame($session->id, $performance->stream_session_id);
+        }
+
+        $this->assertSame('performing', $performances[1]->fresh()->status);
+        $this->assertSame($session->id, $tournament->fresh()->active_stream_session_id);
+        $this->assertSame('done', $performances[2]->fresh()->status);
+        $this->assertSame(20.0, (float) $performances[2]->fresh()->total);
+        $this->assertSame('withdrawn', $performances[3]->fresh()->status);
+        $this->assertNotNull($performances[3]->fresh()->withdrawn_at);
     }
 
     public function test_updating_and_deleting_group_session_syncs_every_stream(): void

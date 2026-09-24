@@ -24,8 +24,8 @@
                 </a>
                 @if($tr->categories->isNotEmpty())
                     <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500"
-                        href="{{ route('secretary.tournament.live', $tr) }}?category={{ $tr->categories->sortBy('id')->first()->id }}">
-                        Live — Секретарь
+                        href="{{ auth()->user()->isChiefJudge() ? route('secretary.queue.review', $tr->categories->sortBy('id')->first()) : route('secretary.tournament.live', ['tournament' => $tr, 'category' => $tr->categories->sortBy('id')->first()->id]) }}">
+                        {{ auth()->user()->isChiefJudge() ? 'Просмотр оценок' : 'Live — Секретарь' }}
                     </a>
                     <form method="POST"
                           action="{{ route('secretary.tournament.categories.clear', $tr) }}"

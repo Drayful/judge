@@ -209,7 +209,13 @@ class GroupStreamSessionService
 
         Performance::query()
             ->where('category_id', $category->id)
-            ->where('status', 'scheduled')
+            // Сессия может быть создана уже после начала потока. В таком случае
+            // завершённые, текущие и снятые выступления тоже должны получить
+            // правильную сессию, иначе они исчезнут из её истории.
+            ->where(function ($query) use ($session) {
+                $query->whereNull('stream_session_id')
+                    ->orWhere('stream_session_id', $session->id);
+            })
             ->get(['id', 'apparatus'])
             ->filter(fn (Performance $performance) => in_array(
                 PerformanceApparatus::sessionKey($performance->apparatus),
@@ -217,5 +223,20 @@ class GroupStreamSessionService
                 true,
             ))
             ->each(fn (Performance $performance) => $performance->update(['stream_session_id' => $session->id]));
+
+        $hasCurrentPerformance = Performance::query()
+            ->where('category_id', $category->id)
+            ->where('stream_session_id', $session->id)
+            ->where('status', 'performing')
+            ->exists();
+
+        if ($hasCurrentPerformance) {
+            // Если сессию создали во время выступления, планшеты должны сразу
+            // продолжить смотреть на перенесённую текущую гимнастку.
+            $category->tournament()
+                ->where('active_category_id', $category->id)
+                ->whereNull('active_stream_session_id')
+                ->update(['active_stream_session_id' => $session->id]);
+        }
     }
 }

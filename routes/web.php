@@ -9,6 +9,7 @@ use App\Http\Controllers\ScoreboardController;
 use App\Http\Controllers\ScoreboardJudgeController;
 use App\Http\Controllers\SecretaryController;
 use App\Http\Controllers\SupervisorController;
+use App\Http\Controllers\TournamentWorkflowController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -29,6 +30,11 @@ Route::get('/dashboard', function () {
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
+    Route::post('/secretary/tournaments/{tournament}/scoring-settings', [TournamentWorkflowController::class, 'settings'])->middleware('role:secretary,admin')->name('workflow.settings');
+    Route::post('/secretary/tournaments/{tournament}/judges-import', [TournamentWorkflowController::class, 'importJudges'])->middleware('role:secretary,admin')->name('workflow.judges.import');
+    Route::post('/judge/tournaments/{tournament}/identity', [TournamentWorkflowController::class, 'bindJudge'])->middleware('role:judge,admin')->name('workflow.judges.bind');
+    Route::post('/secretary/categories/{category}/state', [TournamentWorkflowController::class, 'streamState'])->middleware('role:secretary,admin')->name('workflow.stream.state');
+    Route::post('/secretary/sessions/{session}/award', [TournamentWorkflowController::class, 'award'])->middleware('role:secretary,admin')->name('workflow.award');
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
@@ -275,6 +281,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/scoreboard-judge/performances/{performance}/accept', [ScoreboardJudgeController::class, 'accept'])
         ->middleware('role:scoreboard_judge,admin,super_admin')
         ->name('scoreboard-judge.accept');
+    Route::post('/scoreboard-judge/performances/{performance}/cancel', [ScoreboardJudgeController::class, 'cancel'])
+        ->middleware('role:scoreboard_judge,admin,super_admin')
+        ->name('scoreboard-judge.cancel');
 
     Route::post('/performances/{performance}/inquiries', [InquiryController::class, 'store'])
         ->middleware('role:secretary,superior_jury,head_judge,chief_judge,admin,super_admin')

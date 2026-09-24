@@ -48,6 +48,7 @@
                         @csrf
                         <input type="hidden" name="tournament_id" value="{{ $tournament->id }}">
                         <button class="rounded-lg border border-slate-600 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60">↻ Показать ещё раз</button>
+                        <button formaction="{{ route('scoreboard-judge.cancel', $performance) }}" class="rounded-lg border border-rose-500 bg-rose-950 px-4 py-2 text-sm text-white">Отменить показ</button>
                     </form>
                 </div>
             @endforeach

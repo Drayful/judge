@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\StreamSession;
 use App\Models\Tournament;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -16,9 +17,9 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 /** Excel-выгрузки, которые секретарь использует до начала судейства. */
 class StartProtocolExporter
 {
-    public function buildStartSheet(Tournament $tournament): Spreadsheet
+    public function buildStartSheet(Tournament $tournament, ?string $date = null): Spreadsheet
     {
-        return $this->buildStartDocument($tournament, 'СТАРТОВЫЙ ЛИСТ', 'Стартовый лист');
+        return $this->buildStartDocument($tournament, 'СТАРТОВЫЙ ЛИСТ', 'Стартовый лист', $date);
     }
 
     public function buildStartProtocol(Tournament $tournament): Spreadsheet
@@ -28,55 +29,47 @@ class StartProtocolExporter
 
     public function buildProgramme(Tournament $tournament): Spreadsheet
     {
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Программа');
-
-        $sheet->mergeCells('A1:G1');
-        $sheet->setCellValue('A1', $tournament->name);
-        $sheet->mergeCells('A2:G2');
-        $sheet->setCellValue('A2', 'ПРОГРАММА СОРЕВНОВАНИЙ');
-        $this->styleTitle($sheet, 'A1:G2');
-
-        $headers = ['Дата', 'Время', 'Группа', 'Поток', 'Программа', 'Вид / предмет', 'Участниц'];
-        $sheet->fromArray($headers, null, 'A4');
-        $this->styleHeader($sheet, 'A4:G4');
-
-        $row = 5;
-        $categories = Category::query()
-            ->with(['group', 'sessions', 'performances'])
-            ->where('tournament_id', $tournament->id)
-            ->orderedByPerformanceTime()
-            ->get();
-
-        foreach ($categories as $category) {
-            $sessions = $category->sessions;
-            if ($sessions->isEmpty()) {
-                $this->writeProgrammeRow($sheet, $row++, $category, null);
-
-                continue;
+        $book = new Spreadsheet;
+        $categories = Category::query()->with(['group', 'sessions', 'performances'])
+            ->where('tournament_id', $tournament->id)->orderedByPerformanceTime()->get();
+        $days = $this->startDocumentBlocks($categories)->groupBy(
+            fn ($block) => $block['session']?->scheduled_on?->format('Y-m-d') ?? 'Без даты',
+        );
+        if ($days->isEmpty()) {
+            $days = collect(['Без даты' => collect()]);
+        }
+        foreach ($days as $date => $blocks) {
+            $sheet = $book->getSheetCount() === 1 && $book->getActiveSheet()->getCell('A1')->getValue() === null
+                ? $book->getActiveSheet() : $book->createSheet();
+            $sheet->setTitle($date);
+            $sheet->mergeCells('A1:G1')->setCellValue('A1', $tournament->name);
+            $sheet->mergeCells('A2:G2')->setCellValue('A2', 'ПРОГРАММА СОРЕВНОВАНИЙ · '.$date);
+            $this->styleTitle($sheet, 'A1:G2');
+            $sheet->fromArray(['Дата', 'Время', 'Группа', 'Поток', 'Программа', 'Вид / предмет', 'Участниц'], null, 'A4');
+            $this->styleHeader($sheet, 'A4:G4');
+            $row = 5;
+            foreach ($blocks as $block) {
+                $session = $block['session'];
+                $this->writeProgrammeRow($sheet, $row++, $block['category'], $session);
+                if ($session && $session->award_minutes > 0 && $session->ends_at) {
+                    $start = Carbon::parse($session->ends_at);
+                    $sheet->fromArray([$date, $start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i'), 'Награждение', '', '', $session->award_minutes.' мин.'], null, 'A'.$row++);
+                }
             }
-            foreach ($sessions as $session) {
-                $this->writeProgrammeRow($sheet, $row++, $category, $session);
+            if ($row > 5) {
+                $sheet->getStyle('A4:G'.($row - 1))->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
             }
+            foreach (['A' => 14, 'B' => 16, 'C' => 40, 'D' => 12, 'E' => 20, 'F' => 32, 'G' => 12] as $column => $width) {
+                $sheet->getColumnDimension($column)->setWidth($width);
+            }
+            $sheet->getStyle('A1:G'.max(5, $row - 1))->getAlignment()->setWrapText(true);
+            $sheet->freezePane('A5');
         }
 
-        if ($row === 5) {
-            $sheet->mergeCells('A5:G5');
-            $sheet->setCellValue('A5', 'Потоки ещё не сформированы.');
-        } else {
-            $sheet->getStyle('A4:G'.($row - 1))->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-        }
-
-        foreach (['A' => 14, 'B' => 16, 'C' => 32, 'D' => 12, 'E' => 16, 'F' => 32, 'G' => 12] as $column => $width) {
-            $sheet->getColumnDimension($column)->setWidth($width);
-        }
-        $sheet->freezePane('A5');
-
-        return $spreadsheet;
+        return $book;
     }
 
-    private function buildStartDocument(Tournament $tournament, string $heading, string $sheetTitle): Spreadsheet
+    private function buildStartDocument(Tournament $tournament, string $heading, string $sheetTitle, ?string $date = null): Spreadsheet
     {
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
@@ -103,6 +96,9 @@ class StartProtocolExporter
 
             foreach ($blocks as $block) {
                 $dateKey = $block['session']?->scheduled_on?->format('Y-m-d') ?? 'undated';
+                if ($date !== null && $dateKey !== $date) {
+                    continue;
+                }
                 if ($dateKey !== $currentDate) {
                     if (! $firstDateSection) {
                         $sheet->setBreak("A{$row}", Worksheet::BREAK_ROW);

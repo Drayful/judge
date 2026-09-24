@@ -14,8 +14,8 @@
                    href="{{ route('secretary.tournament', $tournament) }}">← Турнир</a>
                 @if($tournament->categories->isNotEmpty())
                     <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
-                       href="{{ route('secretary.tournament.live', $tournament) }}?category={{ $tournament->categories->sortBy('id')->first()->id }}">
-                        Live — Секретарь
+                       href="{{ auth()->user()->isChiefJudge() ? route('secretary.queue.review', $tournament->categories->sortBy('id')->first()) : route('secretary.tournament.live', ['tournament' => $tournament, 'category' => $tournament->categories->sortBy('id')->first()->id]) }}">
+                        {{ auth()->user()->isChiefJudge() ? 'Просмотр оценок' : 'Live — Секретарь' }}
                     </a>
                 @endif
             </div>
@@ -129,6 +129,9 @@
                             </div>
                             <div>
                                 <x-input-label value="Начало дня (ЧЧ:ММ)" />
+                                <label class="block text-sm text-slate-300">Дата потока
+                                    <input name="scheduled_on" type="date" required value="{{ old('scheduled_on', $tournament->starts_on?->format('Y-m-d') ?? now()->format('Y-m-d')) }}" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950 text-slate-100">
+                                </label>
                                 <x-text-input name="start_time" type="time" value="08:00"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
@@ -453,6 +456,9 @@
                             </div>
                             <div>
                                 <x-input-label value="Начало дня (ЧЧ:ММ)" />
+                                <label class="block text-sm text-slate-300">Дата потока
+                                    <input name="scheduled_on" type="date" required value="{{ old('scheduled_on', $tournament->starts_on?->format('Y-m-d') ?? now()->format('Y-m-d')) }}" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950 text-slate-100">
+                                </label>
                                 <x-text-input name="start_time" type="time" value="08:00"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
@@ -515,6 +521,9 @@
                             </div>
                             <div>
                                 <x-input-label value="Начало (ЧЧ:ММ)" />
+                                <label class="block text-sm text-slate-300">Дата потока
+                                    <input name="scheduled_on" type="date" required value="{{ old('scheduled_on', $tournament->starts_on?->format('Y-m-d') ?? now()->format('Y-m-d')) }}" class="mt-1 block w-full rounded-lg border-slate-700 bg-slate-950 text-slate-100">
+                                </label>
                                 <x-text-input name="start_time" type="time" value="08:00"
                                               class="mt-1 block w-full border-slate-700 bg-slate-950/50 text-slate-100" />
                             </div>
@@ -784,4 +793,6 @@
             </x-card>
         </div>
     </div>
+    @include('secretary.partials.workflow-settings')
+    @include('secretary.partials.schedule-days')
 </x-app-layout>

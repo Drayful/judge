@@ -12,6 +12,7 @@ use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
+use App\Models\User;
 use App\Services\FinalProtocolExporter;
 use App\Services\FinalProtocolService;
 use App\Services\GroupStreamSessionService;
@@ -264,9 +265,11 @@ class SecretaryController extends Controller
         ]);
     }
 
-    public function downloadStartSheet(Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
+    public function downloadStartSheet(Request $request, Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
     {
-        return $this->downloadSpreadsheet($exporter->buildStartSheet($tournament), 'start_sheet_'.$tournament->id.'.xlsx');
+        $data = $request->validate(['date' => ['nullable', 'date_format:Y-m-d']]);
+
+        return $this->downloadSpreadsheet($exporter->buildStartSheet($tournament, $data['date'] ?? null), 'start_sheet_'.$tournament->id.(! empty($data['date']) ? '_'.$data['date'] : '').'.xlsx');
     }
 
     public function downloadStartProtocol(Tournament $tournament, StartProtocolExporter $exporter): StreamedResponse
@@ -617,6 +620,7 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_on' => ['nullable', 'date_format:Y-m-d'],
             'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ], [
             'apparatus.required' => 'Выберите хотя бы один предмет для индивидуальных.',
@@ -661,7 +665,7 @@ class SecretaryController extends Controller
             }
 
             $groupsCreated = $groups->count();
-            $streamsCreated = $this->cascadeStreams($groups, $streamSize, $data['start_time'] ?? null, $minutesPerAthlete, $numberMode, $builder, 'tournament:'.$tournament->id.':assembled');
+            $streamsCreated = $this->cascadeStreams($groups, $streamSize, $data['start_time'] ?? null, $minutesPerAthlete, $numberMode, $builder, 'tournament:'.$tournament->id.':assembled', $data['scheduled_on'] ?? null);
         });
 
         return redirect()->route('secretary.tournament.groups', $tournament)
@@ -678,6 +682,7 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_on' => ['nullable', 'date_format:Y-m-d'],
             'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
 
@@ -704,6 +709,7 @@ class SecretaryController extends Controller
                 $data['number_mode'] ?? null, // null → у каждой группы свой режим
                 $builder,
                 'tournament:'.$tournament->id.':all',
+                $data['scheduled_on'] ?? null,
             );
         });
 
@@ -718,7 +724,7 @@ class SecretaryController extends Controller
      * @param  Collection<int, Group>  $groups
      * @return int число сформированных потоков
      */
-    private function cascadeStreams($groups, int $streamSize, ?string $startTime, ?int $minutesPerAthlete, ?string $numberModeOverride, StreamBuilderService $builder, string $scheduleChain): int
+    private function cascadeStreams($groups, int $streamSize, ?string $startTime, ?int $minutesPerAthlete, ?string $numberModeOverride, StreamBuilderService $builder, string $scheduleChain, ?string $scheduledOn = null): int
     {
         $streamSize = max(1, $streamSize);
         $cursor = ($startTime !== null && $minutesPerAthlete !== null)
@@ -748,7 +754,7 @@ class SecretaryController extends Controller
             }
 
             $mode = $numberModeOverride ?? $group->number_mode ?? 'per_stream';
-            $builder->generateStreams($group, $streamSize, $times, $mode);
+            $builder->generateStreams($group, $streamSize, $times, $mode, $scheduledOn);
             $streamsCreated += $streamCount;
         }
 
@@ -1067,6 +1073,7 @@ class SecretaryController extends Controller
             'stream_size' => ['required', 'integer', 'min:1', 'max:200'],
             'number_mode' => ['nullable', 'string', 'in:continuous,per_stream'],
             'start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_on' => ['nullable', 'date_format:Y-m-d'],
             'minutes_per_athlete' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
 
@@ -1082,6 +1089,7 @@ class SecretaryController extends Controller
             (int) $data['stream_size'],
             $times,
             $data['number_mode'] ?? $group->number_mode ?? 'per_stream',
+            $data['scheduled_on'] ?? null,
         );
 
         $streams = $group->categories()->count();
@@ -1666,10 +1674,12 @@ class SecretaryController extends Controller
         $tournament = $category->tournament;
         abort_unless($tournament !== null, 404);
         $session = $this->requestedStreamSession($request, $category);
-        $poolResults = $protocols->poolAthletesById($category);
+        $filter = $request->validate(['birth_year' => ['nullable', 'integer', 'min:1900', 'max:2100']]);
+        $poolResults = $protocols->poolAthletesById($category, false, isset($filter['birth_year']) ? (int) $filter['birth_year'] : null);
         $performances = Performance::query()
             ->with('athlete')
             ->where('category_id', $category->id)
+            ->when(isset($filter['birth_year']), fn ($query) => $query->whereHas('athlete', fn ($athletes) => $athletes->whereYear('birthdate', $filter['birth_year'])))
             ->when(
                 $session !== null,
                 fn ($query) => $query->where('stream_session_id', $session->id),
@@ -1691,6 +1701,10 @@ class SecretaryController extends Controller
         })->all();
 
         $fileName = 'stream_'.$category->id.($session ? '_session_'.$session->id : '').'_results.xlsx';
+        if (isset($filter['birth_year'])) {
+            $category->name .= ' · '.$filter['birth_year'].' г.р.';
+            $fileName = 'stream_'.$category->id.'_year_'.$filter['birth_year'].'_results.xlsx';
+        }
 
         return $this->downloadSpreadsheet(
             $exporter->buildStreamReview($tournament, $category, $session, $rows),
@@ -1944,11 +1958,12 @@ class SecretaryController extends Controller
         $scoreHistoryByPerformance = $ordered->mapWithKeys(function (Performance $performance) use ($category) {
             $slots = [];
             $rules = $performance->category?->scoring_rules ?? $category->scoring_rules ?? [];
-            foreach (SecretaryLiveUi::scoreRowsBySlot($performance, $category, true) as $slot => $row) {
+            foreach (array_merge(SecretaryLiveUi::scoreRowsBySlot($performance, $category, true), SecretaryLiveUi::difficultyAverageRows($performance)) as $slot => $row) {
                 if ($row === null) {
                     continue;
                 }
-                $score = $row->score !== null ? (float) $row->score : null;
+                $scoreValue = in_array($slot, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true) ? $row->average_score : $row->score;
+                $score = $scoreValue !== null ? (float) $scoreValue : null;
                 $isDeduction = in_array($row->panel, ['a', 'e'], true);
                 $base = (float) ($rules[$row->panel.'_base'] ?? 10.0);
                 $displayScore = $score;
@@ -1957,12 +1972,14 @@ class SecretaryController extends Controller
                 }
                 $slots[$slot] = [
                     'slot' => $slot,
-                    'judge' => $row->judge?->name ?? '—',
+                    'judge' => $row->judge_name ?? $row->judge?->name ?? '—',
+                    'returned' => $row->returned_at !== null,
+                    'same_club' => filled($row->judge_club) && mb_strtolower(trim($row->judge_club)) === mb_strtolower(trim($performance->athlete?->club ?? '')),
                     'score' => $score !== null ? number_format($score, 3, '.', '') : '—',
                     'display_score' => $displayScore !== null ? number_format($displayScore, 3, '.', '') : '—',
                     'display_label' => $isDeduction ? 'Сбавка' : 'Оценка',
                     'age_group' => $row->age_group,
-                    'submitted_at' => $row->submitted_at?->format('H:i:s'),
+                    'submitted_at' => ($row->submitted_at ?? $row->average_submitted_at)?->format('H:i:s'),
                     'entries' => $row->entries ?? [],
                 ];
             }
@@ -2039,7 +2056,7 @@ class SecretaryController extends Controller
             'scoreHistory' => $scoreHistory,
             'scoreHistoryByPerformance' => $scoreHistoryByPerformance,
             'poolResultsByAthlete' => $poolResultsByAthlete,
-            'historyJudgeColumns' => SecretaryLiveUi::ALL_JUDGE_SLOTS,
+            'historyJudgeColumns' => array_merge(SecretaryLiveUi::ALL_JUDGE_SLOTS, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS),
             'liveJudgeActions' => $liveJudgeActions,
             'queueRev' => $this->queuePing(request(), $category)->getData(true)['rev'] ?? null,
         ];
@@ -2101,7 +2118,7 @@ class SecretaryController extends Controller
             $locked->approved_at = now();
             $locked->save();
 
-            if ($category?->autoAdvanceEnabled() && $locked->status === 'performing') {
+            if (! request()->user()->isChiefJudge() && $category?->autoAdvanceEnabled() && $locked->status === 'performing') {
                 $moved = StreamAdvanceService::advanceToNextInCategory($category, $locked->stream_session_id);
             }
         });
@@ -2125,7 +2142,7 @@ class SecretaryController extends Controller
     {
         $data = $request->validate([
             'panel' => ['nullable', Rule::in(['db', 'da', 'a', 'e', 'penalty', 'all'])],
-            'slot' => ['nullable', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'slot' => ['nullable', 'string', Rule::in(array_merge(SecretaryLiveUi::ALL_JUDGE_SLOTS, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS))],
         ]);
 
         if (empty($data['panel']) && empty($data['slot'])) {
@@ -2140,7 +2157,7 @@ class SecretaryController extends Controller
 
             if (! empty($data['slot'])) {
                 $performance->load(['judgeScores.judge', 'category']);
-                $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category);
+                $rows = array_merge(SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category), SecretaryLiveUi::difficultyAverageRows($performance));
                 $row = $rows[$data['slot']] ?? null;
 
                 if ($data['slot'] === 'TIME'
@@ -2154,10 +2171,11 @@ class SecretaryController extends Controller
                     $timerReturned = true;
                     $returned = 1;
                     $label = 'TIME';
-                } elseif ($row === null || $row->submitted_at === null) {
+                } elseif ($row === null || ($row->submitted_at === null && $row->average_submitted_at === null)) {
                     return back()->withErrors(['return' => 'Для слота '.$data['slot'].' нет отправленной оценки — возвращать нечего.']);
                 } else {
                     $row->submitted_at = null;
+                    $row->returned_at = now();
                     $row->average_score = null;
                     $row->average_submitted_at = null;
                     $row->save();
@@ -2184,11 +2202,16 @@ class SecretaryController extends Controller
                     $label = strtoupper($key);
                 }
 
-                $returned = $query->update([
-                    'submitted_at' => null,
-                    'average_score' => null,
-                    'average_submitted_at' => null,
-                ]);
+                $returnedRows = $query->get();
+                $returned = $returnedRows->count();
+                foreach ($returnedRows as $returnedRow) {
+                    $returnedRow->forceFill([
+                        'submitted_at' => null,
+                        'returned_at' => now(),
+                        'average_score' => null,
+                        'average_submitted_at' => null,
+                    ])->save();
+                }
 
                 if (in_array($key, ['db', 'da', 'all'], true)) {
                     $averageQuery = JudgeScore::query()
@@ -2198,10 +2221,15 @@ class SecretaryController extends Controller
                     if ($key !== 'all') {
                         $averageQuery->where('subpanel', $key);
                     }
-                    $returned += $averageQuery->update([
-                        'average_score' => null,
-                        'average_submitted_at' => null,
-                    ]);
+                    foreach ($averageQuery->get() as $averageRow) {
+                        $averageRow->forceFill([
+                            'submitted_at' => null,
+                            'average_score' => null,
+                            'average_submitted_at' => null,
+                            'returned_at' => now(),
+                        ])->save();
+                        $returned++;
+                    }
                 }
 
                 if (in_array($key, ['penalty', 'all'], true)) {
@@ -2242,17 +2270,18 @@ class SecretaryController extends Controller
     public function scoreLiveHistory(Performance $performance, Request $request): JsonResponse
     {
         $data = $request->validate([
-            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'slot' => ['required', 'string', Rule::in(array_merge(SecretaryLiveUi::ALL_JUDGE_SLOTS, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS))],
         ]);
         $slot = strtoupper((string) $data['slot']);
         $performance->loadMissing(['athlete', 'category.tournament', 'judgeScores.judge']);
         $category = $performance->category;
         abort_unless($category !== null, 404);
 
-        $row = SecretaryLiveUi::scoreRowsBySlot($performance, $category, true)[$slot] ?? null;
+        $row = array_merge(SecretaryLiveUi::scoreRowsBySlot($performance, $category, true), SecretaryLiveUi::difficultyAverageRows($performance))[$slot] ?? null;
         $score = null;
         if ($row !== null) {
-            $rawScore = $row->score !== null ? (float) $row->score : null;
+            $scoreValue = in_array($slot, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true) ? $row->average_score : $row->score;
+            $rawScore = $scoreValue !== null ? (float) $scoreValue : null;
             $isDeduction = in_array($row->panel, ['a', 'e'], true);
             $rules = $category->scoring_rules ?? [];
             $base = (float) ($rules[$row->panel.'_base'] ?? 10.0);
@@ -2260,11 +2289,13 @@ class SecretaryController extends Controller
                 ? max(0.0, $base - $rawScore)
                 : $rawScore;
             $score = [
-                'judge' => $row->judge?->name ?? '—',
+                'judge' => $row->judge_name ?? $row->judge?->name ?? '—',
+                'returned' => $row->returned_at !== null,
+                'same_club' => filled($row->judge_club) && mb_strtolower(trim($row->judge_club)) === mb_strtolower(trim($performance->athlete?->club ?? '')),
                 'score' => $rawScore !== null ? number_format($rawScore, 3, '.', '') : '—',
                 'display_score' => $displayScore !== null ? number_format($displayScore, 3, '.', '') : '—',
                 'display_label' => $isDeduction ? 'Сбавка' : 'Оценка',
-                'submitted_at' => $row->submitted_at?->format('H:i:s'),
+                'submitted_at' => ($row->submitted_at ?? $row->average_submitted_at)?->format('H:i:s'),
                 'age_group' => $row->age_group,
                 'entries' => $row->entries ?? [],
             ];
@@ -2310,22 +2341,70 @@ class SecretaryController extends Controller
     public function updateJudgeScore(Performance $performance, Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'slot' => ['required', 'string', Rule::in(array_merge(SecretaryLiveUi::ALL_JUDGE_SLOTS, SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS))],
             'score' => ['required', 'numeric', 'min:0', 'max:99.999'],
+            'input_mode' => ['nullable', Rule::in(['deduction', 'score'])],
         ]);
 
         return DB::transaction(function () use ($performance, $data) {
             $performance = Performance::query()->lockForUpdate()->findOrFail($performance->id);
             $performance->load(['judgeScores.judge', 'category']);
-            $rows = SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category, true);
+            $rows = array_merge(SecretaryLiveUi::scoreRowsBySlot($performance, $performance->category, true), SecretaryLiveUi::difficultyAverageRows($performance));
             $row = $rows[$data['slot']] ?? null;
 
             if ($row === null) {
-                return back()->withErrors(['edit' => 'Для слота '.$data['slot'].' нет оценки — исправлять нечего.']);
+                $judges = User::query()->where('slot', $data['slot'])->get()
+                    ->filter(fn ($judge) => $judge->judgePanel() !== null);
+                if ($judges->count() !== 1) {
+                    return back()->withErrors(['edit' => 'Для ввода оценки нужен один назначенный судья слота '.$data['slot'].'.']);
+                }
+                $judge = $judges->first();
+                $panel = $judge->judgePanel();
+                $row = new JudgeScore([
+                    'performance_id' => $performance->id,
+                    'judge_id' => $judge->id,
+                    'panel' => $panel['panel'],
+                    'subpanel' => $panel['subpanel'] ?? null,
+                    'penalty_type' => $panel['penalty_type'] ?? null,
+                ]);
             }
 
-            $row->score = (float) $data['score'];
+            $value = (float) $data['score'];
+            if (($data['input_mode'] ?? 'score') === 'deduction' && in_array($row->panel, ['a', 'e'], true)) {
+                $base = (float) (($performance->category->scoring_rules ?? [])[$row->panel.'_base'] ?? 10);
+                if ($value > $base) {
+                    return back()->withErrors(['edit' => 'Сбавка не может превышать '.$base.'.']);
+                }
+                $value = $base - $value;
+            }
+            $before = in_array($data['slot'], SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true) ? $row->average_score : $row->score;
+            $displayBefore = $before;
+            if (($data['input_mode'] ?? 'score') === 'deduction' && in_array($row->panel, ['a', 'e'], true) && $before !== null) {
+                $displayBefore = $base - (float) $before;
+            }
+            if (in_array($data['slot'], SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true)) {
+                $row->average_score = round($value, 3);
+                $row->average_submitted_at = now();
+                $row->returned_at = null;
+            } else {
+                $row->score = round($value, 3);
+                $row->submitted_at = now();
+            }
             $row->save();
+            if ($row->wasRecentlyCreated) {
+                JudgeScoreAction::create([
+                    'performance_id' => $performance->id,
+                    'judge_id' => $row->judge_id,
+                    'slot' => $data['slot'],
+                    'panel' => $row->panel,
+                    'subpanel' => $row->subpanel,
+                    'penalty_type' => $row->penalty_type,
+                    'action' => 'Исправление '.(($data['input_mode'] ?? 'score') === 'deduction' ? 'исходного балла/сбавки' : 'оценки').': '.($displayBefore === null ? 'не отправлено' : number_format((float) $displayBefore, 3, '.', ''))
+                        .' → '.number_format((float) $data['score'], 3, '.', '').' ('.auth()->user()->name.')',
+                    'draft_score' => $value,
+                    'entries' => $row->entries ?? [],
+                ]);
+            }
 
             $performance->refresh();
             $performance->load(['judgeScores', 'category']);
@@ -2917,7 +2996,7 @@ class SecretaryController extends Controller
         $error = null;
         DB::transaction(function () use ($performance, $categoryId, $sessionId, &$error): void {
             $previous = Performance::query()->lockForUpdate()->findOrFail($performance->id);
-            if ($previous->status !== 'done') {
+            if (! in_array($previous->status, ['done', 'published'], true)) {
                 $error = 'Вернуть можно только последнее завершённое выступление.';
 
                 return;
@@ -2934,12 +3013,6 @@ class SecretaryController extends Controller
                 ->lockForUpdate()
                 ->first();
 
-            if ($current === null) {
-                $error = 'Нет текущей гимнастки, переход к которой можно отменить.';
-
-                return;
-            }
-
             $latestCompleted = Performance::query()
                 ->where('category_id', $categoryId)
                 ->when(
@@ -2947,7 +3020,7 @@ class SecretaryController extends Controller
                     fn ($query) => $query->where('stream_session_id', $sessionId),
                     fn ($query) => $query->whereNull('stream_session_id'),
                 )
-                ->where('status', 'done')
+                ->whereIn('status', ['done', 'published'])
                 ->orderByDesc('ended_at')
                 ->orderByDesc('id')
                 ->lockForUpdate()
@@ -2959,7 +3032,7 @@ class SecretaryController extends Controller
                 return;
             }
 
-            $currentHasActivity = $current->timer_started_at !== null
+            $currentHasActivity = $current !== null && ($current->timer_started_at !== null
                 || $current->timer_ended_at !== null
                 || $current->actual_duration_seconds !== null
                 || $current->finalized_at !== null
@@ -2967,7 +3040,7 @@ class SecretaryController extends Controller
                 || $current->published_at !== null
                 || $current->scores_overridden
                 || $current->judgeScores()->exists()
-                || $current->judgeScoreActions()->exists();
+                || $current->judgeScoreActions()->exists());
 
             if ($currentHasActivity) {
                 $error = 'Нельзя вернуться назад: по текущей гимнастке уже запущен таймер или началось судейство.';
@@ -2975,17 +3048,19 @@ class SecretaryController extends Controller
                 return;
             }
 
-            $current->status = 'scheduled';
-            $current->called_at = null;
-            $current->started_at = null;
-            $current->timer_started_at = null;
-            $current->timer_ended_at = null;
-            $current->timer_revision_requested_at = null;
-            $current->ended_at = null;
-            $current->actual_duration_seconds = null;
-            $current->time_penalty = 0;
-            $current->save();
+            if ($current !== null) {
+                $current->status = 'scheduled';
+                $current->called_at = null;
+                $current->started_at = null;
+                $current->timer_started_at = null;
+                $current->timer_ended_at = null;
+                $current->timer_revision_requested_at = null;
+                $current->ended_at = null;
+                $current->actual_duration_seconds = null;
+                $current->time_penalty = 0;
+                $current->save();
 
+            }
             $previous->status = 'performing';
             $previous->ended_at = null;
             $previous->save();

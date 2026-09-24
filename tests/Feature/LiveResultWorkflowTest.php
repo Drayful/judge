@@ -1528,7 +1528,7 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertFalse($performance->category->fresh()->auto_advance);
     }
 
-    public function test_combined_live_queue_advances_to_the_next_stream_without_reassigning_results(): void
+    public function test_combined_live_queue_waits_for_manual_stream_selection(): void
     {
         $tournament = Tournament::create(['name' => 'T', 'timezone' => 'Asia/Almaty']);
         $group = Group::create([
@@ -1614,13 +1614,13 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertSame($firstCategory->id, $first->fresh()->category_id);
         $this->assertSame($thirdCategory->id, $third->fresh()->category_id);
 
-        $this->assertTrue(StreamAdvanceService::advanceToNextInCategory($firstCategory));
+        $this->assertFalse(StreamAdvanceService::advanceToNextInCategory($firstCategory));
         $this->assertSame('done', $first->fresh()->status);
         $this->assertSame('scheduled', $second->fresh()->status);
-        $this->assertSame('performing', $third->fresh()->status);
+        $this->assertSame('scheduled', $third->fresh()->status);
         $this->assertSame($thirdCategory->id, $third->fresh()->category_id);
         $this->assertSame([$firstCategory->id, $thirdCategory->id], $tournament->fresh()->combinedLiveCategoryIds());
-        $this->assertSame($thirdCategory->id, $tournament->fresh()->active_category_id);
+        $this->assertSame($firstCategory->id, $tournament->fresh()->active_category_id);
 
         $this->actingAs($secretary)
             ->post(route('secretary.tournament.liveQueue', $tournament))

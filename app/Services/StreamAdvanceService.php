@@ -17,6 +17,10 @@ class StreamAdvanceService
     public static function advanceToNextInCategory(Category $category, ?int $streamSessionId = null): bool
     {
         return DB::transaction(function () use ($category, $streamSessionId) {
+            $state = $streamSessionId === null ? $category->fresh() : StreamSession::findOrFail($streamSessionId);
+            if ($state->closed_at !== null) {
+                return false;
+            }
             $performing = Performance::query()
                 ->where('category_id', $category->id)
                 ->when(
@@ -58,70 +62,7 @@ class StreamAdvanceService
                 return true;
             }
 
-            $category->loadMissing(['group', 'tournament']);
-            $combinedCategoryIds = $category->tournament?->combinedLiveCategoryIds() ?? [];
-            if (! $category->tournament?->hasCombinedLiveQueue()
-                || ! in_array($category->id, $combinedCategoryIds, true)) {
-                return false;
-            }
-
-            $currentSession = $streamSessionId !== null
-                ? StreamSession::query()->find($streamSessionId)
-                : null;
-            $currentPosition = array_search($category->id, $combinedCategoryIds, true);
-            $remainingCategoryIds = $currentPosition === false
-                ? []
-                : array_slice($combinedCategoryIds, $currentPosition + 1);
-            $siblings = Category::query()
-                ->where('tournament_id', $category->tournament_id)
-                ->whereIn('id', $remainingCategoryIds)
-                ->get()
-                ->keyBy('id');
-
-            foreach ($remainingCategoryIds as $siblingId) {
-                $sibling = $siblings->get($siblingId);
-                if ($sibling === null) {
-                    continue;
-                }
-                $targetSessionId = null;
-                if ($currentSession !== null) {
-                    $targetSessionId = $sibling->sessions()
-                        ->where('session_no', $currentSession->session_no)
-                        ->value('id');
-                    if ($targetSessionId === null) {
-                        continue;
-                    }
-                }
-
-                $combinedNext = Performance::query()
-                    ->where('category_id', $sibling->id)
-                    ->when(
-                        $targetSessionId !== null,
-                        fn ($query) => $query->where('stream_session_id', $targetSessionId),
-                        fn ($query) => $query->whereNull('stream_session_id'),
-                    )
-                    ->where('status', 'scheduled')
-                    ->orderBy('order_index')
-                    ->orderBy('id')
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($combinedNext === null) {
-                    continue;
-                }
-
-                $combinedNext->status = 'performing';
-                $combinedNext->called_at = now();
-                $combinedNext->started_at = now();
-                $combinedNext->save();
-
-                $category->tournament?->update([
-                    'active_category_id' => $sibling->id,
-                    'active_stream_session_id' => $targetSessionId,
-                ]);
-
-                return true;
-            }
+            // Следующий поток открывает секретарь вручную.
 
             return false;
         });
