@@ -24,6 +24,10 @@
     let liveRenderedHtml = null;
     let liveScrollPointerDown = false;
     let liveScrollLockedUntil = 0;
+    let editDirty = false;
+    body.addEventListener('input', (event) => {
+        if (event.target.closest('form')) editDirty = true;
+    });
 
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -141,6 +145,7 @@
     };
 
     const stopLive = () => {
+        editDirty = false;
         if (liveInterval) clearInterval(liveInterval);
         liveInterval = null;
         liveSelection = null;
@@ -175,7 +180,7 @@
     const liveScrollIsBusy = () => liveScrollPointerDown || Date.now() < liveScrollLockedUntil;
 
     const refreshLive = async () => {
-        if (! liveSelection || liveRequestInFlight || modal.classList.contains('hidden')) return;
+        if (! liveSelection || liveRequestInFlight || editDirty || modal.classList.contains('hidden')) return;
         if (body.contains(document.activeElement) && document.activeElement?.matches('input, select, textarea')) return;
         if (liveScrollIsBusy()) return;
         liveRequestInFlight = true;
@@ -194,7 +199,8 @@
                 ? slotBlock(liveSelection.performanceHistory, liveSelection.slot, true, data.score)
                 : '<div class="rounded-2xl border-2 border-dashed border-amber-700 bg-amber-950/25 p-5 text-lg font-semibold text-amber-200">Итоговая оценка ещё не отправлена.' + slotActions(liveSelection.performanceHistory, liveSelection.slot, '') + '</div>';
             const nextHtml = finalScore + liveActionsBlock(data.actions);
-            if (nextHtml === liveRenderedHtml || liveScrollIsBusy()) return;
+            if (nextHtml === liveRenderedHtml || liveScrollIsBusy() || editDirty
+                || (body.contains(document.activeElement) && document.activeElement?.matches('input, select, textarea'))) return;
 
             const actionsScroll = body.querySelector('[data-live-actions-scroll]');
             const bodyScrollTop = body.scrollTop;
@@ -251,7 +257,7 @@
         td.addEventListener('click', () => {
             const slot = td.dataset.historySlot;
             const performanceHistory = histories[String(currentPerformanceId)];
-            if (performanceHistory?.slots?.[slot]) open(performanceHistory, [slot], 'История выставления — ' + slot, true);
+            if (performanceHistory) openLive(performanceHistory, currentPerformanceId, slot);
         });
     });
 

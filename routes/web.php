@@ -62,6 +62,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/secretary/categories/{category}/review.xlsx', [SecretaryController::class, 'downloadQueueReview'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.queue.review.excel');
+    Route::get('/secretary/categories/{category}/review/print', [SecretaryController::class, 'printQueueReview'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.queue.review.print');
+    Route::get('/secretary/categories/{category}/review/ping', [SecretaryController::class, 'reviewPing'])
+        ->middleware('role:secretary,chief_judge,admin')
+        ->name('secretary.queue.review.ping');
     Route::post('/secretary/categories/{category}/queue', [SecretaryController::class, 'addToQueue'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.queue.add');

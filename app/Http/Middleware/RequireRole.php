@@ -30,7 +30,7 @@ class RequireRole
                 'secretary.performance.confirmScore', 'secretary.performance.returnScores',
                 'secretary.performance.updateJudgeScore', 'secretary.performance.setFinalScore',
                 'secretary.performance.clearFinalOverride', 'supervisor.approve',
-                'inquiries.store', 'inquiries.underReview', 'inquiries.decide',
+                // Протесты меняют статус выступления и блокируют очередь: только просмотр для главного судьи.
                 'profile.update', 'profile.destroy', 'logout',
             ];
             abort_if(in_array($name, ['secretary.queue', 'secretary.queue.ping', 'secretary.tournament.live'], true), 403);

@@ -188,7 +188,10 @@ const asyncPage = {
                 signal: controller.signal,
             });
             if (!response.ok) throw new Error(`Ошибка ${response.status}`);
-            return await this.replaceFromHtml(await response.text(), response.url || url, options);
+            const html = await response.text();
+            // A user may start editing while a background response is in flight.
+            if (options.canReplace && !options.canReplace()) return false;
+            return await this.replaceFromHtml(html, response.url || url, options);
         } catch (error) {
             this.showStatus(
                 error?.name === 'AbortError' ? 'Обновление заняло слишком много времени' : (error?.message || 'Не удалось обновить страницу'),

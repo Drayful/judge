@@ -89,7 +89,7 @@ class StartProtocolExporter
             ->get();
 
         $hasSessions = $categories->contains(fn (Category $category) => $category->sessions->isNotEmpty());
-        if ($hasSessions) {
+        if ($hasSessions || $date !== null) {
             $blocks = $this->startDocumentBlocks($categories);
             $currentDate = null;
             $firstDateSection = true;
@@ -129,9 +129,9 @@ class StartProtocolExporter
             }
         }
 
-        if ($categories->isEmpty()) {
+        if ($row === 4) {
             $sheet->mergeCells('A4:F4');
-            $sheet->setCellValue('A4', 'Потоки ещё не сформированы.');
+            $sheet->setCellValue('A4', $date ? 'На выбранный день потоки не назначены.' : 'Потоки ещё не сформированы.');
         }
 
         foreach (['A' => 8, 'B' => 10, 'C' => 16, 'D' => 34, 'E' => 10, 'F' => 28] as $column => $width) {
@@ -282,6 +282,15 @@ class StartProtocolExporter
         }
         $sheet->getStyle("A{$headerRow}:F".($row - 1))
             ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+
+        if ($session && $session->award_minutes > 0 && $session->ends_at) {
+            $start = Carbon::parse($session->ends_at);
+            $sheet->mergeCells("A{$row}:F{$row}");
+            $sheet->setCellValue("A{$row}", 'Награждение · '.$start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i').' · '.$session->award_minutes.' мин.');
+            $sheet->getStyle("A{$row}:F{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
+            $sheet->getStyle("A{$row}")->getFont()->setBold(true);
+            $row++;
+        }
 
         return $row + 1;
     }

@@ -6,6 +6,7 @@
                 <div class="text-lg font-semibold text-white">{{ $category->name }}</div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ route('secretary.queue.review.print', ['category' => $category, 'session' => $streamSession?->id]) }}" target="_blank" rel="noopener" class="rounded-lg border border-slate-600 px-3 py-2 text-sm text-white">Печать по годам</a>
                 <a href="{{ route('secretary.queue.review.excel', ['category' => $category->id, 'session' => $streamSession?->id]) }}"
                    class="rounded-lg border border-sky-600/70 bg-sky-950/45 px-3 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-900/60">
                     Скачать Excel
@@ -20,9 +21,11 @@
         </div>
     </x-slot>
 
-    <div class="mx-auto max-w-[1600px] space-y-5 py-6">
+    <div id="stream-review" class="mx-auto max-w-[1600px] space-y-5 py-6">
+        <x-flash />
         <div class="rounded-xl border border-sky-800/60 bg-sky-950/25 px-4 py-3 text-sm text-sky-100">
             Эта страница не меняет активный поток судейских планшетов. Здесь можно безопасно смотреть будущие и прошлые оценки.
+            <a href="{{ request()->fullUrl() }}" class="ml-2 underline">Обновить данные</a>
         </div>
 
         <div class="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/55 p-4 md:grid-cols-2">
@@ -62,6 +65,7 @@
             <div class="flex flex-wrap gap-3">
                 @foreach($orderedPerformances->map(fn ($p) => $p->athlete?->birthdate?->year)->filter()->unique()->sort() as $year)
                     <a class="rounded border border-sky-700 px-3 py-2 text-sky-200" href="{{ route('secretary.queue.review.excel', ['category' => $category, 'session' => $streamSession?->id, 'birth_year' => $year]) }}">Протокол {{ $year }} г.р.</a>
+                    <a class="rounded border border-slate-700 px-3 py-2 text-slate-200" target="_blank" rel="noopener" href="{{ route('secretary.queue.review.print', ['category' => $category, 'session' => $streamSession?->id, 'birth_year' => $year]) }}">Печать {{ $year }} г.р.</a>
                 @endforeach
             </div>
             @forelse($orderedPerformances as $performance)
@@ -77,7 +81,7 @@
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <div class="text-base font-semibold text-white">№ {{ $performance->start_number ?? '—' }} · {{ $performance->athlete->last_name }} {{ $performance->athlete->first_name }}</div>
-                            <div class="mt-1 text-xs text-slate-400">{{ $performance->apparatus ?? '—' }} · {{ $performance->status }} · {{ $performance->athlete->club ?? '—' }}</div>
+                            <div class="mt-1 text-xs text-slate-400">{{ $performance->apparatus ?? '—' }} · {{ ['scheduled' => 'В очереди', 'called' => 'Вызвана', 'performing' => 'Выступает', 'done' => 'Завершено', 'published' => 'Опубликовано', 'withdrawn' => 'Снята', 'inquiry' => 'Протест', 'under_review' => 'Рассмотрение'][$performance->status] ?? $performance->status }} · {{ $performance->athlete->club ?? '—' }}</div>
                         </div>
                         <div class="flex flex-wrap gap-2 font-mono text-xs">
                             @foreach([['DB', $reviewDb], ['DA', $reviewDa], ['A', $performance->a_score], ['E', $performance->e_score], ['Сбавка', $performance->penalty], ['Итого', $performance->total]] as [$label, $value])
@@ -86,6 +90,7 @@
                             <span class="rounded-md border border-violet-700/70 bg-violet-950/40 px-2 py-1 text-violet-100">Место {{ $reviewPlace !== null && $reviewPlaceOf !== null ? $reviewPlace.'/'.$reviewPlaceOf : '—' }}</span>
                         </div>
                     </div>
+                    @include('secretary.partials.review-performance')
                     <div class="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                         @foreach($historyJudgeColumns as $slot)
                             @php($score = $history['slots'][$slot] ?? null)
@@ -103,14 +108,15 @@
                     </div>
                     <form method="POST" action="{{ route('secretary.performance.confirmScore', $performance) }}" class="mt-3">
                         @csrf
+                        <input type="hidden" name="review" value="1">
                         <button class="rounded-lg bg-emerald-700 px-4 py-2 text-white">Подтвердить итог</button>
                     </form>
                     <details class="mt-3 rounded-lg border border-slate-700 p-3">
                         <summary class="cursor-pointer text-slate-200">Итог вручную / возврат оценок</summary>
                         <form method="POST" action="{{ route('secretary.performance.setFinalScore', $performance) }}" class="mt-3 flex flex-wrap gap-2">
                             @csrf
-                            @foreach(['d_score' => 'D', 'a_score' => 'A', 'e_score' => 'E', 'penalty' => 'Штраф'] as $field => $label)
-                                <label>{{ $label }}<input type="number" name="{{ $field }}" step="{{ $field === 'e_score' ? '0.01' : '0.001' }}" min="0" max="99.999" required value="{{ $performance->$field ?? ($field === 'penalty' ? 0 : '') }}" class="block w-28 rounded bg-slate-900"></label>
+                            @foreach(['db_score' => ['DB', $performance->db_average], 'da_score' => ['DA', $performance->da_average], 'a_score' => ['A', $performance->a_score], 'e_score' => ['E', $performance->e_score], 'penalty' => ['Штраф', $performance->penalty ?? 0]] as $field => [$label, $value])
+                                <label>{{ $label }}<input type="number" name="{{ $field }}" step="{{ $field === 'e_score' ? '0.01' : '0.001' }}" min="0" max="99.999" required value="{{ $value !== null ? number_format((float) $value, $field === 'e_score' ? 2 : 3, '.', '') : '' }}" class="block w-28 rounded bg-slate-900"></label>
                             @endforeach
                             <button class="rounded bg-amber-800 px-3">Сохранить итог</button>
                         </form>
@@ -118,7 +124,7 @@
                         <form method="POST" action="{{ route('secretary.performance.returnScores', $performance) }}" class="mt-2">
                             @csrf
                             <select name="panel" class="rounded bg-slate-900"><option value="all">Все судьи</option><option value="db">DB</option><option value="da">DA</option><option value="a">A</option><option value="e">E</option><option value="penalty">Штрафы</option></select>
-                            <button class="rounded bg-rose-800 px-3 py-2">На доработку</button>
+                            <button class="rounded bg-violet-800 px-3 py-2">На доработку</button>
                         </form>
                     </details>
                 </article>
@@ -134,6 +140,39 @@
             const search = document.getElementById('review-stream-search');
             const select = document.getElementById('review-stream-select');
             const session = document.getElementById('review-session-select');
+            const root = document.getElementById('stream-review');
+            let dirty = false;
+            let busy = false;
+            let revision = null;
+            const born = performance.now();
+            root?.addEventListener('input', (event) => {
+                if (event.target.closest('form')) dirty = true;
+            });
+            const paused = () => dirty || (root.contains(document.activeElement) && document.activeElement.matches('input, select, textarea'))
+                || root.querySelector('details[open]') || [...root.querySelectorAll('audio')].some((audio) => !audio.paused)
+                || document.querySelector('[data-pause-live-refresh]:not(.hidden)');
+            const interval = setInterval(async () => {
+                if (!root?.isConnected) { clearInterval(interval); return; }
+                root.querySelectorAll('[data-review-timer][data-running="1"]').forEach((timer) => {
+                    const seconds = Number(timer.dataset.elapsed) + Math.floor((performance.now() - born) / 1000);
+                    timer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+                });
+                if (busy || document.hidden || paused()) return;
+                busy = true;
+                try {
+                    const response = await fetch(@json(route('secretary.queue.review.ping', ['category' => $category, 'session' => $streamSession?->id])), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+                    if (!response.ok || !root.isConnected || paused()) return;
+                    const data = await response.json();
+                    if (revision !== null && data.rev !== revision && window.JudgeAsync) {
+                        if (await window.JudgeAsync.refresh(window.location.href, { silent: true, canReplace: () => root.isConnected && !paused() })) revision = data.rev;
+                    } else revision = data.rev;
+                } catch (_) { /* Временный обрыв связи не закрывает просмотр. */ }
+                finally { busy = false; }
+            }, 2000);
+            window.addEventListener('judge:before-page-update', () => {
+                clearInterval(interval);
+                root?.querySelectorAll('audio').forEach((audio) => audio.pause());
+            }, { once: true });
             if (search && select) {
                 const placeholder = select.querySelector('[data-stream-placeholder]');
                 const options = Array.from(select.querySelectorAll('[data-stream-option]')).map((option) => ({
@@ -165,8 +204,11 @@
                     navigate();
                 });
             }
-            session?.addEventListener('change', () => {
-                if (session.value) window.JudgeAsync?.refresh(session.value, { force: true, silent: true }) || window.location.assign(session.value);
+            session?.addEventListener('change', async () => {
+                if (!session.value) return;
+                const url = session.value;
+                const refreshed = window.JudgeAsync ? await window.JudgeAsync.refresh(url, { force: true, silent: true }) : false;
+                if (!refreshed) window.location.assign(url);
             });
         })();
     </script>

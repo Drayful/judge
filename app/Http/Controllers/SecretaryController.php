@@ -1712,6 +1712,41 @@ class SecretaryController extends Controller
         );
     }
 
+    public function printQueueReview(Request $request, Category $category, FinalProtocolService $protocols): View
+    {
+        $category->loadMissing('tournament');
+        abort_unless($category->tournament !== null, 404);
+        $session = $this->requestedStreamSession($request, $category);
+        $filter = $request->validate(['birth_year' => ['nullable', 'integer', 'min:1900', 'max:2100']]);
+        $performances = Performance::with('athlete')
+            ->where('category_id', $category->id)
+            ->when($session !== null,
+                fn ($query) => $query->where('stream_session_id', $session->id),
+                fn ($query) => $query->whereNull('stream_session_id'))
+            ->when(isset($filter['birth_year']), fn ($query) => $query->whereHas('athlete', fn ($athletes) => $athletes->whereYear('birthdate', $filter['birth_year'])))
+            ->orderBy('order_index')->orderBy('id')->get();
+        $sections = SecretaryLiveUi::orderedPerformances($performances)
+            ->groupBy(fn ($performance) => $performance->athlete?->birthdate?->year ?? 'unknown')
+            ->sortKeys()->map(function ($items, $year) use ($category, $protocols) {
+                return [
+                    'year' => $year === 'unknown' ? null : (int) $year,
+                    'performances' => $items,
+                    // Не приписываем участникам без даты рождения места возрастной группы.
+                    'places' => $year === 'unknown' ? [] : $protocols->poolAthletesById($category, false, (int) $year),
+                ];
+            });
+
+        return view('secretary.stream-protocol-print', compact('category', 'session', 'sections'));
+    }
+
+    public function reviewPing(Request $request, Category $category): JsonResponse
+    {
+        $data = $this->queuePing($request, $category)->getData(true);
+
+        // Просмотр остаётся на выбранном потоке независимо от активной очереди.
+        return response()->json(['rev' => $data['rev']])->header('Cache-Control', 'no-store');
+    }
+
     /**
      * Лёгкий опрос для автообновления Live/очереди (оценки судей без WebSocket).
      */
@@ -1728,7 +1763,7 @@ class SecretaryController extends Controller
             )
             ->orderBy('order_index')
             ->orderBy('id')
-            ->get(['id', 'status', 'order_index', 'updated_at', 'finalized_at', 'timer_started_at', 'timer_ended_at', 'actual_duration_seconds', 'time_penalty', 'd_score', 'a_score', 'e_score', 'penalty', 'total']);
+            ->get(['id', 'status', 'order_index', 'updated_at', 'finalized_at', 'approved_at', 'scoreboard_accepted_at', 'timer_started_at', 'timer_ended_at', 'actual_duration_seconds', 'time_penalty', 'db_average', 'da_average', 'd_score', 'a_score', 'e_score', 'penalty', 'total']);
 
         $ordered = SecretaryLiveUi::orderedPerformances($performances);
         $current = SecretaryLiveUi::currentPerformance($ordered);
@@ -1738,6 +1773,10 @@ class SecretaryController extends Controller
             $p->status,
             (string) ($p->updated_at?->getTimestamp() ?? 0),
             (string) ($p->finalized_at?->getTimestamp() ?? 0),
+            (string) ($p->approved_at?->getTimestamp() ?? 0),
+            (string) ($p->scoreboard_accepted_at?->getTimestamp() ?? 0),
+            (string) ($p->db_average ?? ''),
+            (string) ($p->da_average ?? ''),
             (string) ($p->timer_started_at?->getTimestamp() ?? 0),
             (string) ($p->timer_ended_at?->getTimestamp() ?? 0),
             (string) ($p->actual_duration_seconds ?? ''),
@@ -2118,7 +2157,7 @@ class SecretaryController extends Controller
             $locked->approved_at = now();
             $locked->save();
 
-            if (! request()->user()->isChiefJudge() && $category?->autoAdvanceEnabled() && $locked->status === 'performing') {
+            if (! request()->user()->isChiefJudge() && ! request()->boolean('review') && $category?->autoAdvanceEnabled() && $locked->status === 'performing') {
                 $moved = StreamAdvanceService::advanceToNextInCategory($category, $locked->stream_session_id);
             }
         });
@@ -2353,13 +2392,18 @@ class SecretaryController extends Controller
             $row = $rows[$data['slot']] ?? null;
 
             if ($row === null) {
-                $judges = User::query()->where('slot', $data['slot'])->get()
-                    ->filter(fn ($judge) => $judge->judgePanel() !== null);
+                $judges = User::query()->where(fn ($query) => $query->where('slot', $data['slot'])->orWhereNull('slot'))->get()
+                    ->filter(fn ($judge) => ($judge->judgePanel()['slot'] ?? null) === $data['slot']);
                 if ($judges->count() !== 1) {
                     return back()->withErrors(['edit' => 'Для ввода оценки нужен один назначенный судья слота '.$data['slot'].'.']);
                 }
                 $judge = $judges->first();
                 $panel = $judge->judgePanel();
+                if ($panel['panel'] === 'd' && ($panel['subpanel'] ?? null) === 'da'
+                    && ! in_array($data['slot'], SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true)
+                    && $performance->isBodyOnlyApparatus()) {
+                    $panel['subpanel'] = 'db';
+                }
                 $row = new JudgeScore([
                     'performance_id' => $performance->id,
                     'judge_id' => $judge->id,

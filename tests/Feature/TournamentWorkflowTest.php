@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Group;
 use App\Models\JudgeScore;
+use App\Models\MusicTrack;
 use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
@@ -71,7 +72,142 @@ class TournamentWorkflowTest extends TestCase
         $this->get(route('secretary.tournament.live', $p->category->tournament))->assertForbidden();
         $this->post(route('secretary.callNext', $p->category))->assertForbidden();
         $this->post(route('workflow.stream.state', $p->category), ['closed' => 1])->assertForbidden();
+        $this->post(route('inquiries.store', $p), ['reason' => 'Не менять очередь'])->assertForbidden();
         $this->assertSame('performing', $p->fresh()->status);
+    }
+
+    public function test_live_renders_editors_for_missing_scores_and_official_averages(): void
+    {
+        $p = $this->performance();
+        $this->actingAs(User::factory()->create(['role' => 'secretary']))
+            ->get(route('secretary.queue', $p->category))
+            ->assertOk()->assertSee('Не отправлено')
+            ->assertSee('name="slot" value="E1"', false)
+            ->assertSee('data-slot="DB_AVG"', false)
+            ->assertSee('data-slot="DA_AVG"', false);
+        $this->assertSame(0, $p->judgeScores()->count());
+    }
+
+    public function test_missing_score_uses_role_default_slot(): void
+    {
+        $p = $this->performance();
+        $judge = User::factory()->create(['role' => 'judge_e', 'slot' => null]);
+        $this->actingAs(User::factory()->create(['role' => 'secretary']))
+            ->post(route('secretary.performance.updateJudgeScore', $p), ['slot' => 'E1', 'score' => 3, 'input_mode' => 'deduction'])
+            ->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('judge_scores', ['performance_id' => $p->id, 'judge_id' => $judge->id, 'score' => 7]);
+        $this->assertSame('performing', $p->fresh()->status);
+    }
+
+    public function test_missing_score_rejects_ambiguous_tablet_without_writing(): void
+    {
+        $p = $this->performance();
+        User::factory()->create(['role' => 'judge_e', 'slot' => 'E1']);
+        User::factory()->create(['role' => 'judge_e', 'slot' => null]);
+        $this->actingAs(User::factory()->create(['role' => 'secretary']))
+            ->post(route('secretary.performance.updateJudgeScore', $p), ['slot' => 'E1', 'score' => 3])
+            ->assertSessionHasErrors('edit');
+        $this->assertSame(0, $p->judgeScores()->count());
+    }
+
+    public function test_missing_da_score_on_body_only_uses_db_panel_like_tablet(): void
+    {
+        $p = $this->performance();
+        $p->update(['apparatus' => 'БП']);
+        $judge = User::factory()->create(['role' => 'judge_d_da', 'slot' => 'DA1']);
+        $this->actingAs(User::factory()->create(['role' => 'chief_judge']))
+            ->post(route('secretary.performance.updateJudgeScore', $p), ['slot' => 'DA1', 'score' => 3])
+            ->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('judge_scores', ['performance_id' => $p->id, 'judge_id' => $judge->id, 'subpanel' => 'db', 'score' => 3]);
+    }
+
+    public function test_confirm_from_review_does_not_advance_even_for_secretary(): void
+    {
+        $p = $this->performance();
+        $p->category->update(['auto_advance' => true]);
+        $p->forceFill(['scores_overridden' => true, 'd_score' => 4, 'a_score' => 8, 'e_score' => 8.13])->save();
+        $next = Performance::create(['category_id' => $p->category_id, 'athlete_id' => $p->athlete_id, 'status' => 'scheduled', 'order_index' => 2]);
+        $this->actingAs(User::factory()->create(['role' => 'secretary']))
+            ->post(route('secretary.performance.confirmScore', $p), ['review' => 1])
+            ->assertSessionHasNoErrors();
+        $this->assertNotNull($p->fresh()->approved_at);
+        $this->assertSame('performing', $p->fresh()->status);
+        $this->assertSame('scheduled', $next->fresh()->status);
+    }
+
+    public function test_review_displays_performance_context_and_ping_never_redirects(): void
+    {
+        $p = $this->performance();
+        $p->update(['timer_started_at' => now()->subSeconds(80), 'timer_ended_at' => now(), 'actual_duration_seconds' => 80]);
+        $p->athlete->update(['is_team' => true]);
+        $member = Athlete::create(['last_name' => 'TeamMember', 'first_name' => 'Test']);
+        $p->athlete->members()->attach($member->id, ['position' => 1]);
+        $track = MusicTrack::create(['athlete_id' => $p->athlete_id, 'performance_id' => $p->id, 'type' => 'primary', 'original_name' => 'routine.mp3', 'disk' => 'local', 'path' => 'test.mp3', 'is_active' => true]);
+        $other = Category::create(['tournament_id' => $p->category->tournament_id, 'name' => 'Active elsewhere']);
+        $p->category->tournament->update(['active_category_id' => $other->id]);
+        $this->actingAs(User::factory()->create(['role' => 'chief_judge']))
+            ->get(route('secretary.queue.review', $p->category))->assertOk()
+            ->assertSee('TeamMember')->assertSee(route('tracks.play', $track), false)
+            ->assertSee('01:20')->assertSee('name="db_score"', false)->assertSee('name="da_score"', false)
+            ->assertDontSee('Вызвать следующую');
+        $this->getJson(route('secretary.queue.review.ping', $p->category))->assertOk()
+            ->assertJsonStructure(['rev'])->assertJsonMissingPath('redirect_url');
+        $this->assertEquals($other->id, $p->category->tournament->fresh()->active_category_id);
+        $this->assertSame('performing', $p->fresh()->status);
+    }
+
+    public function test_review_revision_changes_when_scoreboard_acceptance_is_cancelled_in_same_second(): void
+    {
+        $this->freezeTime();
+        $p = $this->performance();
+        $p->update(['scoreboard_accepted_at' => now()]);
+        $this->actingAs(User::factory()->create(['role' => 'chief_judge']));
+        $url = route('secretary.queue.review.ping', $p->category);
+        $before = $this->getJson($url)->assertOk()->json('rev');
+        $p->update(['scoreboard_accepted_at' => null]);
+        $this->assertNotSame($before, $this->getJson($url)->assertOk()->json('rev'));
+    }
+
+    public function test_print_protocol_separates_birth_years_and_filters_session(): void
+    {
+        $p = $this->performance();
+        $p->athlete->update(['birthdate' => '2012-04-01', 'last_name' => 'YearTwelve']);
+        $sessions = collect([1, 2])->map(fn ($n) => StreamSession::create([
+            'category_id' => $p->category_id, 'session_no' => $n, 'scheduled_on' => '2026-09-24',
+            'starts_at' => '09:00', 'ends_at' => '10:00', 'apparatus' => [],
+        ]));
+        $p->update(['stream_session_id' => $sessions[0]->id, 'total' => 20]);
+        $other = Athlete::create(['last_name' => 'YearThirteen', 'first_name' => 'Test', 'birthdate' => '2013-04-01']);
+        Performance::create(['category_id' => $p->category_id, 'stream_session_id' => $sessions[0]->id, 'athlete_id' => $other->id, 'total' => 19]);
+        $outsider = Athlete::create(['last_name' => 'OtherSession', 'first_name' => 'Test', 'birthdate' => '2012-04-01']);
+        Performance::create(['category_id' => $p->category_id, 'stream_session_id' => $sessions[1]->id, 'athlete_id' => $outsider->id]);
+        $this->actingAs(User::factory()->create(['role' => 'chief_judge']));
+        $url = route('secretary.queue.review.print', ['category' => $p->category, 'session' => $sessions[0]->id]);
+        $this->get($url)->assertOk()->assertSee('2012 год рождения')->assertSee('2013 год рождения')->assertDontSee('OtherSession')
+            ->assertViewHas('sections', fn ($sections) => $sections->count() === 2);
+        $this->get($url.'&birth_year=2012')->assertOk()->assertSee('YearTwelve')->assertDontSee('YearThirteen')
+            ->assertViewHas('sections', fn ($sections) => $sections->count() === 1);
+        $this->get($url.'&birth_year=bad')->assertSessionHasErrors('birth_year');
+        $this->assertSame('performing', $p->fresh()->status);
+    }
+
+    public function test_daily_start_sheet_does_not_include_undated_streams(): void
+    {
+        $p = $this->performance();
+        $p->athlete->update(['last_name' => 'UndatedAthlete']);
+        $book = app(StartProtocolExporter::class)->buildStartSheet($p->category->tournament, '2026-09-24');
+        $this->assertStringNotContainsString('UndatedAthlete', json_encode($book->getActiveSheet()->toArray()));
+        $this->assertSame('На выбранный день потоки не назначены.', $book->getActiveSheet()->getCell('A4')->getValue());
+    }
+
+    public function test_daily_start_sheet_includes_award_time(): void
+    {
+        $p = $this->performance();
+        $session = StreamSession::create(['category_id' => $p->category_id, 'session_no' => 1, 'scheduled_on' => '2026-09-24', 'starts_at' => '09:00', 'ends_at' => '10:00', 'apparatus' => []]);
+        $session->forceFill(['award_minutes' => 20])->save();
+        $p->update(['stream_session_id' => $session->id]);
+        $book = app(StartProtocolExporter::class)->buildStartSheet($p->category->tournament, '2026-09-24');
+        $this->assertStringContainsString('Награждение · 10:00–10:20 · 20 мин.', json_encode($book->getActiveSheet()->toArray(), JSON_UNESCAPED_UNICODE));
     }
 
     public function test_close_reopen_is_explicit_and_preserves_results(): void

@@ -409,8 +409,10 @@
         </div>
 
         {{-- Оценки --}}
-        @if(false) {{-- Временно скрыто: управление перенесено в историю гимнасток потока. --}}
-        <div class="live-panel p-5">
+        @if($currentPerformance)
+        <details class="live-panel p-5" data-current-score-editor>
+            <summary class="cursor-pointer text-base font-semibold text-sky-200">Оценки текущего выступления · ввод, исправление и возврат</summary>
+        <div class="mt-4">
             <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                 <div>
                     <h2 class="text-base font-semibold text-white">Оценки (текущая гимнастка)</h2>
@@ -419,7 +421,7 @@
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <span class="inline-flex items-center gap-2 rounded-lg border border-emerald-600/80 bg-emerald-950/50 px-2.5 py-1.5 font-medium text-emerald-100">
                         <span class="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></span>
-                        Автопереход: всегда включён
+                        Автопереход: {{ $category->autoAdvanceEnabled() ? 'включён' : 'выключен' }}
                     </span>
                     <span class="rounded-lg border px-2.5 py-1 {{ ($panelSpread['has_violation'] ?? false) ? 'border-rose-700/60 bg-rose-950/40 text-rose-100' : 'border-emerald-800/60 bg-emerald-950/40 text-emerald-100' }}">
                         Расхождение ≤ {{ number_format($panelSpread['max_spread'] ?? 1.0, 1) }}:
@@ -542,8 +544,8 @@
                                     $isReturned = $scoreHistory[$col]['returned'] ?? false;
                                 @endphp
                                 <td data-history-slot="{{ $col }}"
-                                    class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ isset($scoreHistory[$col]) ? 'cursor-pointer hover:bg-slate-800/60' : '' }} {{ $isOff ? 'text-slate-500 italic' : ($isReturned ? 'bg-violet-950/60 text-violet-100 font-bold ring-1 ring-inset ring-violet-400/60' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100'))) }}"
-                                    title="{{ isset($scoreHistory[$col]) ? 'Нажмите — история выставления оценки '.$col : '' }}">{{ $scoreMatrix['values'][$col] }}</td>
+                                    class="cursor-pointer hover:bg-slate-800/60 px-2 py-3 font-mono text-sm border-t border-slate-800 {{ $isOff ? 'text-slate-500 italic' : ($isReturned ? 'bg-violet-950/60 text-violet-100 font-bold ring-1 ring-inset ring-violet-400/60' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100'))) }}"
+                                    title="Нажмите — ввод и история оценки {{ $col }}">{{ $scoreMatrix['values'][$col] }}</td>
                             @endforeach
                         </tr>
                     </tbody>
@@ -589,8 +591,7 @@
                 @php
                     $editableSlots = collect($scoreMatrix['columns'])->filter(function ($col) use ($scoreMatrix) {
                         if ($scoreMatrix['inactive'][$col] ?? false) return false;
-                        $v = $scoreMatrix['values'][$col] ?? '—';
-                        return $v !== '—' && $v !== 'off';
+                        return ($scoreMatrix['values'][$col] ?? '—') !== 'off';
                     })->values();
                 @endphp
                 <div class="mt-4 rounded-xl border border-slate-700 bg-slate-950/50 p-4">
@@ -619,6 +620,7 @@
                                         {{ $averageReady ? number_format((float) $averageRow->average_score, 3, '.', '') : 'ожидание' }}
                                     </div>
                                 </div>
+                                <button type="button" data-stream-history-score data-performance-id="{{ $currentPerformance->id }}" data-slot="{{ $averageItem['slot'] }}" class="mt-2 text-xs text-sky-300 hover:underline">{{ $averageReady ? 'Изменить / история' : 'Ввести оценку' }}</button>
                             </div>
                         @endforeach
                     </div>
@@ -631,13 +633,16 @@
                                 @php
                                     $isPen = $scoreMatrix['penalty'][$col] ?? false;
                                     $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
-                                    $cur = $scoreHistory[$col]['display_score'] ?? $scoreMatrix['values'][$col];
+                                    $cur = $scoreHistory[$col]['display_score'] ?? $scoreMatrix['values'][$col] ?? '—';
+                                    $cur = in_array($cur, ['—', 'off'], true) ? '' : $cur;
+                                    $returned = $scoreHistory[$col]['returned'] ?? false;
                                 @endphp
-                                <div class="rounded-lg border px-3 py-2.5 {{ $isSpread ? 'border-rose-700/60 bg-rose-950/20' : ($isPen ? 'border-rose-900/40 bg-rose-950/10' : 'border-slate-800 bg-slate-900/40') }}">
+                                <div class="rounded-lg border px-3 py-2.5 {{ $returned ? 'border-violet-400 bg-violet-900/75 ring-1 ring-violet-300' : ($isSpread ? 'border-rose-700/60 bg-rose-950/20' : ($isPen ? 'border-rose-900/40 bg-rose-950/10' : 'border-slate-800 bg-slate-900/40')) }}">
                                     <div class="flex items-center justify-between gap-2">
                                         <span class="font-mono text-xs font-bold {{ $isSpread ? 'text-rose-200' : 'text-emerald-300' }}">{{ $col }}</span>
-                                        <span class="font-mono text-sm text-white tabular-nums">{{ $cur }}</span>
+                                        <span class="font-mono text-sm text-white tabular-nums">{{ $cur === '' ? 'Не отправлено' : $cur }}</span>
                                     </div>
+                                    @if($returned)<div class="text-xs font-bold text-violet-200">На доработке</div>@endif
                                     @if(isset($scoreHistory[$col]['judge']))
                                         <div class="mt-0.5 text-[10px] text-slate-500 truncate">{{ $scoreHistory[$col]['judge'] }}</div>
                                     @endif
@@ -773,6 +778,7 @@
                 </div>
             @endif
         </div>
+        </details>
         @endif
 
         {{-- История потока --}}
@@ -1546,12 +1552,13 @@
     let failedRefreshes = 0;
     const intervalMs = 1000;
     const requestTimeoutMs = 5000;
+    const editingScores = () => document.querySelector('[data-pause-live-refresh="1"]:not(.hidden), [data-current-score-editor][open]');
     const checkForUpdates = async function () {
         if (pageRoot && ! pageRoot.isConnected) {
             stopPolling();
             return;
         }
-        if (document.querySelector('[data-pause-live-refresh="1"]:not(.hidden)')) return;
+        if (editingScores()) return;
         if (requestInFlight) return;
 
         requestInFlight = true;
@@ -1566,6 +1573,7 @@
             });
             if (!r.ok) return;
             const j = await r.json();
+            if (editingScores() || (pageRoot && !pageRoot.isConnected)) return;
             if (!j.rev) return;
             if (lastRev === null) {
                 lastRev = j.rev;
@@ -1574,10 +1582,11 @@
             if (j.rev !== lastRev) {
                 let refreshed = false;
                 if (window.JudgeAsync) {
-                    refreshed = await window.JudgeAsync.refresh(j.redirect_url || window.location.href, { silent: true });
+                    refreshed = await window.JudgeAsync.refresh(j.redirect_url || window.location.href, { silent: true, canReplace: () => (!pageRoot || pageRoot.isConnected) && !editingScores() });
                 }
 
                 if (refreshed) return;
+                if (editingScores() || (pageRoot && !pageRoot.isConnected)) return;
 
                 // JudgeAsync may be temporarily busy with a secretary action. Retry once;
                 // if background replacement is still unavailable, reload automatically.
