@@ -84,8 +84,8 @@
             : '<div class="mt-3 text-sm text-slate-400">История нажатий не передана (оценка введена без планшета или старой версией).</div>';
         const actions = withActions ? slotActions(performanceHistory, slot, h.display_score) : '';
         return `
-            <div class="rounded-2xl border-2 ${h.returned ? 'border-rose-500 bg-rose-900/60' : h.same_club ? 'border-amber-400 bg-amber-950/40' : 'border-emerald-700/70 bg-emerald-950/25'} p-5">
-                ${h.returned ? '<div class="font-bold text-rose-200">ВОЗВРАЩЕНО НА ДОРАБОТКУ</div>' : ''}
+            <div class="rounded-2xl border-2 ${h.returned ? 'border-violet-400 bg-violet-900/60' : h.same_club ? 'border-amber-400 bg-amber-950/40' : 'border-emerald-700/70 bg-emerald-950/25'} p-5">
+                ${h.returned ? '<div class="font-bold text-violet-200">ВОЗВРАЩЕНО НА ДОРАБОТКУ</div>' : ''}
                 ${h.same_club ? '<div class="text-amber-200">Судья и участница из одной школы</div>' : ''}
                 <div class="flex items-center justify-between gap-2">
                     <div class="font-mono text-2xl font-black text-emerald-300 sm:text-3xl">${esc(slot)} <span class="text-white">${esc(h.display_score)}</span>${h.display_label === 'Сбавка' ? ' <span class="text-sm font-sans text-emerald-200">сбавка</span>' : ''}</div>

@@ -90,10 +90,10 @@
                         @foreach($historyJudgeColumns as $slot)
                             @php($score = $history['slots'][$slot] ?? null)
                             @php($isSpread = in_array($slot, $violating, true))
-                            <button type="button" data-stream-history-score data-performance-id="{{ $performance->id }}" data-slot="{{ $slot }}" class="rounded-lg border px-1.5 py-2 text-center {{ $isSpread || ($score && !$score['submitted_at']) ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($score ? 'border-emerald-900/70 bg-emerald-950/25 text-emerald-100' : 'border-slate-800 bg-slate-900/45 text-slate-600') }}">
+                            <button type="button" data-stream-history-score data-performance-id="{{ $performance->id }}" data-slot="{{ $slot }}" class="rounded-lg border px-1.5 py-2 text-center {{ ($score['returned'] ?? false) ? 'border-violet-400 bg-violet-900/75 text-white ring-1 ring-violet-300' : ($isSpread ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($score ? 'border-emerald-900/70 bg-emerald-950/25 text-emerald-100' : 'border-slate-800 bg-slate-900/45 text-slate-600')) }}">
                                 <div class="font-mono text-[10px] font-bold">{{ $slot }}</div>
                                 <div class="mt-0.5 font-mono text-sm font-semibold">{{ $score['display_score'] ?? '—' }}</div>
-                                @if($score['returned'] ?? false)<div class="text-[9px] font-bold text-rose-200">На доработке</div>@endif
+                                @if($score['returned'] ?? false)<div class="text-[9px] font-bold text-violet-200">На доработке</div>@endif
                                 @if($score['same_club'] ?? false)<div class="rounded bg-amber-800 text-[9px] text-amber-100">Одна школа</div>@endif
                                 @if($score && in_array($slot, ['A1','A2','A3','A4','E1','E2','E3','E4'], true))
                                     <div class="text-[9px] opacity-75">сбавка</div>

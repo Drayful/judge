@@ -526,8 +526,9 @@
                                     $isPen = $scoreMatrix['penalty'][$col] ?? false;
                                     $isOff = $scoreMatrix['inactive'][$col] ?? false;
                                     $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
+                                    $isReturned = $scoreHistory[$col]['returned'] ?? false;
                                 @endphp
-                                <th class="px-2 py-3 font-semibold border-b border-slate-900 {{ $isOff ? 'bg-slate-900/80 text-slate-500 line-through' : ($isSpread ? 'bg-rose-950/90 text-rose-100 ring-1 ring-inset ring-rose-500/50' : ($isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200')) }}">{{ $col }}</th>
+                                <th class="px-2 py-3 font-semibold border-b border-slate-900 {{ $isOff ? 'bg-slate-900/80 text-slate-500 line-through' : ($isReturned ? 'bg-violet-950/90 text-violet-100 ring-1 ring-inset ring-violet-400/70' : ($isSpread ? 'bg-rose-950/90 text-rose-100 ring-1 ring-inset ring-rose-500/50' : ($isPen ? 'bg-rose-950/80 text-rose-100' : 'bg-slate-800 text-slate-200'))) }}">{{ $col }}</th>
                             @endforeach
                         </tr>
                     </thead>
@@ -538,9 +539,10 @@
                                     $isPen = $scoreMatrix['penalty'][$col] ?? false;
                                     $isOff = $scoreMatrix['inactive'][$col] ?? false;
                                     $isSpread = in_array($col, $panelSpread['violating_slots'] ?? [], true);
+                                    $isReturned = $scoreHistory[$col]['returned'] ?? false;
                                 @endphp
                                 <td data-history-slot="{{ $col }}"
-                                    class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ isset($scoreHistory[$col]) ? 'cursor-pointer hover:bg-slate-800/60' : '' }} {{ $isOff ? 'text-slate-500 italic' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100')) }}"
+                                    class="px-2 py-3 font-mono text-sm border-t border-slate-800 {{ isset($scoreHistory[$col]) ? 'cursor-pointer hover:bg-slate-800/60' : '' }} {{ $isOff ? 'text-slate-500 italic' : ($isReturned ? 'bg-violet-950/60 text-violet-100 font-bold ring-1 ring-inset ring-violet-400/60' : ($isSpread ? 'bg-rose-950/40 text-rose-100 font-bold ring-1 ring-inset ring-rose-500/40' : ($isPen ? 'text-rose-100' : 'text-slate-100'))) }}"
                                     title="{{ isset($scoreHistory[$col]) ? 'Нажмите — история выставления оценки '.$col : '' }}">{{ $scoreMatrix['values'][$col] }}</td>
                             @endforeach
                         </tr>
@@ -877,26 +879,27 @@
                             @foreach($historyJudgeColumns as $judgeColumn)
                                 @php
                                     $judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null;
-                                    $historySlotHasSpread = in_array($judgeColumn, $historySpread['violating_slots'] ?? [], true) || ($judgeHistory['returned'] ?? false);
+                                    $historySlotReturned = $judgeHistory['returned'] ?? false;
+                                    $historySlotHasSpread = in_array($judgeColumn, $historySpread['violating_slots'] ?? [], true);
                                 @endphp
-                                <div class="min-w-0 rounded-lg border px-1 py-1.5 text-center {{ $historySlotHasSpread ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($judgeHistory ? 'border-emerald-900/70 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/45') }}">
-                                    <div class="truncate font-mono text-[9px] font-semibold uppercase tracking-wide {{ $historySlotHasSpread ? 'text-white' : ($judgeHistory ? 'text-emerald-400/80' : 'text-slate-500') }}">{{ $judgeColumn }}</div>
+                                <div class="min-w-0 rounded-lg border px-1 py-1.5 text-center {{ $historySlotReturned ? 'border-violet-400 bg-violet-900/75 text-white ring-1 ring-violet-300' : ($historySlotHasSpread ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($judgeHistory ? 'border-emerald-900/70 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/45')) }}">
+                                    <div class="truncate font-mono text-[9px] font-semibold uppercase tracking-wide {{ $historySlotReturned || $historySlotHasSpread ? 'text-white' : ($judgeHistory ? 'text-emerald-400/80' : 'text-slate-500') }}">{{ $judgeColumn }}</div>
                                     <button type="button"
                                         data-stream-history-score
                                         data-performance-id="{{ $p->id }}"
                                         data-slot="{{ $judgeColumn }}"
-                                        class="mt-0.5 block w-full truncate rounded px-0.5 py-0.5 font-mono text-xs font-semibold underline underline-offset-2 hover:text-white sm:text-sm {{ $historySlotHasSpread ? 'text-white decoration-rose-200/80 hover:bg-rose-800/70' : ($judgeHistory ? 'text-emerald-200 decoration-emerald-700/60 hover:bg-emerald-950/60' : 'text-sky-300 decoration-sky-800/70 hover:bg-sky-950/60') }}"
+                                        class="mt-0.5 block w-full truncate rounded px-0.5 py-0.5 font-mono text-xs font-semibold underline underline-offset-2 hover:text-white sm:text-sm {{ $historySlotReturned ? 'text-white decoration-violet-200/80 hover:bg-violet-800/70' : ($historySlotHasSpread ? 'text-white decoration-rose-200/80 hover:bg-rose-800/70' : ($judgeHistory ? 'text-emerald-200 decoration-emerald-700/60 hover:bg-emerald-950/60' : 'text-sky-300 decoration-sky-800/70 hover:bg-sky-950/60')) }}"
                                         title="Открыть Live-действия судьи {{ $judgeColumn }}">
                                         {{ $judgeHistory['display_score'] ?? 'live' }}
                                     </button>
                                     @if($judgeHistory['returned'] ?? false)
-                                        <div class="text-[9px] font-bold text-rose-200">На доработке</div>
+                                        <div class="text-[9px] font-bold text-violet-200">На доработке</div>
                                     @endif
                                     @if($judgeHistory['same_club'] ?? false)
                                         <div class="rounded bg-amber-800 px-1 text-[9px] text-amber-100">Одна школа</div>
                                     @endif
                                     @if(($judgeHistory['display_label'] ?? null) === 'Сбавка')
-                                        <div class="truncate text-[9px] {{ $historySlotHasSpread ? 'text-rose-100' : 'text-slate-500' }}">сбавка</div>
+                                        <div class="truncate text-[9px] {{ $historySlotReturned ? 'text-violet-100' : ($historySlotHasSpread ? 'text-rose-100' : 'text-slate-500') }}">сбавка</div>
                                     @elseif(! $judgeHistory)
                                         <div class="truncate text-[9px] text-sky-500">смотреть</div>
                                     @endif
