@@ -1,5 +1,5 @@
 @unless(auth()->user()->isChiefJudge())
-<details class="rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100" @if($errors->hasAny(['judges', 'max_panel_spread', 'max_average_deviation']) || session('status')) open @endif>
+<details class="rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100">
     <summary class="cursor-pointer font-semibold">Судьи и допустимые расхождения</summary>
     <form method="POST" action="{{ route('workflow.settings', $tournament) }}" class="mt-3 flex flex-wrap gap-3">
         @csrf
@@ -12,15 +12,5 @@
         <label>Судьи Excel — столбцы «ФИО», «Школа» <input type="file" name="judges" accept=".xlsx,.xls" required class="block"></label>
         <button class="rounded bg-sky-700 px-4">Загрузить судей</button>
     </form>
-    @php
-        $judgeRoster = \Illuminate\Support\Facades\DB::table('tournament_judges')->where('tournament_id', $tournament->id)->orderBy('name')->get();
-    @endphp
-    @if (session('status'))
-        <p class="mt-3 text-sm text-emerald-300">{{ session('status') }}</p>
-    @endif
-    @foreach (['judges', 'max_panel_spread', 'max_average_deviation'] as $field)
-        @error($field)<p class="mt-3 text-sm text-red-400">{{ $message }}</p>@enderror
-    @endforeach
-    <p class="mt-3 text-sm text-slate-400">В списке турнира: {{ $judgeRoster->count() }} суд., закреплено за планшетами: {{ $judgeRoster->whereNotNull('tablet_user_id')->count() }}. ФИО выбирается на планшете судьи.</p>
 </details>
 @endunless

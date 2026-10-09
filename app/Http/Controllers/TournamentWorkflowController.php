@@ -33,32 +33,13 @@ class TournamentWorkflowController extends Controller
         $book = IOFactory::load($request->file('judges')->getRealPath());
         $rows = $book->getActiveSheet()->toArray();
         $book->disconnectWorksheets();
-        // Строка заголовка ищется в первых 10 строках: «ФИО» (Ф.И.О.) и «Школа» (клуб/организация) в любых столбцах.
-        $normalize = fn ($value) => str_replace(['.', ' '], '', mb_strtolower(trim((string) $value)));
-        $headerIndex = $nameColumn = $clubColumn = null;
-        foreach (array_slice($rows, 0, 10, true) as $index => $row) {
-            foreach ($row as $column => $value) {
-                $cell = $normalize($value);
-                if ($nameColumn === null && str_starts_with($cell, 'фио')) {
-                    $nameColumn = $column;
-                } elseif ($clubColumn === null && preg_match('/^(школа|клуб|организация|спортшкола)/u', $cell)) {
-                    $clubColumn = $column;
-                }
-            }
-            if ($nameColumn !== null) {
-                $headerIndex = $index;
-                break;
-            }
-            $clubColumn = null;
+        if (mb_strtolower(trim((string) ($rows[0][0] ?? ''))) !== 'фио') {
+            throw ValidationException::withMessages(['judges' => 'Первая строка: ФИО | Школа.']);
         }
-        if ($headerIndex === null) {
-            throw ValidationException::withMessages(['judges' => 'Не найдена строка заголовка со столбцом «ФИО» (и «Школа»).']);
-        }
-        $imported = 0;
-        DB::transaction(function () use ($rows, $tournament, $headerIndex, $nameColumn, $clubColumn, &$imported) {
-            foreach (array_slice($rows, $headerIndex + 1) as $row) {
-                $name = preg_replace('/\s+/u', ' ', trim((string) ($row[$nameColumn] ?? '')));
-                $club = $clubColumn === null ? '' : trim((string) ($row[$clubColumn] ?? ''));
+        DB::transaction(function () use ($rows, $tournament) {
+            foreach (array_slice($rows, 1) as $row) {
+                $name = trim((string) ($row[0] ?? ''));
+                $club = trim((string) ($row[1] ?? ''));
                 if ($name === '') {
                     continue;
                 }
@@ -69,14 +50,10 @@ class TournamentWorkflowController extends Controller
                     ['tournament_id' => $tournament->id, 'name' => $name],
                     ['club' => $club ?: null, 'updated_at' => now(), 'created_at' => now()],
                 );
-                $imported++;
             }
         });
-        if ($imported === 0) {
-            throw ValidationException::withMessages(['judges' => 'Под заголовком «ФИО» нет ни одной строки с судьёй.']);
-        }
 
-        return back()->with('status', "Список судей загружен: {$imported}.");
+        return back()->with('status', 'Список судей загружен.');
     }
 
     public function bindJudge(Request $request, Tournament $tournament)
