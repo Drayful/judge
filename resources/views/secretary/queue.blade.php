@@ -821,14 +821,18 @@
 
                             <div class="flex flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
                                 <div class="grid min-w-0 flex-1 grid-cols-3 gap-1.5 sm:grid-cols-7 xl:min-w-[610px] xl:flex-none">
-                                    @foreach([
+                                    @foreach(array_merge($p->isBodyOnlyApparatus() ? [
+                                        // БП: единая D из DB1/DB2/DA1/DA2, отдельных средних DB/DA нет.
+                                        ['label' => 'D (БП)', 'value' => $p->d_score, 'class' => 'text-cyan-100'],
+                                    ] : [
                                         ['label' => 'DB', 'value' => $historyDb, 'class' => 'text-cyan-100'],
                                         ['label' => 'DA', 'value' => $historyDa, 'class' => 'text-cyan-100'],
+                                    ], [
                                         ['label' => 'A', 'value' => $p->a_score, 'class' => 'text-slate-100'],
                                         ['label' => 'E', 'value' => $p->e_score, 'class' => 'text-slate-100'],
                                         ['label' => 'Сбавка', 'value' => $p->penalty, 'class' => 'text-rose-200'],
                                         ['label' => 'Итого', 'value' => $p->total, 'class' => 'text-teal-200'],
-                                    ] as $historyTotal)
+                                    ]) as $historyTotal)
                                         <div class="min-w-0 rounded-lg border border-slate-800 bg-slate-900/70 px-1.5 py-2 text-center">
                                             <div class="truncate text-[9px] font-semibold uppercase tracking-wide text-slate-500">{{ $historyTotal['label'] }}</div>
                                             <div class="mt-0.5 truncate font-mono text-xs font-semibold sm:text-sm {{ $historyTotal['class'] }}">
@@ -883,6 +887,7 @@
 
                         <div class="mt-3 grid grid-cols-4 gap-1.5 border-t border-slate-800/80 pt-3 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                             @foreach($historyJudgeColumns as $judgeColumn)
+                                @continue($p->isBodyOnlyApparatus() && in_array($judgeColumn, \App\Support\SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true))
                                 @php
                                     $judgeHistory = $scoreHistoryByPerformance[$p->id]['slots'][$judgeColumn] ?? null;
                                     $historySlotReturned = $judgeHistory['returned'] ?? false;

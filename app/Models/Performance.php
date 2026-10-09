@@ -281,27 +281,10 @@ class Performance extends Model
         $this->db_average = isset($db) && $db !== null ? round($db, $round) : null;
         $this->da_average = isset($da) && $da !== null ? round($da, $round) : null;
 
-        $aVals = $scores->where('panel', 'a')->pluck('score')->filter($notNull)->sort()->values();
-        $eVals = $scores->where('panel', 'e')->pluck('score')->filter($notNull)->sort()->values();
-
-        $activeASlots = collect(['A1', 'A2', 'A3', 'A4'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
-        $activeESlots = collect(['E1', 'E2', 'E3', 'E4'])->reject(fn (string $slot) => in_array($slot, $inactive, true));
-
-        $a = null;
-        if (! $activeASlots->isEmpty() && $aVals->count() >= 4) {
-            $mid = $aVals->slice(1, $aVals->count() - 2);
-            $a = (float) $mid->avg();
-        } elseif (! $activeASlots->isEmpty() && $aVals->count() > 0) {
-            $a = (float) $aVals->avg();
-        }
-
-        $e = null;
-        if (! $activeESlots->isEmpty() && $eVals->count() >= 4) {
-            $mid = $eVals->slice(1, $eVals->count() - 2);
-            $e = (float) $mid->avg();
-        } elseif (! $activeESlots->isEmpty() && $eVals->count() > 0) {
-            $e = (float) $eVals->avg();
-        }
+        // A/E по FIG: оценка панели появляется только когда отправили ВСЕ активные
+        // судьи панели (частичное среднее давало значения вроде 5.467).
+        $a = $this->calculateTrimmedPanelScore(['A1', 'A2', 'A3', 'A4'], $inactive, $rowsBySlot);
+        $e = $this->calculateTrimmedPanelScore(['E1', 'E2', 'E3', 'E4'], $inactive, $rowsBySlot);
 
         // penalties: суммируем только реально пришедшие записи penalty-судей,
         // чтобы отсутствие записей сохранило penalty=null (а не 0.0), и в табло
@@ -344,6 +327,40 @@ class Performance extends Model
         }
     }
 
+    /**
+     * Оценка панели A/E: null, пока не отправили все активные слоты.
+     * 4 судьи — отбрасываем мин./макс., среднее двух центральных;
+     * 3 — центральная оценка; 2 — среднее; 1 — сама оценка.
+     *
+     * @param  list<string>  $panelSlots
+     * @param  list<string>  $inactive
+     * @param  array<string, ?JudgeScore>  $rowsBySlot
+     */
+    private function calculateTrimmedPanelScore(array $panelSlots, array $inactive, array $rowsBySlot): ?float
+    {
+        $activeSlots = array_values(array_diff($panelSlots, $inactive));
+        if ($activeSlots === []) {
+            return null;
+        }
+
+        $vals = collect($activeSlots)->map(function (string $slot) use ($rowsBySlot) {
+            $row = $rowsBySlot[$slot] ?? null;
+
+            return ($row === null || $row->submitted_at === null || $row->score === null) ? null : (float) $row->score;
+        });
+        if ($vals->containsStrict(null)) {
+            return null;
+        }
+
+        $sorted = $vals->sort()->values();
+        $count = $sorted->count();
+        if ($count >= 3) {
+            return (float) $sorted->slice(1, $count - 2)->avg();
+        }
+
+        return (float) $sorted->avg();
+    }
+
     public function isBodyOnlyApparatus(): bool
     {
         return PerformanceApparatus::isBodyOnly($this->apparatus);
@@ -377,7 +394,7 @@ class Performance extends Model
                 return (float) $row->score;
             });
 
-        if ($vals->contains(null)) {
+        if ($vals->containsStrict(null)) {
             return null;
         }
 

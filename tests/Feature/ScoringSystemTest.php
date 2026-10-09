@@ -142,8 +142,10 @@ class ScoringSystemTest extends TestCase
         $this->addScore($perf, 'a', 5.0, null, null, 'A3');
         $this->addScore($perf, 'a', 10.0, null, null, 'A4');
 
-        // E: один судья ставит 0.0 -> avg=0
-        $this->addScore($perf, 'e', 0.0, null, null, 'E1');
+        // E: все четыре судьи ставят 0.0 -> E=0
+        foreach (['E1', 'E2', 'E3', 'E4'] as $slot) {
+            $this->addScore($perf, 'e', 0.0, null, null, $slot);
+        }
 
         $perf->load('judgeScores', 'category');
         $perf->recalculateTotals();
@@ -192,7 +194,7 @@ class ScoringSystemTest extends TestCase
         $this->assertNull($perf->total, 'total=null если D неполный');
     }
 
-    public function test_partial_a_panel_under_four_uses_plain_average(): void
+    public function test_partial_a_panel_waits_for_all_active_judges(): void
     {
         $category = $this->makeCategory();
         $perf = $this->makePerformance($category);
@@ -201,12 +203,10 @@ class ScoringSystemTest extends TestCase
         $this->addScore($perf, 'd', 3.0, 'da', null, 'DA1');
         $this->submitRequiredManualAverages($perf);
 
-        // Только 3 судьи A -> среднее без отбрасывания: (8+8.6+9.1)/3 = 8.5667
+        // Пришли 3 из 4 активных A и 2 из 4 E -> частичного среднего нет (раньше было 8.5667).
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
         $this->addScore($perf, 'a', 8.6, null, null, 'A2');
         $this->addScore($perf, 'a', 9.1, null, null, 'A3');
-
-        // 2 судьи E -> (7+8)/2 = 7.5
         $this->addScore($perf, 'e', 7.0, null, null, 'E1');
         $this->addScore($perf, 'e', 8.0, null, null, 'E2');
 
@@ -214,9 +214,22 @@ class ScoringSystemTest extends TestCase
         $perf->recalculateTotals();
 
         $this->assertEqualsWithDelta(7.0, $perf->d_score, 0.0005);
-        $this->assertEqualsWithDelta(8.5667, $perf->a_score, 0.001);
-        $this->assertEqualsWithDelta(7.5, $perf->e_score, 0.0005);
-        $this->assertEqualsWithDelta(23.0667, $perf->total, 0.001);
+        $this->assertNull($perf->a_score, 'A ждёт A4');
+        $this->assertNull($perf->e_score, 'E ждёт E3/E4');
+        $this->assertNull($perf->total);
+
+        // Все отправили: A 8.0, 8.6, 8.7, 9.1 -> avg(8.6, 8.7) = 8.65; E 7, 7.5, 8, 8 -> avg(7.5, 8) = 7.75
+        $this->addScore($perf, 'a', 8.7, null, null, 'A4');
+        $this->addScore($perf, 'e', 7.5, null, null, 'E3');
+        $this->addScore($perf, 'e', 8.0, null, null, 'E4');
+
+        $perf->unsetRelation('judgeScores');
+        $perf->load('judgeScores', 'category');
+        $perf->recalculateTotals();
+
+        $this->assertEqualsWithDelta(8.65, $perf->a_score, 0.0005);
+        $this->assertEqualsWithDelta(7.75, $perf->e_score, 0.0005);
+        $this->assertEqualsWithDelta(23.4, $perf->total, 0.0005);
     }
 
     public function test_final_protocol_places_and_vidi_sum(): void
@@ -412,10 +425,10 @@ class ScoringSystemTest extends TestCase
         $this->submitRequiredManualAverages($perf);
         $this->addScore($perf, 'a', 8.0, null, null, 'A1');
         $this->addScore($perf, 'a', 8.3, null, null, 'A2');
-        $this->addScore($perf, 'a', 8.7, null, null, 'A3'); // 3 судьи -> avg 8.333
+        $this->addScore($perf, 'a', 8.7, null, null, 'A3'); // 3 судьи -> центральная 8.3
         $this->addScore($perf, 'e', 7.0, null, null, 'E1');
         $this->addScore($perf, 'e', 7.5, null, null, 'E2');
-        $this->addScore($perf, 'e', 8.0, null, null, 'E3'); // 3 судьи -> avg 7.5
+        $this->addScore($perf, 'e', 8.0, null, null, 'E3'); // 3 судьи -> центральная 7.5
 
         $perf->load('judgeScores', 'category');
 
@@ -425,10 +438,10 @@ class ScoringSystemTest extends TestCase
         $perf->recalculateTotals();
 
         $this->assertEqualsWithDelta(7.0, $perf->d_score, 0.0005, 'D считается: остались DB1 и DA1');
-        $this->assertEqualsWithDelta(8.3333, $perf->a_score, 0.001, 'A = среднее по 3 судьям');
-        $this->assertEqualsWithDelta(7.5, $perf->e_score, 0.0005, 'E = среднее по 3 судьям');
-        // total = 7.0 + 8.3333 + 7.5 = 22.8333
-        $this->assertEqualsWithDelta(22.8333, $perf->total, 0.001, 'итог считается нормально');
+        $this->assertEqualsWithDelta(8.3, $perf->a_score, 0.0005, 'A = центральная из 3 (мин./макс. отброшены)');
+        $this->assertEqualsWithDelta(7.5, $perf->e_score, 0.0005, 'E = центральная из 3');
+        // total = 7.0 + 8.3 + 7.5 = 22.8
+        $this->assertEqualsWithDelta(22.8, $perf->total, 0.0005, 'итог считается нормально');
     }
 
     public function test_score_from_inactive_slot_is_excluded_and_not_moved_to_another_slot(): void

@@ -84,7 +84,7 @@
                             <div class="mt-1 text-xs text-slate-400">{{ $performance->apparatus ?? '—' }} · {{ ['scheduled' => 'В очереди', 'called' => 'Вызвана', 'performing' => 'Выступает', 'done' => 'Завершено', 'published' => 'Опубликовано', 'withdrawn' => 'Снята', 'inquiry' => 'Протест', 'under_review' => 'Рассмотрение'][$performance->status] ?? $performance->status }} · {{ $performance->athlete->club ?? '—' }}</div>
                         </div>
                         <div class="flex flex-wrap gap-2 font-mono text-xs">
-                            @foreach([['DB', $reviewDb], ['DA', $reviewDa], ['A', $performance->a_score], ['E', $performance->e_score], ['Сбавка', $performance->penalty], ['Итого', $performance->total]] as [$label, $value])
+                            @foreach([...($performance->isBodyOnlyApparatus() ? [['D (БП)', $performance->d_score]] : [['DB', $reviewDb], ['DA', $reviewDa]]), ['A', $performance->a_score], ['E', $performance->e_score], ['Сбавка', $performance->penalty], ['Итого', $performance->total]] as [$label, $value])
                                 <span class="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200">{{ $label }} {{ \App\Support\SecretaryLiveUi::formatScore($value !== null ? (float) $value : null, $label === 'E' ? 2 : 3) }}</span>
                             @endforeach
                             <span class="rounded-md border border-violet-700/70 bg-violet-950/40 px-2 py-1 text-violet-100">Место {{ $reviewPlace !== null && $reviewPlaceOf !== null ? $reviewPlace.'/'.$reviewPlaceOf : '—' }}</span>
@@ -93,6 +93,7 @@
                     @include('secretary.partials.review-performance')
                     <div class="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-8 2xl:grid-cols-[repeat(16,minmax(0,1fr))]">
                         @foreach($historyJudgeColumns as $slot)
+                            @continue($performance->isBodyOnlyApparatus() && in_array($slot, \App\Support\SecretaryLiveUi::DIFFICULTY_AVERAGE_SLOTS, true))
                             @php($score = $history['slots'][$slot] ?? null)
                             @php($isSpread = in_array($slot, $violating, true))
                             <button type="button" data-stream-history-score data-performance-id="{{ $performance->id }}" data-slot="{{ $slot }}" class="rounded-lg border px-1.5 py-2 text-center {{ ($score['returned'] ?? false) ? 'border-violet-400 bg-violet-900/75 text-white ring-1 ring-violet-300' : ($isSpread ? 'border-rose-500 bg-rose-900/75 text-white ring-1 ring-rose-400' : ($score ? 'border-emerald-900/70 bg-emerald-950/25 text-emerald-100' : 'border-slate-800 bg-slate-900/45 text-slate-600')) }}">
