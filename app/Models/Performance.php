@@ -269,12 +269,22 @@ class Performance extends Model
             $averageRows = SecretaryLiveUi::difficultyAverageRows($this);
             $dbRow = $averageRows['DB_AVG'] ?? null;
             $daRow = $averageRows['DA_AVG'] ?? null;
-            $db = $dbRow?->average_submitted_at !== null && $dbRow?->average_score !== null
-                ? (float) $dbRow->average_score
-                : null;
-            $da = $daRow?->average_submitted_at !== null && $daRow?->average_score !== null
-                ? (float) $daRow->average_score
-                : null;
+            // Если планшет средней отключён (нет отдельного судьи), официальное
+            // значение — среднее активных судей панели (один судья — его оценка).
+            if (in_array('DB_AVG', $inactive, true)) {
+                $db = $this->calculateTrimmedPanelScore(['DB1', 'DB2'], $inactive, $rowsBySlot);
+            } else {
+                $db = $dbRow?->average_submitted_at !== null && $dbRow?->average_score !== null
+                    ? (float) $dbRow->average_score
+                    : null;
+            }
+            if (in_array('DA_AVG', $inactive, true)) {
+                $da = $this->calculateTrimmedPanelScore(['DA1', 'DA2'], $inactive, $rowsBySlot);
+            } else {
+                $da = $daRow?->average_submitted_at !== null && $daRow?->average_score !== null
+                    ? (float) $daRow->average_score
+                    : null;
+            }
             $d = ($db !== null && $da !== null) ? $db + $da : null;
         }
 
@@ -328,7 +338,7 @@ class Performance extends Model
     }
 
     /**
-     * Оценка панели A/E: null, пока не отправили все активные слоты.
+     * Оценка панели A/E (и DB/DA без планшета средней): null, пока не отправили все активные слоты.
      * 4 судьи — отбрасываем мин./макс., среднее двух центральных;
      * 3 — центральная оценка; 2 — среднее; 1 — сама оценка.
      *

@@ -1885,12 +1885,13 @@ class SecretaryController extends Controller
         $difficultyAverageSlots = collect([
             'DB_AVG' => 'Средняя DB',
             'DA_AVG' => 'Средняя DA',
-        ])->map(function (string $label, string $slot) use ($difficultyAverageRows) {
+        ])->map(function (string $label, string $slot) use ($difficultyAverageRows, $category) {
             $row = $difficultyAverageRows[$slot] ?? null;
 
             return [
                 'slot' => $slot,
                 'label' => $label,
+                'inactive' => SecretaryLiveUi::isSlotInactive($category, $slot),
                 'ok' => $row?->average_submitted_at !== null && $row?->average_score !== null,
                 'value' => $row?->average_score,
             ];
@@ -2931,7 +2932,7 @@ class SecretaryController extends Controller
     public function toggleJudgeSlot(Request $request, Category $category)
     {
         $data = $request->validate([
-            'slot' => ['required', 'string', Rule::in(SecretaryLiveUi::ALL_JUDGE_SLOTS)],
+            'slot' => ['required', 'string', Rule::in(array_merge(SecretaryLiveUi::ALL_JUDGE_SLOTS, SecretaryLiveUi::MANUAL_AVERAGE_SLOTS))],
             'active' => ['required', 'in:0,1'],
         ]);
 

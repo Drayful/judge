@@ -389,16 +389,23 @@
                 </div>
                 <div class="mt-4 border-t border-slate-800 pt-3">
                     <div class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-300">Независимые итоговые планшеты</div>
-                    <div class="flex flex-wrap gap-2">
+                    <div class="flex flex-wrap gap-2" id="judge-avg-grid">
                         @foreach($difficultyAverageSlots as $averageSlot)
-                            <span class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold {{ $averageSlot['ok'] ? 'border-cyan-700 bg-cyan-950/50 text-cyan-100' : 'border-amber-800 bg-amber-950/35 text-amber-100' }}">
-                                <span class="h-2 w-2 rounded-full {{ $averageSlot['ok'] ? 'bg-cyan-400' : 'bg-amber-400' }}"></span>
+                            @php $avgInactive = (bool) ($averageSlot['inactive'] ?? false); @endphp
+                            <button
+                                type="button"
+                                data-slot="{{ $averageSlot['slot'] }}"
+                                data-inactive="{{ $avgInactive ? '1' : '0' }}"
+                                class="judge-avg-toggle inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-cyan-500/50 {{ $avgInactive ? 'border-slate-800 bg-slate-950/40 text-slate-500 line-through opacity-70 hover:opacity-100' : ($averageSlot['ok'] ? 'border-cyan-700 bg-cyan-950/50 text-cyan-100' : 'border-amber-800 bg-amber-950/35 text-amber-100') }}"
+                                title="{{ $avgInactive ? 'Планшет отключён — клик, чтобы включить' : 'Клик, чтобы отключить (нет отдельного судьи средней)' }}"
+                            >
+                                <span class="h-2 w-2 rounded-full {{ $avgInactive ? 'bg-slate-600' : ($averageSlot['ok'] ? 'bg-cyan-400' : 'bg-amber-400') }}"></span>
                                 {{ $averageSlot['label'] }}:
-                                <span class="font-mono">{{ $averageSlot['ok'] ? number_format((float) $averageSlot['value'], 3, '.', '') : 'ждём' }}</span>
-                            </span>
+                                <span class="font-mono">{{ $avgInactive ? 'off' : ($averageSlot['ok'] ? number_format((float) $averageSlot['value'], 3, '.', '') : 'ждём') }}</span>
+                            </button>
                         @endforeach
                     </div>
-                    <p class="mt-2 text-[10px] text-slate-500">Эти два планшета не отключаются вместе с DB1/DB2/DA1/DA2 и напрямую задают итоговые DB и DA.</p>
+                    <p class="mt-2 text-[10px] text-slate-500">Эти два планшета напрямую задают итоговые DB и DA. Если планшет отключить, DB (DA) считается как среднее активных судей DB1/DB2 (DA1/DA2); при одном судье — его оценка.</p>
                 </div>
                 <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                     <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>оценка пришла</span>
@@ -1379,6 +1386,44 @@
     const grid = document.getElementById('judge-slots-grid');
     const waitingEl = document.getElementById('judge-slots-waiting');
     const activeCountEl = document.getElementById('judge-slots-active');
+    const avgGrid = document.getElementById('judge-avg-grid');
+
+    // Планшеты средней DB/DA: переключение меняет формулу D, поэтому перезагружаем страницу.
+    if (avgGrid) {
+        avgGrid.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('.judge-avg-toggle');
+            if (!btn) return;
+            ev.preventDefault();
+            const slot = btn.dataset.slot;
+            const willBeActive = btn.dataset.inactive === '1' ? 1 : 0;
+            if (!willBeActive && !confirm(`Отключить ${slot}? DB/DA будут считаться по судьям панели.`)) return;
+            btn.disabled = true;
+            toast('saving', `Сохраняю слот ${slot}…`);
+            try {
+                const res = await fetch(toggleUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+                    },
+                    body: JSON.stringify({ slot, active: willBeActive }),
+                });
+                if (!res.ok) {
+                    toast('err', 'Не удалось сохранить.');
+                    btn.disabled = false;
+                    return;
+                }
+                const data = await res.json();
+                toast('ok', data.message || 'Сохранено');
+                window.location.reload();
+            } catch (e) {
+                toast('err', 'Нет связи.');
+                btn.disabled = false;
+            }
+        });
+    }
 
     const styleButton = (btn) => {
         const inactive = btn.dataset.inactive === '1';

@@ -366,6 +366,9 @@ class JudgeController extends Controller
         if ($current->isBodyOnlyApparatus()) {
             return response()->json(['ok' => false, 'error' => 'Для БП отдельные средние DB/DA не используются.'], 422);
         }
+        if (! $user->isAdmin() && SecretaryLiveUi::isSlotInactive($category, $slot)) {
+            return response()->json(['ok' => false, 'error' => "Слот {$slot} отключён секретарём — средняя не требуется."], 422);
+        }
 
         if ($user->isAdmin()) {
             $panel = [

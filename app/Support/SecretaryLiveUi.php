@@ -238,6 +238,15 @@ class SecretaryLiveUi
         $requiredPanelGroups = $perf->isBodyOnlyApparatus()
             ? [self::D_JUDGE_SLOTS, ['A1', 'A2', 'A3', 'A4'], ['E1', 'E2', 'E3', 'E4']]
             : [['A1', 'A2', 'A3', 'A4'], ['E1', 'E2', 'E3', 'E4']];
+        // Без планшета средней DB/DA считается по судьям панели — нужен хотя бы один.
+        if (! $perf->isBodyOnlyApparatus()) {
+            if (in_array('DB_AVG', $inactive, true)) {
+                $requiredPanelGroups[] = ['DB1', 'DB2'];
+            }
+            if (in_array('DA_AVG', $inactive, true)) {
+                $requiredPanelGroups[] = ['DA1', 'DA2'];
+            }
+        }
         foreach ($requiredPanelGroups as $panelSlots) {
             if (collect($panelSlots)->every(fn (string $slot) => in_array($slot, $inactive, true))) {
                 return false;
@@ -275,7 +284,12 @@ class SecretaryLiveUi
         }
 
         $rows = self::difficultyAverageRows($perf);
+        $inactive = self::inactiveSlots($category ?? $perf->category);
         foreach (self::MANUAL_AVERAGE_SLOTS as $slot) {
+            // Отключённый планшет средней не блокирует поток: DB/DA берутся от судей панели.
+            if (in_array($slot, $inactive, true)) {
+                continue;
+            }
             $row = $rows[$slot] ?? null;
             if ($row === null || $row->average_submitted_at === null || $row->average_score === null) {
                 return false;

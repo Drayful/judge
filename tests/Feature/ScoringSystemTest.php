@@ -444,6 +444,74 @@ class ScoringSystemTest extends TestCase
         $this->assertEqualsWithDelta(22.8, $perf->total, 0.0005, 'итог считается нормально');
     }
 
+    public function test_inactive_average_tablets_take_d_from_single_panel_judges(): void
+    {
+        // Как на реальном турнире: по одному судье DB и DA, планшетов средней нет.
+        $category = $this->makeCategory([
+            'inactive_judge_slots' => ['DB2', 'DA2', 'DB_AVG', 'DA_AVG', 'A4', 'E4', 'LINE1', 'LINE2', 'TIME', 'RESP'],
+        ]);
+        $perf = $this->makePerformance($category);
+
+        $this->addScore($perf, 'd', 1.4, 'db', null, 'DB1');
+        $this->addScore($perf, 'a', 6.5, null, null, 'A1');
+        $this->addScore($perf, 'a', 6.4, null, null, 'A2');
+        $this->addScore($perf, 'a', 4.9, null, null, 'A3');
+        $this->addScore($perf, 'e', 5.7, null, null, 'E1');
+        $this->addScore($perf, 'e', 5.5, null, null, 'E2');
+        $this->addScore($perf, 'e', 5.2, null, null, 'E3');
+
+        $perf->recalculateTotals();
+        $this->assertNull($perf->d_score, 'D ждёт DA1, хотя планшет средней отключён');
+        $this->assertFalse(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
+
+        $this->addScore($perf, 'd', 1.7, 'da', null, 'DA1');
+        $perf->recalculateTotals();
+
+        $this->assertTrue(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
+        $this->assertTrue(SecretaryLiveUi::requiredManualAveragesSubmitted($perf, $category));
+        $this->assertEqualsWithDelta(1.4, $perf->db_average, 0.0005);
+        $this->assertEqualsWithDelta(1.7, $perf->da_average, 0.0005);
+        $this->assertEqualsWithDelta(3.1, $perf->d_score, 0.0005);
+        $this->assertEqualsWithDelta(6.4, $perf->a_score, 0.0005);
+        $this->assertEqualsWithDelta(5.5, $perf->e_score, 0.0005);
+        $this->assertEqualsWithDelta(15.0, $perf->total, 0.0005);
+    }
+
+    public function test_inactive_average_tablet_uses_mean_of_two_panel_judges(): void
+    {
+        $category = $this->makeCategory(['inactive_judge_slots' => ['DB_AVG']]);
+        $perf = $this->makePerformance($category);
+
+        $this->addScore($perf, 'd', 4.0, 'db', null, 'DB1');
+        $this->addScore($perf, 'd', 4.6, 'db', null, 'DB2');
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
+        $this->addScore($perf, 'd', 2.2, 'da', null, 'DA2');
+        $this->addOfficialDifficultyAverage($perf, 'da', 2.1);
+        $this->fillAeScores($perf);
+
+        $perf->recalculateTotals();
+
+        $this->assertEqualsWithDelta(4.3, $perf->db_average, 0.0005, 'DB = среднее DB1/DB2');
+        $this->assertEqualsWithDelta(2.1, $perf->da_average, 0.0005, 'DA — с активного планшета средней');
+        $this->assertEqualsWithDelta(6.4, $perf->d_score, 0.0005);
+    }
+
+    public function test_average_tablet_cannot_be_inactive_together_with_both_panel_judges(): void
+    {
+        $category = $this->makeCategory(['inactive_judge_slots' => ['DB1', 'DB2', 'DB_AVG']]);
+        $perf = $this->makePerformance($category);
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA1');
+        $this->addScore($perf, 'd', 2.0, 'da', null, 'DA2');
+        $this->addOfficialDifficultyAverage($perf, 'da', 2.0);
+        $this->fillAeScores($perf);
+
+        $perf->recalculateTotals();
+
+        $this->assertNull($perf->d_score, 'DB взять неоткуда');
+        $this->assertNull($perf->total);
+        $this->assertFalse(SecretaryLiveUi::requiredScoresSubmitted($perf, $category));
+    }
+
     public function test_score_from_inactive_slot_is_excluded_and_not_moved_to_another_slot(): void
     {
         $category = $this->makeCategory([

@@ -1512,6 +1512,26 @@ class LiveResultWorkflowTest extends TestCase
         $this->assertTrue($first->category->fresh()->isJudgeSlotActive('E4'));
     }
 
+    public function test_secretary_can_disable_difficulty_average_tablets(): void
+    {
+        $performance = $this->performance();
+        $secretary = User::factory()->create(['role' => 'secretary']);
+
+        foreach (['DB_AVG', 'DA_AVG'] as $slot) {
+            $this->actingAs($secretary)
+                ->postJson(route('secretary.category.judgeSlot.toggle', $performance->category), [
+                    'slot' => $slot,
+                    'active' => 0,
+                ])
+                ->assertOk()
+                ->assertJsonPath('active', false);
+        }
+
+        $list = $performance->category->tournament->fresh()->inactiveJudgeSlotList();
+        $this->assertContains('DB_AVG', $list);
+        $this->assertContains('DA_AVG', $list);
+    }
+
     public function test_auto_advance_switch_controls_the_selected_stream(): void
     {
         $performance = $this->performance();
