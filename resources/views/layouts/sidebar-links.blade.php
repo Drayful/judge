@@ -5,6 +5,7 @@
     $canChiefJudge = $user ? $user->isChiefJudge() : false;
     $canJudge = $user ? ($user->isAnyJudge() || $user->isAdmin()) : false;
     $canScoreboardJudge = $user ? ($user->isScoreboardJudge() || $user->isAdmin()) : false;
+    $canMusicOperator = $user ? ($user->isSoundOperator() || $user->isSecretary() || $user->isAdmin()) : false;
 @endphp
 
 <nav class="px-3 py-4 space-y-1">
@@ -46,6 +47,12 @@
     @if($canScoreboardJudge)
         <a href="{{ route('scoreboard-judge.index') }}" class="{{ request()->routeIs('scoreboard-judge.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
             Оператор табло
+        </a>
+    @endif
+
+    @if($canMusicOperator)
+        <a href="{{ route('music-operator.index') }}" class="{{ request()->routeIs('music-operator.*') ? $linkActive : $linkIdle }} {{ $linkBase }}">
+            Музыка выступлений
         </a>
     @endif
 

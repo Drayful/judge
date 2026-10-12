@@ -54,6 +54,12 @@ class User extends Authenticatable
         return $this->role === 'scoreboard_judge';
     }
 
+    /** Звукорежиссёр: только запуск музыки выступающих. */
+    public function isSoundOperator(): bool
+    {
+        return $this->role === 'sound_operator';
+    }
+
     /**
      * Замена музыки после дедлайна категории (секретариат / админ).
      */

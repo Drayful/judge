@@ -9,7 +9,7 @@ class MusicTrackPolicy
 {
     public function download(User $user, MusicTrack $track): bool
     {
-        if (in_array($user->role, ['admin', 'super_admin', 'secretary', 'chief_judge', 'organising_committee'], true)) {
+        if (in_array($user->role, ['admin', 'super_admin', 'secretary', 'chief_judge', 'organising_committee', 'sound_operator'], true)) {
             return true;
         }
 

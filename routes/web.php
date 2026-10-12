@@ -3,6 +3,7 @@
 use App\Http\Controllers\AthleteMusicController;
 use App\Http\Controllers\InquiryController;
 use App\Http\Controllers\JudgeController;
+use App\Http\Controllers\MusicOperatorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PublicAthleteUploadController;
 use App\Http\Controllers\ScoreboardController;
@@ -290,6 +291,13 @@ Route::middleware('auth')->group(function () {
     Route::post('/scoreboard-judge/performances/{performance}/cancel', [ScoreboardJudgeController::class, 'cancel'])
         ->middleware('role:scoreboard_judge,admin,super_admin')
         ->name('scoreboard-judge.cancel');
+
+    Route::get('/music-operator', [MusicOperatorController::class, 'index'])
+        ->middleware('role:sound_operator,secretary,admin,super_admin')
+        ->name('music-operator.index');
+    Route::get('/music-operator/live', [MusicOperatorController::class, 'live'])
+        ->middleware('role:sound_operator,secretary,admin,super_admin')
+        ->name('music-operator.live');
 
     Route::post('/performances/{performance}/inquiries', [InquiryController::class, 'store'])
         ->middleware('role:secretary,superior_jury,head_judge,chief_judge,admin,super_admin')

@@ -36,6 +36,10 @@
                             <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('secretary.categories') }}">{{ Auth::user()->isChiefJudge() ? 'Главный судья' : 'Секретарь' }} · Категории / Live</a>
                         @endif
 
+                        @if(Auth::user()->isSoundOperator() || Auth::user()->isSecretary() || Auth::user()->isAdmin())
+                            <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('music-operator.index') }}">Музыка выступлений</a>
+                        @endif
+
                         @if(in_array($role, ['judge', 'admin'], true))
                             <a class="text-emerald-400 hover:text-emerald-300 font-medium" href="{{ route('judge.tournaments') }}">Судейство · Турниры</a>
                         @endif
