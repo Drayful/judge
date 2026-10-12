@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MusicTrack;
 use App\Models\Performance;
+use App\Models\User;
 use DomainException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
