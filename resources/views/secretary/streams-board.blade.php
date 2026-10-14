@@ -202,12 +202,13 @@
                             if ($started) $warnings[] = ['rose', 'В группе уже идут выступления — состав потоков заморожен. Порядок оставшихся меняйте в Live.'];
                             if ($g->usesApparatusChoice() && $g->hasPendingApparatusSelection()) $warnings[] = ['amber', 'Вид на выбор: виды ещё не указаны — очереди пустые. Укажите их ниже.'];
                             if (count($board['unassigned'])) $warnings[] = ['sky', count($board['unassigned']).' — не в потоке. Перетащите карточки в нужный поток.'];
+                            // Подсказки не должны отодвигать потоки вниз — они свёрнуты в одну строку.
                             $noMusic = collect($board['streams'])->flatMap(fn ($s) => $s['cards'])->filter(fn ($c) => ! $c['music'] && ! $c['withdrawn'])->pluck('name');
-                            if ($noMusic->isNotEmpty()) $warnings[] = ['amber', 'Нет музыки: '.$noMusic->implode(', ')];
+                            $sameClub = [];
                             foreach ($board['streams'] as $s) {
                                 foreach ($s['cards'] as $i => $c) {
                                     if ($i > 0 && $g->program === 'individual' && $c['club'] && $c['club'] === $s['cards'][$i - 1]['club']) {
-                                        $warnings[] = ['sky', 'Поток '.$s['no'].': «'.$c['club'].'» подряд (№'.$i.' и №'.($i + 1).') — тренеру может не хватить времени'];
+                                        $sameClub[] = 'Поток '.$s['no'].': «'.$c['club'].'» подряд (№'.$i.' и №'.($i + 1).')';
                                     }
                                 }
                             }
@@ -215,6 +216,21 @@
                         @foreach($warnings as [$tone, $text])
                             <div class="rounded-lg border px-3 py-2 text-sm {{ ['rose' => 'border-rose-800/70 bg-rose-950/30 text-rose-100', 'amber' => 'border-amber-800/70 bg-amber-950/30 text-amber-100', 'sky' => 'border-sky-800/70 bg-sky-950/30 text-sky-100'][$tone] }}">{{ $text }}</div>
                         @endforeach
+                        @if($noMusic->isNotEmpty() || $sameClub)
+                            <details class="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-400">
+                                <summary class="cursor-pointer select-none">
+                                    Подсказки:
+                                    @if($noMusic->isNotEmpty())<span class="text-amber-300">♪✕ без музыки — {{ $noMusic->count() }}</span>@endif
+                                    @if($noMusic->isNotEmpty() && $sameClub) · @endif
+                                    @if($sameClub)<span class="text-sky-300">один клуб подряд — {{ count($sameClub) }}</span>@endif
+                                    <span class="text-slate-500">(показать)</span>
+                                </summary>
+                                <div class="mt-2 space-y-1 pb-1">
+                                    @if($noMusic->isNotEmpty())<div><span class="text-amber-300">Нет музыки:</span> {{ $noMusic->implode(', ') }}</div>@endif
+                                    @foreach($sameClub as $line)<div class="text-sky-200">{{ $line }} — тренеру может не хватить времени</div>@endforeach
+                                </div>
+                            </details>
+                        @endif
                         @if($g->usesApparatusChoice() && ! $started)
                             <form method="POST" action="{{ route('secretary.tournament.board.apparatus', [$tournament, $g]) }}" class="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-300">
                                 @csrf
