@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Models\Group;
 use App\Models\Performance;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -16,6 +17,12 @@ class StreamScheduleService
     public function recalculate(Category $category): void
     {
         $category->refresh();
+
+        if ($category->group?->schedule_mode === 'sessions') {
+            $this->recalculateGroupSessions($category->group);
+
+            return;
+        }
 
         if ($category->schedule_chain !== null && $category->schedule_chain !== '') {
             $categories = Category::query()
@@ -63,6 +70,62 @@ class StreamScheduleService
 
         $start = Carbon::createFromFormat('H:i', substr($category->starts_at_label, 0, 5))->startOfMinute();
         DB::transaction(fn () => $this->applyPerformanceTimes($category, $start));
+    }
+
+    /**
+     * Время по дням группы: в каждой сессии (дне) потоки идут друг за другом
+     * от времени начала первого потока; снятые время не занимают.
+     */
+    public function recalculateGroupSessions(Group $group): void
+    {
+        $categories = $group->categories()->with('sessions')->orderBy('stream_no')->orderBy('id')->get();
+        $sessionNos = $categories->flatMap(fn (Category $category) => $category->sessions->pluck('session_no'))->unique()->sort()->values();
+
+        DB::transaction(function () use ($categories, $sessionNos) {
+            foreach ($sessionNos as $sessionNo) {
+                $cursor = null;
+                foreach ($categories as $category) {
+                    $session = $category->sessions->firstWhere('session_no', $sessionNo);
+                    if ($session === null) {
+                        continue;
+                    }
+                    if ($cursor === null) {
+                        if ($session->starts_at === null || $session->starts_at === '') {
+                            break;
+                        }
+                        $cursor = Carbon::createFromFormat('H:i', substr((string) $session->starts_at, 0, 5))->startOfMinute();
+                    }
+                    $minutes = max(1, (int) ($category->minutes_per_athlete ?? 2));
+                    $session->starts_at = $cursor->format('H:i');
+
+                    Performance::query()->where('stream_session_id', $session->id)->update(['scheduled_at_label' => null]);
+                    $performances = Performance::query()
+                        ->where('stream_session_id', $session->id)
+                        ->whereNull('withdrawn_at')
+                        ->where('status', '!=', 'withdrawn')
+                        ->orderBy('order_index')
+                        ->orderBy('id')
+                        ->get(['id']);
+                    foreach ($performances as $performance) {
+                        Performance::query()->whereKey($performance->id)->update(['scheduled_at_label' => $cursor->format('H:i')]);
+                        $cursor->addMinutes($minutes);
+                    }
+                    $session->ends_at = $cursor->format('H:i');
+                    $session->save();
+                }
+            }
+
+            foreach ($categories as $category) {
+                $first = $category->sessions->sortBy('session_no')->first();
+                if ($first === null || $first->starts_at === null) {
+                    continue;
+                }
+                $category->starts_at_label = substr((string) $first->starts_at, 0, 5);
+                $category->ends_at_label = substr((string) $first->ends_at, 0, 5);
+                $this->updateCategoryName($category);
+                $category->save();
+            }
+        });
     }
 
     private function applyPerformanceTimes(Category $category, Carbon $start): Carbon

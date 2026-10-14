@@ -31,6 +31,7 @@ class Category extends Model
         'scoring_rules',
         'auto_advance',
         'inactive_judge_slots',
+        'sheet_position',
     ];
 
     protected $casts = [

@@ -9,6 +9,7 @@ use App\Http\Controllers\PublicAthleteUploadController;
 use App\Http\Controllers\ScoreboardController;
 use App\Http\Controllers\ScoreboardJudgeController;
 use App\Http\Controllers\SecretaryController;
+use App\Http\Controllers\StreamsBoardController;
 use App\Http\Controllers\SupervisorController;
 use App\Http\Controllers\TournamentWorkflowController;
 use Illuminate\Support\Facades\Route;
@@ -35,7 +36,6 @@ Route::middleware('auth')->group(function () {
     Route::post('/secretary/tournaments/{tournament}/judges-import', [TournamentWorkflowController::class, 'importJudges'])->middleware('role:secretary,admin')->name('workflow.judges.import');
     Route::post('/judge/tournaments/{tournament}/identity', [TournamentWorkflowController::class, 'bindJudge'])->middleware('role:judge,admin')->name('workflow.judges.bind');
     Route::post('/secretary/categories/{category}/state', [TournamentWorkflowController::class, 'streamState'])->middleware('role:secretary,admin')->name('workflow.stream.state');
-    Route::post('/secretary/sessions/{session}/award', [TournamentWorkflowController::class, 'award'])->middleware('role:secretary,admin')->name('workflow.award');
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
@@ -114,6 +114,22 @@ Route::middleware('auth')->group(function () {
     Route::get('/secretary/tournaments/{tournament}/groups', [SecretaryController::class, 'groups'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups');
+    Route::prefix('/secretary/tournaments/{tournament}')
+        ->middleware('role:secretary,admin')
+        ->group(function () {
+            Route::get('/board', [StreamsBoardController::class, 'index'])->name('secretary.tournament.board');
+            Route::post('/board/pools', [StreamsBoardController::class, 'createGroup'])->name('secretary.tournament.board.pool');
+            Route::post('/board/groups/{group}/streams', [StreamsBoardController::class, 'createStreams'])->name('secretary.tournament.board.streams');
+            Route::post('/board/groups/{group}/arrange', [StreamsBoardController::class, 'arrange'])->name('secretary.tournament.board.arrange');
+            Route::post('/board/groups/{group}/shuffle', [StreamsBoardController::class, 'shuffle'])->name('secretary.tournament.board.shuffle');
+            Route::post('/board/groups/{group}/days/{day}', [StreamsBoardController::class, 'updateDay'])->whereNumber('day')->name('secretary.tournament.board.day');
+            Route::post('/board/groups/{group}/apparatus', [StreamsBoardController::class, 'setApparatus'])->name('secretary.tournament.board.apparatus');
+            Route::get('/start-list', [StreamsBoardController::class, 'startList'])->name('secretary.tournament.start-list');
+            Route::post('/start-list/order', [StreamsBoardController::class, 'saveOrder'])->name('secretary.tournament.start-list.order');
+            Route::post('/awards', [StreamsBoardController::class, 'storeAward'])->name('secretary.tournament.awards.store');
+            Route::patch('/awards/{award}', [StreamsBoardController::class, 'updateAward'])->name('secretary.tournament.awards.update');
+            Route::delete('/awards/{award}', [StreamsBoardController::class, 'destroyAward'])->name('secretary.tournament.awards.destroy');
+        });
     Route::post('/secretary/tournaments/{tournament}/groups', [SecretaryController::class, 'storeGroup'])
         ->middleware('role:secretary,chief_judge,admin')
         ->name('secretary.tournament.groups.store');

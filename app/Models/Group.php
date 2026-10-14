@@ -20,6 +20,7 @@ class Group extends Model
         'apparatus_count',
         'number_mode',
         'order_index',
+        'schedule_mode',
     ];
 
     protected $casts = [

@@ -22,6 +22,16 @@
                    href="{{ route('secretary.tournament.groups', $tr) }}">
                     Группы и потоки
                 </a>
+                @unless(auth()->user()->isChiefJudge())
+                    <a class="rounded-lg border border-emerald-600 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800/60 transition"
+                       href="{{ route('secretary.tournament.board', $tr) }}">
+                        Потоки (новый вид)
+                    </a>
+                    <a class="rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-900/50 transition"
+                       href="{{ route('secretary.tournament.start-list', $tr) }}">
+                        Стартовый лист
+                    </a>
+                @endunless
                 @if($tr->categories->isNotEmpty())
                     <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500"
                         href="{{ auth()->user()->isChiefJudge() ? route('secretary.queue.review', $tr->categories->sortBy('id')->first()) : route('secretary.tournament.live', ['tournament' => $tr, 'category' => $tr->categories->sortBy('id')->first()->id]) }}">

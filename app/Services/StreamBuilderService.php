@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Entry;
 use App\Models\Group;
+use App\Models\MusicTrack;
 use App\Models\Performance;
+use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Support\PerformanceApparatus;
 use DomainException;
@@ -36,6 +38,7 @@ class StreamBuilderService
         $streamSize = max(1, $streamSize);
 
         DB::transaction(function () use ($group, $streamSize, $times, $numberMode, $scheduledOn) {
+            $music = $this->musicLinks($group);
             $entries = $group->entries()
                 ->orderBy('order_index')
                 ->orderBy('id')
@@ -68,6 +71,7 @@ class StreamBuilderService
             }
 
             $this->purgeStaleStreams($group, $kept);
+            $this->relinkMusic($group, $music);
 
             if ($kept !== []) {
                 $firstCategory = Category::query()
@@ -92,6 +96,144 @@ class StreamBuilderService
                 }
             }
         });
+    }
+
+    /**
+     * Создание потоков со страницы «Потоки»: равномерное деление на N потоков
+     * и дни (сессии) группы со своими видами. Время считается по каждому дню.
+     *
+     * @param  array{stream_count:int,number_mode:string,minutes:int,order:string,apparatus_mode:string,apparatus:list<string>,apparatus_count:?int,days:list<array{date:string,start:string,apparatus:list<string>}>}  $options
+     */
+    public function createStreams(Group $group, array $options): void
+    {
+        DB::transaction(function () use ($group, $options) {
+            $this->ensureNotStarted($group);
+            $choice = $options['apparatus_mode'] === 'choice';
+
+            $group->update([
+                'apparatus' => $choice ? [] : array_values($options['apparatus']),
+                'apparatus_selection_mode' => $choice ? 'choice' : 'fixed',
+                'apparatus_count' => $choice ? (int) $options['apparatus_count'] : null,
+                'number_mode' => $options['number_mode'],
+                'schedule_mode' => 'sessions',
+            ]);
+
+            $entries = $group->entries()->orderBy('order_index')->orderBy('id')->get()->values();
+            if ($options['order'] === 'draw') {
+                $entries = $entries->shuffle()->values();
+            }
+            $count = max(1, min((int) $options['stream_count'], max(1, $entries->count())));
+            $base = intdiv($entries->count(), $count);
+            $extra = $entries->count() % $count;
+            $position = 0;
+            for ($stream = 1; $stream <= $count; $stream++) {
+                $size = $base + ($stream <= $extra ? 1 : 0);
+                for ($k = 0; $k < $size; $k++) {
+                    $entry = $entries[$position];
+                    $entry->stream_no = $stream;
+                    $entry->order_index = ++$position;
+                    $entry->save();
+                }
+            }
+
+            StreamSession::query()->whereIn('category_id', $group->categories()->select('id'))->delete();
+            $this->renumber($group);
+
+            $categories = $group->categories()->orderBy('stream_no')->get();
+            foreach ($categories as $category) {
+                $category->update(['minutes_per_athlete' => max(1, (int) $options['minutes']), 'schedule_chain' => null]);
+                foreach (array_values($options['days']) as $i => $day) {
+                    $session = StreamSession::query()->create([
+                        'category_id' => $category->id,
+                        'session_no' => $i + 1,
+                        'scheduled_on' => $day['date'],
+                        'starts_at' => $day['start'],
+                        'apparatus' => $choice ? [] : array_values($day['apparatus']),
+                    ]);
+                    $this->groupSessions->syncCategorySession($category, $session);
+                }
+            }
+
+            $this->schedule->recalculateGroupSessions($group->fresh());
+        });
+    }
+
+    /**
+     * Раскладка с доски: порядок и потоки так, как их расставил секретарь.
+     * Пустые потоки убираются, нумерация и очереди пересобираются.
+     *
+     * @param  list<list<int>>  $streams  id записей по потокам
+     * @param  list<int>  $unassigned  записи группы вне потоков
+     */
+    public function arrange(Group $group, array $streams, array $unassigned): void
+    {
+        DB::transaction(function () use ($group, $streams, $unassigned) {
+            $this->ensureNotStarted($group);
+
+            $entries = $group->entries()->lockForUpdate()->get()->keyBy('id');
+            $given = array_merge(array_merge(...array_values($streams) ?: [[]]), $unassigned);
+            if (count($given) !== count(array_unique($given)) || count($given) !== $entries->count()
+                || array_diff($given, $entries->keys()->all()) !== []) {
+                throw new DomainException('Состав группы изменился. Обновите страницу и повторите.');
+            }
+
+            $order = 0;
+            $streamNo = 0;
+            foreach ($streams as $ids) {
+                if ($ids === []) {
+                    continue;
+                }
+                $streamNo++;
+                foreach ($ids as $id) {
+                    $entries[$id]->forceFill(['stream_no' => $streamNo, 'order_index' => ++$order])->save();
+                }
+            }
+            foreach ($unassigned as $id) {
+                $entries[$id]->forceFill(['stream_no' => null, 'start_number' => null, 'order_index' => ++$order])->save();
+            }
+
+            $this->renumber($group);
+        });
+    }
+
+    /**
+     * Дата/начало дня группы и минуты на выход.
+     */
+    public function updateDay(Group $group, int $sessionNo, string $date, string $start, int $minutes): void
+    {
+        DB::transaction(function () use ($group, $sessionNo, $date, $start, $minutes) {
+            $sessions = StreamSession::query()
+                ->whereIn('category_id', $group->categories()->select('id'))
+                ->where('session_no', $sessionNo)
+                ->lockForUpdate()
+                ->get();
+            if ($sessions->isEmpty()) {
+                throw new DomainException('День не найден. Обновите страницу.');
+            }
+            if (Performance::query()->whereIn('stream_session_id', $sessions->pluck('id'))->whereNotIn('status', ['scheduled', 'withdrawn'])->exists()) {
+                throw new DomainException('Этот день уже начался — время менять нельзя.');
+            }
+            foreach ($sessions as $session) {
+                $session->update(['scheduled_on' => $date, 'starts_at' => $start]);
+            }
+            $group->categories()->update(['minutes_per_athlete' => max(1, $minutes)]);
+            $this->schedule->recalculateGroupSessions($group);
+        });
+    }
+
+    public function hasStarted(Group $group): bool
+    {
+        return Performance::query()
+            ->whereIn('category_id', $group->categories()->select('id'))
+            ->whereNotIn('status', ['scheduled', 'withdrawn'])
+            ->exists();
+    }
+
+    private function ensureNotStarted(Group $group): void
+    {
+        if ($this->hasStarted($group)) {
+            throw new DomainException('В группе уже начались выступления — менять потоки нельзя. Порядок оставшихся меняйте в Live.');
+        }
     }
 
     /**
@@ -268,6 +410,7 @@ class StreamBuilderService
     public function renumber(Group $group): void
     {
         DB::transaction(function () use ($group) {
+            $music = $this->musicLinks($group);
             $entries = $group->entries()
                 ->whereNotNull('stream_no')
                 ->orderBy('stream_no')
@@ -294,6 +437,7 @@ class StreamBuilderService
             }
 
             $this->purgeStaleStreams($group, $kept);
+            $this->relinkMusic($group, $music);
 
             if ($kept !== []) {
                 $firstCategory = Category::query()
@@ -400,11 +544,14 @@ class StreamBuilderService
         $occurrence = [];
         $orderIndex = 0;
         $sessionIdByApparatus = [];
-        foreach ($category->sessions()->get() as $session) {
+        $sessions = $category->sessions()->get();
+        foreach ($sessions as $session) {
             foreach ($session->apparatus ?? [] as $sessionApparatus) {
                 $sessionIdByApparatus[PerformanceApparatus::sessionKey($sessionApparatus)] = $session->id;
             }
         }
+        // Один день без списка видов («вид на выбор»): все выступления в нём.
+        $onlySessionId = $sessions->count() === 1 && ($sessions->first()->apparatus ?? []) === [] ? $sessions->first()->id : null;
         foreach ($expanded as $it) {
             /** @var Entry $entry */
             $entry = $it['entry'];
@@ -428,7 +575,7 @@ class StreamBuilderService
 
             Performance::query()->create([
                 'category_id' => $category->id,
-                'stream_session_id' => $sessionIdByApparatus[PerformanceApparatus::sessionKey($base)] ?? null,
+                'stream_session_id' => $sessionIdByApparatus[PerformanceApparatus::sessionKey($base)] ?? $onlySessionId,
                 'athlete_id' => $athleteId,
                 'start_number' => $entry->start_number,
                 'order_index' => ++$orderIndex,
@@ -463,6 +610,52 @@ class StreamBuilderService
 
             Performance::query()->where('category_id', $category->id)->delete();
             $category->delete();
+        }
+    }
+
+    /**
+     * Музыка привязана к выступлению, а очередь пересобирается заново —
+     * запоминаем, чей трек к какому виду относился.
+     *
+     * @return list<array{athlete_id:int,apparatus:?string,track_ids:list<int>}>
+     */
+    private function musicLinks(Group $group): array
+    {
+        $performances = Performance::query()
+            ->whereIn('category_id', $group->categories()->select('id'))
+            ->where('status', 'scheduled')
+            ->get(['id', 'athlete_id', 'apparatus'])
+            ->keyBy('id');
+        if ($performances->isEmpty()) {
+            return [];
+        }
+
+        return MusicTrack::query()
+            ->whereIn('performance_id', $performances->keys())
+            ->get(['id', 'performance_id'])
+            ->groupBy('performance_id')
+            ->map(fn (Collection $tracks, $performanceId) => [
+                'athlete_id' => (int) $performances[$performanceId]->athlete_id,
+                'apparatus' => $performances[$performanceId]->apparatus,
+                'track_ids' => $tracks->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** @param list<array{athlete_id:int,apparatus:?string,track_ids:list<int>}> $links */
+    private function relinkMusic(Group $group, array $links): void
+    {
+        foreach ($links as $link) {
+            $performanceId = Performance::query()
+                ->whereIn('category_id', $group->categories()->select('id'))
+                ->where('athlete_id', $link['athlete_id'])
+                ->where('apparatus', $link['apparatus'])
+                ->orderByRaw("CASE WHEN status = 'scheduled' THEN 0 ELSE 1 END")
+                ->value('id');
+            if ($performanceId !== null) {
+                MusicTrack::query()->whereIn('id', $link['track_ids'])->update(['performance_id' => $performanceId]);
+            }
         }
     }
 

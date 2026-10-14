@@ -15,6 +15,7 @@ use App\Models\Tournament;
 use App\Models\User;
 use App\Services\FinalProtocolExporter;
 use App\Services\FinalProtocolService;
+use App\Services\GroupPoolService;
 use App\Services\GroupStreamSessionService;
 use App\Services\MusicTrackUploadService;
 use App\Services\StartProtocolExporter;
@@ -768,38 +769,7 @@ class SecretaryController extends Controller
      */
     private function createGroupFromPool(Tournament $tournament, string $program, ?int $birthYear, ?string $division, array $apparatus, string $numberMode, string $apparatusMode = 'fixed', ?int $apparatusCount = null): Group
     {
-        // метка пула («2020 и мл» и т.п.), если есть у entries.
-        $label = Entry::query()
-            ->where('tournament_id', $tournament->id)
-            ->whereNull('group_id')
-            ->where('program', $program)
-            ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
-            ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
-            ->value('meta->label');
-
-        $group = Group::query()->create([
-            'tournament_id' => $tournament->id,
-            'program' => $program,
-            'birth_year' => $birthYear,
-            'birth_year_label' => is_string($label) ? $label : null,
-            'division' => $division,
-            'name' => $this->groupName($birthYear, $division, is_string($label) ? $label : null),
-            'apparatus' => $apparatus,
-            'apparatus_selection_mode' => $apparatusMode,
-            'apparatus_count' => $apparatusCount,
-            'number_mode' => $numberMode,
-            'order_index' => (int) (Group::query()->where('tournament_id', $tournament->id)->max('order_index') ?? 0) + 1,
-        ]);
-
-        Entry::query()
-            ->where('tournament_id', $tournament->id)
-            ->whereNull('group_id')
-            ->where('program', $program)
-            ->when($birthYear !== null, fn ($q) => $q->where('birth_year', $birthYear), fn ($q) => $q->whereNull('birth_year'))
-            ->when($division !== null, fn ($q) => $q->where('division', $division), fn ($q) => $q->whereNull('division'))
-            ->update(['group_id' => $group->id]);
-
-        return $group;
+        return app(GroupPoolService::class)->createFromPool($tournament, $program, $birthYear, $division, $apparatus, $numberMode, $apparatusMode, $apparatusCount);
     }
 
     /**

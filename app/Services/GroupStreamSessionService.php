@@ -194,6 +194,11 @@ class GroupStreamSessionService
         }
     }
 
+    public function syncCategorySession(Category $category, StreamSession $session): void
+    {
+        $this->syncPerformances($category, $session);
+    }
+
     private function syncPerformances(Category $category, StreamSession $session): void
     {
         $sessionApparatus = array_map(

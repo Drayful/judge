@@ -16,11 +16,13 @@ class StreamSession extends Model
         'starts_at',
         'ends_at',
         'apparatus',
+        'sheet_position',
     ];
 
     protected $casts = [
         'scheduled_on' => 'date',
         'apparatus' => 'array',
+        'sheet_position' => 'integer',
     ];
 
     public function category(): BelongsTo

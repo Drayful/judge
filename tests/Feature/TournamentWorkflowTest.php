@@ -204,10 +204,10 @@ class TournamentWorkflowTest extends TestCase
     {
         $p = $this->performance();
         $session = StreamSession::create(['category_id' => $p->category_id, 'session_no' => 1, 'scheduled_on' => '2026-09-24', 'starts_at' => '09:00', 'ends_at' => '10:00', 'apparatus' => []]);
-        $session->forceFill(['award_minutes' => 20])->save();
         $p->update(['stream_session_id' => $session->id]);
+        $p->category->tournament->awards()->create(['title' => 'Награждение 2015 г.р.', 'scheduled_on' => '2026-09-24', 'starts_at' => '10:00', 'ends_at' => '10:20']);
         $book = app(StartProtocolExporter::class)->buildStartSheet($p->category->tournament, '2026-09-24');
-        $this->assertStringContainsString('Награждение · 10:00–10:20 · 20 мин.', json_encode($book->getActiveSheet()->toArray(), JSON_UNESCAPED_UNICODE));
+        $this->assertStringContainsString('Награждение 2015 г.р. · 10:00–10:20', json_encode($book->getActiveSheet()->toArray(), JSON_UNESCAPED_UNICODE));
     }
 
     public function test_close_reopen_is_explicit_and_preserves_results(): void
@@ -221,7 +221,7 @@ class TournamentWorkflowTest extends TestCase
         $this->assertNull($p->category->fresh()->closed_at);
     }
 
-    public function test_award_updates_shift_by_delta_and_do_not_affect_other_days(): void
+    public function test_free_award_time_does_not_shift_streams(): void
     {
         $p = $this->performance();
         $sessions = [];
@@ -229,11 +229,11 @@ class TournamentWorkflowTest extends TestCase
             $sessions[] = StreamSession::create(['category_id' => $p->category_id, 'session_no' => $i + 1, 'scheduled_on' => $date, 'starts_at' => $start, 'ends_at' => $end, 'apparatus' => []]);
         }
         $this->actingAs(User::factory()->create(['role' => 'secretary']));
-        $this->post(route('workflow.award', $sessions[0]), ['minutes' => 20])->assertSessionHasNoErrors();
-        $this->assertSame('10:20', substr($sessions[1]->fresh()->starts_at, 0, 5));
-        $this->post(route('workflow.award', $sessions[0]), ['minutes' => 10])->assertSessionHasNoErrors();
-        $this->assertSame('10:10', substr($sessions[1]->fresh()->starts_at, 0, 5));
-        $this->assertSame('10:00', substr($sessions[2]->fresh()->starts_at, 0, 5));
+        $this->post(route('secretary.tournament.awards.store', $p->category->tournament), [
+            'title' => 'Церемония открытия и награждение', 'scheduled_on' => '2026-09-24', 'starts_at' => '13:45', 'ends_at' => '14:05',
+        ])->assertSessionHasNoErrors();
+        $this->assertSame('10:00', substr($sessions[1]->fresh()->starts_at, 0, 5));
+        $this->assertDatabaseHas('tournament_awards', ['title' => 'Церемония открытия и награждение']);
         $book = app(StartProtocolExporter::class)->buildProgramme($p->category->tournament);
         $this->assertContains('2026-09-24', $book->getSheetNames());
         $this->assertContains('2026-09-25', $book->getSheetNames());
@@ -289,13 +289,14 @@ class TournamentWorkflowTest extends TestCase
         $this->assertTrue($p->judgeScoreActions()->where('action', 'like', '%3.000 → 2.000%')->exists());
     }
 
-    public function test_award_crossing_midnight_is_rejected_atomically(): void
+    public function test_award_ending_before_start_is_rejected(): void
     {
         $p = $this->performance();
-        $session = StreamSession::create(['category_id' => $p->category_id, 'session_no' => 1, 'scheduled_on' => '2026-09-24', 'starts_at' => '23:00', 'ends_at' => '23:50', 'apparatus' => []]);
         $this->actingAs(User::factory()->create(['role' => 'secretary']))
-            ->post(route('workflow.award', $session), ['minutes' => 30])->assertSessionHasErrors('minutes');
-        $this->assertEquals(0, $session->fresh()->award_minutes);
+            ->post(route('secretary.tournament.awards.store', $p->category->tournament), [
+                'title' => 'Награждение', 'scheduled_on' => '2026-09-24', 'starts_at' => '23:00', 'ends_at' => '22:30',
+            ])->assertSessionHasErrors('ends_at');
+        $this->assertDatabaseCount('tournament_awards', 0);
     }
 
     public function test_new_streams_keep_the_selected_day(): void
@@ -348,21 +349,21 @@ class TournamentWorkflowTest extends TestCase
         $this->assertTrue($p->judgeScoreActions()->where('action', 'like', '%Возврат на доработку: 4.500%')->exists());
     }
 
-    public function test_programme_puts_award_duration_under_apparatus(): void
+    public function test_programme_lists_award_with_its_own_title_and_time(): void
     {
         $p = $this->performance();
-        $session = StreamSession::create([
+        StreamSession::create([
             'category_id' => $p->category_id, 'session_no' => 1,
             'scheduled_on' => '2026-09-24', 'starts_at' => '09:00',
             'ends_at' => '10:00', 'apparatus' => [],
         ]);
-        $session->forceFill(['award_minutes' => 20])->save();
+        $p->category->tournament->awards()->create(['title' => 'Награждение 2015 A', 'scheduled_on' => '2026-09-24', 'starts_at' => '10:00', 'ends_at' => '10:20']);
 
         $sheet = app(StartProtocolExporter::class)->buildProgramme($p->category->tournament)->getSheetByName('2026-09-24');
         $this->assertNotNull($sheet);
-        $awardRow = collect(range(5, 10))->first(fn (int $row) => $sheet->getCell('C'.$row)->getValue() === 'Награждение');
+        $awardRow = collect(range(5, 10))->first(fn (int $row) => $sheet->getCell('C'.$row)->getValue() === 'Награждение 2015 A');
         $this->assertNotNull($awardRow);
-        $this->assertSame('20 мин.', $sheet->getCell('F'.$awardRow)->getValue());
+        $this->assertSame('10:00–10:20', $sheet->getCell('B'.$awardRow)->getValue());
         $this->assertNull($sheet->getCell('G'.$awardRow)->getValue());
     }
 

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\StreamSession;
 use App\Models\Tournament;
+use App\Models\TournamentAward;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -17,6 +18,8 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 /** Excel-выгрузки, которые секретарь использует до начала судейства. */
 class StartProtocolExporter
 {
+    public function __construct(private readonly StartListService $startList) {}
+
     public function buildStartSheet(Tournament $tournament, ?string $date = null): Spreadsheet
     {
         return $this->buildStartDocument($tournament, 'СТАРТОВЫЙ ЛИСТ', 'Стартовый лист', $date);
@@ -30,18 +33,15 @@ class StartProtocolExporter
     public function buildProgramme(Tournament $tournament): Spreadsheet
     {
         $book = new Spreadsheet;
-        $categories = Category::query()->with(['group', 'sessions', 'performances'])
-            ->where('tournament_id', $tournament->id)->orderedByPerformanceTime()->get();
-        $days = $this->startDocumentBlocks($categories)->groupBy(
-            fn ($block) => $block['session']?->scheduled_on?->format('Y-m-d') ?? 'Без даты',
-        );
+        $days = $this->startList->days($tournament)
+            ->mapWithKeys(fn (Collection $items, string $date) => [$date !== '' ? $date : 'Без даты' => $items]);
         if ($days->isEmpty()) {
             $days = collect(['Без даты' => collect()]);
         }
         foreach ($days as $date => $blocks) {
             $sheet = $book->getSheetCount() === 1 && $book->getActiveSheet()->getCell('A1')->getValue() === null
                 ? $book->getActiveSheet() : $book->createSheet();
-            $sheet->setTitle($date);
+            $sheet->setTitle((string) $date);
             $sheet->mergeCells('A1:G1')->setCellValue('A1', $tournament->name);
             $sheet->mergeCells('A2:G2')->setCellValue('A2', 'ПРОГРАММА СОРЕВНОВАНИЙ · '.$date);
             $this->styleTitle($sheet, 'A1:G2');
@@ -49,12 +49,15 @@ class StartProtocolExporter
             $this->styleHeader($sheet, 'A4:G4');
             $row = 5;
             foreach ($blocks as $block) {
-                $session = $block['session'];
-                $this->writeProgrammeRow($sheet, $row++, $block['category'], $session);
-                if ($session && $session->award_minutes > 0 && $session->ends_at) {
-                    $start = Carbon::parse($session->ends_at);
-                    $sheet->fromArray([$date, $start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i'), 'Награждение', '', '', $session->award_minutes.' мин.', ''], null, 'A'.$row++);
+                if ($block['type'] === 'award') {
+                    $award = $block['award'];
+                    $sheet->fromArray([$award->scheduled_on?->format('d.m.Y') ?? '', $award->timeLabel(), $award->title, '', '', '', ''], null, 'A'.$row);
+                    $sheet->getStyle("A{$row}:G{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
+                    $row++;
+
+                    continue;
                 }
+                $this->writeProgrammeRow($sheet, $row++, $block['category'], $block['session']);
             }
             if ($row > 5) {
                 $sheet->getStyle('A4:G'.($row - 1))->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
@@ -89,33 +92,35 @@ class StartProtocolExporter
             ->get();
 
         $hasSessions = $categories->contains(fn (Category $category) => $category->sessions->isNotEmpty());
-        if ($hasSessions || $date !== null) {
-            $blocks = $this->startDocumentBlocks($categories);
-            $currentDate = null;
+        $hasAwards = $tournament->awards()->exists();
+        if ($hasSessions || $hasAwards || $date !== null) {
             $firstDateSection = true;
 
-            foreach ($blocks as $block) {
-                $dateKey = $block['session']?->scheduled_on?->format('Y-m-d') ?? 'undated';
+            foreach ($this->startList->days($tournament) as $dateKey => $blocks) {
                 if ($date !== null && $dateKey !== $date) {
                     continue;
                 }
-                if ($dateKey !== $currentDate) {
-                    if (! $firstDateSection) {
-                        $sheet->setBreak("A{$row}", Worksheet::BREAK_ROW);
-                    }
-                    $row = $this->writeDateHeading($sheet, $row, $block['session']);
-                    $currentDate = $dateKey;
-                    $firstDateSection = false;
+                if (! $firstDateSection) {
+                    $sheet->setBreak("A{$row}", Worksheet::BREAK_ROW);
                 }
+                $row = $this->writeDateHeading($sheet, $row, $dateKey !== '' ? Carbon::parse($dateKey) : null);
+                $firstDateSection = false;
 
-                $row = $this->writeStartBlock(
-                    $sheet,
-                    $row,
-                    $block['category'],
-                    $block['session'],
-                    $block['performances'],
-                    $block['unassigned'],
-                );
+                foreach ($blocks as $block) {
+                    if ($block['type'] === 'award') {
+                        $row = $this->writeAwardRow($sheet, $row, $block['award']);
+
+                        continue;
+                    }
+                    $row = $this->writeStartBlock(
+                        $sheet,
+                        $row,
+                        $block['category'],
+                        $block['session'],
+                        $block['performances'],
+                        $block['unassigned'],
+                    );
+                }
             }
         } else {
             foreach ($categories as $category) {
@@ -154,55 +159,20 @@ class StartProtocolExporter
         return $spreadsheet;
     }
 
-    /**
-     * @param  Collection<int, Category>  $categories
-     * @return Collection<int, array{category:Category,session:?StreamSession,performances:Collection,unassigned:bool}>
-     */
-    private function startDocumentBlocks(Collection $categories): Collection
+    private function writeAwardRow(Worksheet $sheet, int $row, TournamentAward $award): int
     {
-        return $categories
-            ->flatMap(function (Category $category): array {
-                if ($category->sessions->isEmpty()) {
-                    return [[
-                        'category' => $category,
-                        'session' => null,
-                        'performances' => $category->performances,
-                        'unassigned' => false,
-                    ]];
-                }
+        $sheet->mergeCells("A{$row}:F{$row}");
+        $sheet->setCellValue("A{$row}", trim($award->title.' · '.$award->timeLabel(), ' ·'));
+        $sheet->getStyle("A{$row}:F{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
+        $sheet->getStyle("A{$row}")->getFont()->setBold(true);
 
-                $blocks = $category->sessions->map(fn (StreamSession $session): array => [
-                    'category' => $category,
-                    'session' => $session,
-                    'performances' => $category->performances
-                        ->where('stream_session_id', $session->id),
-                    'unassigned' => false,
-                ])->all();
-                $unassigned = $category->performances->whereNull('stream_session_id');
-                if ($unassigned->isNotEmpty()) {
-                    $blocks[] = [
-                        'category' => $category,
-                        'session' => null,
-                        'performances' => $unassigned,
-                        'unassigned' => true,
-                    ];
-                }
-
-                return $blocks;
-            })
-            ->sortBy(fn (array $block): string => implode('|', [
-                $block['session']?->scheduled_on?->format('Y-m-d') ?? '9999-12-31',
-                $block['session']?->starts_at ?? '99:99:99',
-                str_pad((string) ($block['category']->stream_no ?? $block['category']->id), 8, '0', STR_PAD_LEFT),
-                str_pad((string) ($block['session']?->session_no ?? 9999), 8, '0', STR_PAD_LEFT),
-            ]))
-            ->values();
+        return $row + 2;
     }
 
-    private function writeDateHeading(Worksheet $sheet, int $row, ?StreamSession $session): int
+    private function writeDateHeading(Worksheet $sheet, int $row, ?Carbon $date): int
     {
-        $label = $session?->scheduled_on
-            ? 'ДЕНЬ СОРЕВНОВАНИЙ · '.$session->scheduled_on->format('d.m.Y')
+        $label = $date
+            ? 'ДЕНЬ СОРЕВНОВАНИЙ · '.$date->format('d.m.Y')
             : 'БЕЗ НАЗНАЧЕННОЙ ДАТЫ / СЕССИИ';
         $sheet->mergeCells("A{$row}:F{$row}");
         $sheet->setCellValue("A{$row}", $label);
@@ -282,15 +252,6 @@ class StartProtocolExporter
         }
         $sheet->getStyle("A{$headerRow}:F".($row - 1))
             ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-
-        if ($session && $session->award_minutes > 0 && $session->ends_at) {
-            $start = Carbon::parse($session->ends_at);
-            $sheet->mergeCells("A{$row}:F{$row}");
-            $sheet->setCellValue("A{$row}", 'Награждение · '.$start->format('H:i').'–'.$start->addMinutes($session->award_minutes)->format('H:i').' · '.$session->award_minutes.' мин.');
-            $sheet->getStyle("A{$row}:F{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
-            $sheet->getStyle("A{$row}")->getFont()->setBold(true);
-            $row++;
-        }
 
         return $row + 1;
     }

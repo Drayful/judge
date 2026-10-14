@@ -12,6 +12,12 @@
             <div class="flex items-center gap-3">
                 <a class="text-emerald-400 hover:text-emerald-300 hover:underline text-sm font-medium"
                    href="{{ route('secretary.tournament', $tournament) }}">← Турнир</a>
+                @unless(auth()->user()->isChiefJudge())
+                    <a class="rounded-lg border border-emerald-600 bg-emerald-900/50 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800/60"
+                       href="{{ route('secretary.tournament.board', $tournament) }}">Новый вид: Потоки</a>
+                    <a class="rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-900/50"
+                       href="{{ route('secretary.tournament.start-list', $tournament) }}">Стартовый лист</a>
+                @endunless
                 @if($tournament->categories->isNotEmpty())
                     <a class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
                        href="{{ auth()->user()->isChiefJudge() ? route('secretary.queue.review', $tournament->categories->sortBy('id')->first()) : route('secretary.tournament.live', ['tournament' => $tournament, 'category' => $tournament->categories->sortBy('id')->first()->id]) }}">
