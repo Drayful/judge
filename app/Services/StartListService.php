@@ -23,7 +23,7 @@ class StartListService
     public function days(Tournament $tournament): Collection
     {
         $categories = Category::query()
-            ->with(['group', 'sessions', 'performances.athlete.members'])
+            ->with(['group', 'sessions', 'performances.athlete.members', 'performances.track'])
             ->where('tournament_id', $tournament->id)
             ->orderedByPerformanceTime()
             ->get();

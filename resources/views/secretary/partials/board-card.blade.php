@@ -1,22 +1,39 @@
-<div data-entry="{{ $c['id'] }}" class="{{ $c['locked'] ? 'locked' : '' }} select-none rounded-lg border px-3 py-2 {{ $c['locked'] ? 'border-slate-800 bg-slate-950/40 opacity-70' : ($c['withdrawn'] ? 'border-slate-800 bg-slate-950/30 cursor-grab' : 'border-slate-700/80 bg-slate-950/70 cursor-grab hover:border-slate-500') }}">
-    <div class="flex items-center gap-3">
-        <span class="w-6 font-mono text-xs {{ $inStream ? 'text-emerald-300/80' : 'text-slate-600' }}" title="Стартовый номер">{{ $inStream ? ($c['number'] ?? '—') : '—' }}</span>
-        <span class="min-w-0 {{ $c['withdrawn'] ? 'text-slate-500' : '' }}">
-            <span class="block truncate text-sm {{ $c['withdrawn'] ? 'line-through' : 'text-slate-100' }}">{{ $c['name'] }}</span>
-            <span class="block truncate text-[11px] text-slate-500">{{ $c['year'] ? $c['year'].' · ' : '' }}{{ $c['club'] ?? '—' }}</span>
-        </span>
-        <span class="ml-auto flex shrink-0 items-center gap-2 text-xs">
-            @if($c['withdrawn'])<span class="rounded bg-slate-800 px-1.5 text-[10px] text-slate-400">снята</span>@endif
-            @unless($c['music'])<span class="text-amber-300" title="Нет музыки">♪✕</span>@endunless
-            @if($c['locked'])<span title="Уже выступила">🔒</span>@endif
-        </span>
-    </div>
-    @if($c['team'] && $c['members'])
-        <details class="mt-1 pl-9 text-[11px] text-slate-400"><summary class="cursor-pointer text-slate-500">состав: {{ count($c['members']) }}</summary>{!! collect($c['members'])->map(fn ($m) => e($m))->implode('<br>') !!}</details>
-    @endif
+@php
+    $draggable = ! $c['locked'] && ! ($started ?? false);
+@endphp
+<div data-entry="{{ $c['id'] }}" class="{{ $c['locked'] ? 'locked' : '' }} sx-entry {{ $draggable ? 'is-draggable' : '' }} {{ $c['withdrawn'] ? 'is-out' : '' }} {{ ! $c['music'] && ! $c['withdrawn'] ? 'is-nomusic' : '' }}">
+    <span class="sx-grip" @if(! $draggable) style="visibility:hidden" @endif>@include('secretary.partials.sx-icon', ['name' => 'grip', 'size' => 16])</span>
+    <span class="sx-startno" title="Стартовый номер">
+        <span class="sx-label" style="font-size:9px;line-height:11px">старт</span>
+        <b class="sx-mono">{{ $inStream ? '#'.($c['number'] ?? '—') : '—' }}</b>
+    </span>
+    <span class="sx-grow">
+        <span class="sx-truncate sx-body {{ $c['withdrawn'] ? 'sx-strike sx-dim' : 'sx-text' }}" style="display:block;font-weight:600">{{ $c['name'] }}</span>
+        <span class="sx-truncate sx-small sx-muted" style="display:block">{{ $c['year'] ? $c['year'].' · ' : '' }}{{ $c['club'] ?? '—' }}</span>
+        @if($c['team'] && $c['members'])
+            <details class="sx-small sx-muted" style="margin-top:.2rem">
+                <summary style="cursor:pointer" class="sx-dim">состав: {{ count($c['members']) }}</summary>
+                {!! collect($c['members'])->map(fn ($m) => e($m))->implode('<br>') !!}
+            </details>
+        @endif
+    </span>
     @if($inStream && ! $c['withdrawn'] && $c['times'])
-        <div class="mt-1 flex flex-wrap gap-x-3 pl-9 font-mono text-[11px] text-slate-400">
-            @foreach($c['times'] as $t)<span>{{ $t['apparatus'] }} {{ $t['time'] }}</span>@endforeach
-        </div>
+        <span class="sx-mono sx-small sx-muted" style="display:flex;flex-direction:column;align-items:flex-end;gap:.1rem;flex-shrink:0">
+            @foreach($c['times'] as $t)<span><span class="sx-dim">{{ $t['apparatus'] }}</span> <span class="sx-text">{{ $t['time'] }}</span></span>@endforeach
+        </span>
     @endif
+    <span class="sx-row-wrap" style="flex-shrink:0;justify-content:flex-end">
+        @if($c['withdrawn'])
+            <span class="sx-chip sx-chip-bad"><span class="sx-dot"></span>снята</span>
+        @elseif($c['locked'])
+            <span class="sx-chip sx-chip-mute" title="Уже выступила — перемещать нельзя">@include('secretary.partials.sx-icon', ['name' => 'lock', 'size' => 12])выступила</span>
+        @endif
+        @unless($c['withdrawn'])
+            @if($c['music'])
+                <span class="sx-chip sx-chip-info sx-chip-plain" title="Музыка загружена">@include('secretary.partials.sx-icon', ['name' => 'music', 'size' => 12])готово</span>
+            @else
+                <span class="sx-chip sx-chip-warn sx-chip-plain" title="Нет музыки">@include('secretary.partials.sx-icon', ['name' => 'music-off', 'size' => 12])нет музыки</span>
+            @endif
+        @endunless
+    </span>
 </div>

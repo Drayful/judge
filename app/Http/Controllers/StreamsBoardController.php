@@ -252,6 +252,7 @@ class StreamsBoardController extends Controller
             'doc' => in_array($request->query('doc'), ['start', 'protocol', 'program'], true) ? $request->query('doc') : 'start',
             'timesMode' => $request->query('times') === 'each' ? 'each' : 'one',
             'showMembers' => $request->query('members', '1') === '1',
+            'showCoaches' => $request->query('coaches', '1') === '1',
         ]);
     }
 
