@@ -323,6 +323,12 @@ class SecretaryController extends Controller
             $stats['entries_skipped'],
         );
 
+        // С новой страницы «Потоки» возвращаемся на неё же.
+        if ($request->input('return') === 'board') {
+            return redirect()->route('secretary.tournament.board', $tournament)
+                ->with('status', str_replace('Дальше — «Группы и потоки».', 'Новые участницы — в разделе «Без группы» слева.', $message));
+        }
+
         return redirect()->route('secretary.tournament.groups', $tournament)->with('status', $message);
     }
 

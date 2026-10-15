@@ -12,6 +12,8 @@
     /* --- каркас --- */
     .sx-layout{display:flex;flex-direction:column;gap:1.25rem}
     .sx-aside{width:100%}
+    .sx-group-list{max-height:50vh}
+    @media (min-width:1024px){.sx-group-list{max-height:max(12rem,calc(100vh - 33rem))}}
     .sx-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:1rem}
     @media (min-width:1024px){.sx-layout{flex-direction:row}.sx-aside{width:19rem;flex-shrink:0}.sx-aside>.sx-card{position:sticky;top:6rem}}
     .sx-create{display:grid;gap:1.25rem;grid-template-columns:minmax(0,1fr)}

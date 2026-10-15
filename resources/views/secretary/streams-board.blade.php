@@ -34,7 +34,7 @@
                     @include('secretary.partials.sx-icon', ['name' => 'search', 'size' => 15])
                     <input id="group-search" type="search" placeholder="Поиск группы: 2015, B, групповые…" autocomplete="off" class="sx-input">
                 </label>
-                <div id="group-list" style="max-height:70vh;overflow-y:auto;display:flex;flex-direction:column;gap:1rem;padding-right:.25rem">
+                <div id="group-list" class="sx-group-list" style="overflow-y:auto;display:flex;flex-direction:column;gap:1rem;padding-right:.25rem">
                     @foreach([['Индивидуальная программа', $individual], ['Групповые упражнения', $teamGroups]] as [$title, $list])
                         @if($list->isNotEmpty())
                             <div data-section>
@@ -78,9 +78,22 @@
                     @endif
                     <div id="group-search-empty" class="sx-hidden sx-small sx-dim" style="padding:1rem .5rem;text-align:center">Ничего не найдено</div>
                     @if($groups->isEmpty() && $pools->isEmpty())
-                        <div class="sx-small sx-muted" style="padding:1rem .5rem">Участниц ещё нет. Импортируйте Excel на <a class="sx-em" style="text-decoration:underline" href="{{ route('secretary.tournament', $tournament) }}">странице турнира</a>.</div>
+                        <div class="sx-small sx-muted" style="padding:1rem .5rem">Участниц ещё нет. Загрузите Excel со списком ниже.</div>
                     @endif
                 </div>
+                {{-- Импорт стартового протокола (Excel) --}}
+                <form method="POST" action="{{ route('secretary.tournament.importStartProtocol', $tournament) }}" enctype="multipart/form-data" class="sx-inset sx-pad-sm" style="display:flex;flex-direction:column;gap:.5rem">
+                    @csrf
+                    <input type="hidden" name="return" value="board">
+                    <label class="sx-row-wrap" style="gap:.6rem;cursor:pointer;flex-wrap:nowrap">
+                        <span class="sx-icon-box">@include('secretary.partials.sx-icon', ['name' => 'download', 'size' => 18])</span>
+                        <span class="sx-grow"><span class="sx-h3" style="display:block">Импорт из Excel</span><span id="import-file-name" class="sx-small sx-muted sx-truncate" style="display:block">Обновить списки — выбрать .xls / .xlsx</span></span>
+                        <input type="file" name="protocol" required accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sx-hidden"
+                               onchange="document.getElementById('import-file-name').textContent = this.files[0]?.name || 'Обновить списки — выбрать .xls / .xlsx'; document.getElementById('import-submit').disabled = !this.files.length">
+                    </label>
+                    <button id="import-submit" class="sx-btn sx-btn-primary sx-btn-sm" disabled>Импортировать в пул</button>
+                    <span class="sx-small sx-dim">Лист на каждый год + категорию («2019 А»), колонки ФИО, год, клуб. Листы «груп…» — командные. Повторы пропускаются.</span>
+                </form>
             </div>
         </aside>
 
