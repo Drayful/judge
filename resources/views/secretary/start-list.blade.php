@@ -141,8 +141,15 @@
 
         <div class="no-print sx-card sx-pad-sm sx-row-wrap sx-small" style="gap:.75rem">
             <span class="sx-em">@include('secretary.partials.sx-icon', ['name' => 'grip', 'size' => 16])</span>
-            <span class="sx-muted sx-grow">Перетаскивайте блоки за ручку, чтобы изменить порядок выхода потоков и награждений внутри дня. Порядок сохраняется и попадает в печать и Excel.</span>
+            <span class="sx-muted sx-grow" style="min-width:16rem">Перетаскивайте блоки за ручку, чтобы изменить порядок выхода потоков и награждений внутри дня. Порядок сохраняется и попадает в печать и Excel.</span>
             <span id="order-status" class="sx-chip sx-chip-ok"><span class="sx-dot"></span>порядок сохранён</span>
+            @if($doc !== 'program')
+                <span class="sx-row-wrap" style="gap:.4rem">
+                    <span id="collapse-summary" class="sx-dim"></span>
+                    <button type="button" data-collapse-all="1" class="sx-btn sx-btn-sm">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 14]) Свернуть все</button>
+                    <button type="button" data-collapse-all="0" class="sx-btn sx-btn-sm"><span style="display:inline-flex;transform:rotate(180deg)">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 14])</span> Развернуть все</button>
+                </span>
+            @endif
         </div>
 
         <div class="print-root" style="display:flex;flex-direction:column;gap:2rem">
@@ -195,8 +202,10 @@
                                     $blockProblems = $rows->filter(fn ($ps) => ! $ps->every($isWithdrawn) && ! $ps->contains(fn ($p) => $p->track !== null))->count();
                                     $perApparatus = $timesMode === 'each' && $apparatusCols->count() > 1;
                                     [$blockStart, $blockEnd] = $item['unassigned'] ? [null, null] : $span($item);
+                                    // Поток завершён: все выступили (снятые не в счёт).
+                                    $blockFinished = $activeRows > 0 && $rows->every(fn ($ps) => in_array($rowStatus($ps)[0], ['Выступила', 'Снята'], true));
                                 @endphp
-                                <div data-key="{{ $item['key'] }}" class="sx-card sx-stream" style="overflow:hidden">
+                                <div data-key="{{ $item['key'] }}" class="sx-card sx-stream" style="overflow:hidden" @if($blockFinished) data-finished @endif>
                                     <div class="sx-row-wrap" style="padding:.85rem 1rem;gap:.75rem">
                                         @unless($item['unassigned'])<span class="drag-handle no-print sx-grip" style="cursor:grab" title="Перетащить">@include('secretary.partials.sx-icon', ['name' => 'grip', 'size' => 18])</span>@endunless
                                         <span class="sx-icon-box no-print">@include('secretary.partials.sx-icon', ['name' => 'users', 'size' => 18])</span>
@@ -209,6 +218,7 @@
                                             </span>
                                         </span>
                                         @if($item['out_of_order'])<span class="no-print sx-chip sx-chip-bad sx-chip-plain">время раньше предыдущего блока</span>@endif
+                                        @if($blockFinished)<span class="no-print sx-chip sx-chip-mute">@include('secretary.partials.sx-icon', ['name' => 'check', 'size' => 12]) завершён</span>@endif
                                         @if($blockProblems)<span class="no-print sx-chip sx-chip-bad sx-chip-plain">@include('secretary.partials.sx-icon', ['name' => 'music-off', 'size' => 12]) без музыки: {{ $blockProblems }}</span>@endif
                                         @if($doc !== 'program')
                                             <button type="button" data-collapse class="no-print sx-btn sx-btn-ghost sx-btn-sm" title="Свернуть / развернуть"><span class="sx-rot" style="display:inline-flex">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 16])</span></button>
@@ -306,8 +316,31 @@
         });
         awardPanel?.querySelector('[data-award-close]')?.addEventListener('click', () => awardPanel.classList.add('sx-hidden'));
 
-        /* ---------- свернуть / развернуть поток ---------- */
-        document.querySelectorAll('[data-collapse]').forEach(btn => btn.addEventListener('click', () => btn.closest('.sx-stream').classList.toggle('sx-collapsed')));
+        /* ---------- свернуть / развернуть поток ----------
+           Состояние запоминается на время вкладки; по умолчанию свёрнуты только завершённые потоки. */
+        const collapseKey = 'start-list-collapsed-{{ $tournament->id }}';
+        const blocks = () => [...document.querySelectorAll('.sx-stream[data-key]')].filter(b => b.querySelector('[data-collapse]'));
+        const readCollapsed = () => { try { const v = JSON.parse(sessionStorage.getItem(collapseKey) || '{}'); return v && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } };
+        const writeCollapsed = () => {
+            const state = readCollapsed();
+            blocks().forEach(b => { state[b.dataset.key] = b.classList.contains('sx-collapsed'); });
+            try { sessionStorage.setItem(collapseKey, JSON.stringify(state)); } catch (_) {}
+            const folded = blocks().filter(b => b.classList.contains('sx-collapsed')).length;
+            const summary = document.getElementById('collapse-summary');
+            if (summary) summary.textContent = folded ? `свёрнуто ${folded} из ${blocks().length}` : '';
+        };
+        const savedCollapsed = readCollapsed();
+        blocks().forEach(b => b.classList.toggle('sx-collapsed', b.dataset.key in savedCollapsed ? !!savedCollapsed[b.dataset.key] : b.hasAttribute('data-finished')));
+        writeCollapsed();
+        document.querySelectorAll('[data-collapse]').forEach(btn => btn.addEventListener('click', () => {
+            btn.closest('.sx-stream').classList.toggle('sx-collapsed');
+            writeCollapsed();
+        }));
+        document.querySelectorAll('[data-collapse-all]').forEach(btn => btn.addEventListener('click', () => {
+            const fold = btn.dataset.collapseAll === '1';
+            blocks().forEach(b => b.classList.toggle('sx-collapsed', fold));
+            writeCollapsed();
+        }));
 
         /* ---------- поиск и «только с проблемами» ---------- */
         const search = document.getElementById('sheet-search');
@@ -326,6 +359,7 @@
                     if (ok) visible++;
                 });
                 block.classList.toggle('sx-hidden', active && visible === 0);
+                block.classList.toggle('sx-force-open', active && visible > 0);
                 block.querySelector('[data-empty-filter]')?.classList.toggle('sx-hidden', !(active && visible === 0));
             });
         };

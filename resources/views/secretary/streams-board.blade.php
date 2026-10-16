@@ -342,6 +342,14 @@
                             </form>
                         @endif
 
+                        <div class="sx-row-wrap" style="gap:.5rem">
+                            <span class="sx-label">Потоки дня</span>
+                            <span id="collapse-summary" class="sx-small sx-dim"></span>
+                            <span class="sx-row-wrap sx-ml-auto" style="gap:.4rem">
+                                <button type="button" data-collapse-all="1" class="sx-btn sx-btn-sm">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 14]) Свернуть все</button>
+                                <button type="button" data-collapse-all="0" class="sx-btn sx-btn-sm"><span style="display:inline-flex;transform:rotate(180deg)">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 14])</span> Развернуть все</button>
+                            </span>
+                        </div>
                         <div id="board" style="display:flex;flex-direction:column;gap:1rem">
                             @if(count($board['unassigned']))
                                 <section class="sx-card sx-dashed sx-pad-sm" style="border-color:rgba(56,189,248,.45)" data-column="unassigned">
@@ -356,12 +364,17 @@
                                 </section>
                             @endif
                             @foreach($board['streams'] as $s)
-                                <section class="sx-card sx-pad-sm sx-stream" data-column="stream" data-stream-no="{{ $s['no'] }}">
+                                @php
+                                    $streamFinished = collect($s['cards'])->contains(fn ($c) => $c['finished'])
+                                        && collect($s['cards'])->every(fn ($c) => $c['finished'] || $c['withdrawn']);
+                                @endphp
+                                <section class="sx-card sx-pad-sm sx-stream" data-column="stream" data-stream-no="{{ $s['no'] }}" @if($streamFinished) data-finished @endif>
                                     <div class="sx-row-wrap" style="padding:.25rem .25rem .6rem;gap:.75rem">
                                         <span class="sx-dot sx-em" style="width:9px;height:9px"></span>
                                         <span class="sx-h2">Поток <span data-stream-label>{{ $s['no'] }}</span><span class="sx-mono sx-muted" style="font-weight:500"> · {{ $s['start'] && $s['end'] ? $s['start'].' – '.$s['end'] : 'время не задано' }}</span></span>
                                         <span class="sx-small sx-muted">/ {{ count($s['cards']) }} {{ $isTeamGroup ? $plural(count($s['cards']), 'команда', 'команды', 'команд') : $plural(count($s['cards']), 'гимнастка', 'гимнастки', 'гимнасток') }}</span>
                                         @foreach($currentApparatus as $a)<span class="sx-chip sx-chip-warn">{{ $a }}</span>@endforeach
+                                        @if($streamFinished)<span class="sx-chip sx-chip-mute">@include('secretary.partials.sx-icon', ['name' => 'check', 'size' => 12]) завершён</span>@endif
                                         <span class="sx-row-wrap sx-ml-auto" style="gap:.25rem">
                                             @unless($started)<span class="sx-small sx-dim" style="display:inline-flex;align-items:center;gap:.25rem">@include('secretary.partials.sx-icon', ['name' => 'grip', 'size' => 13]) перетаскивайте</span>@endunless
                                             <button type="button" data-collapse class="sx-btn sx-btn-ghost sx-btn-sm" title="Свернуть / развернуть"><span class="sx-rot" style="display:inline-flex">@include('secretary.partials.sx-icon', ['name' => 'chevron', 'size' => 15])</span></button>
@@ -585,23 +598,41 @@
         const arrangeUrl = @json(route('secretary.tournament.board.arrange', [$tournament, $g]));
         const shuffleUrl = @json(route('secretary.tournament.board.shuffle', [$tournament, $g]));
         const undoKey = 'board-undo-{{ $g->id }}';
-        const collapseKey = 'board-collapsed-{{ $g->id }}';
+        const collapseKey = 'board-collapsed-{{ $g->id }}-{{ (int) $board['currentDay'] }}';
         const alertBox = document.getElementById('board-alert');
         const readUndo = () => { try { return JSON.parse(sessionStorage.getItem(undoKey) || '[]'); } catch (_) { return []; } };
         const writeUndo = (stack) => { try { sessionStorage.setItem(undoKey, JSON.stringify(stack.slice(-20))); } catch (_) {} };
         document.getElementById('undo').disabled = started || readUndo().length === 0;
 
-        // Свёрнутые потоки запоминаются, чтобы не раскрываться после каждого перетаскивания.
-        const readCollapsed = () => { try { return JSON.parse(sessionStorage.getItem(collapseKey) || '[]'); } catch (_) { return []; } };
-        readCollapsed().forEach(no => boardEl.querySelector(`[data-stream-no="${no}"]`)?.classList.add('sx-collapsed'));
+        // Свёрнутые/развёрнутые потоки запоминаются (на время вкладки), чтобы не раскрываться
+        // после каждого перетаскивания. По умолчанию свёрнуты только завершённые потоки.
+        const streamSections = () => [...boardEl.querySelectorAll('.sx-stream[data-stream-no]')];
+        const readCollapsed = () => { try { const v = JSON.parse(sessionStorage.getItem(collapseKey) || '{}'); return v && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } };
+        const writeCollapsed = () => {
+            const state = {};
+            streamSections().forEach(s => { state[s.dataset.streamNo] = s.classList.contains('sx-collapsed'); });
+            try { sessionStorage.setItem(collapseKey, JSON.stringify(state)); } catch (_) {}
+            const total = streamSections().length;
+            const folded = streamSections().filter(s => s.classList.contains('sx-collapsed')).length;
+            document.getElementById('collapse-summary').textContent = folded ? `свёрнуто ${folded} из ${total}` : '';
+        };
+        const saved = readCollapsed();
+        streamSections().forEach(s => {
+            const no = s.dataset.streamNo;
+            s.classList.toggle('sx-collapsed', no in saved ? !!saved[no] : s.hasAttribute('data-finished'));
+        });
+        writeCollapsed();
         boardEl.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-collapse]');
             if (!btn) return;
-            const section = btn.closest('.sx-stream');
-            section.classList.toggle('sx-collapsed');
-            const list = [...boardEl.querySelectorAll('.sx-stream.sx-collapsed[data-stream-no]')].map(s => s.dataset.streamNo);
-            try { sessionStorage.setItem(collapseKey, JSON.stringify(list)); } catch (_) {}
+            btn.closest('.sx-stream').classList.toggle('sx-collapsed');
+            writeCollapsed();
         });
+        document.querySelectorAll('[data-collapse-all]').forEach(btn => btn.addEventListener('click', () => {
+            const fold = btn.dataset.collapseAll === '1';
+            boardEl.querySelectorAll('.sx-stream').forEach(s => s.classList.toggle('sx-collapsed', fold));
+            writeCollapsed();
+        }));
 
         const snapshot = () => ({
             streams: [...boardEl.querySelectorAll('[data-col=stream]')].map(col => [...col.querySelectorAll('[data-entry]')].map(c => +c.dataset.entry)),

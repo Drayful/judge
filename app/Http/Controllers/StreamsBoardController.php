@@ -376,6 +376,10 @@ class StreamsBoardController extends Controller
                 'music' => $musicAthletes->has($entry->athlete_id),
                 'locked' => $own->contains(fn (Performance $p) => ! in_array($p->status, ['scheduled', 'withdrawn'], true)),
                 'withdrawn' => $own->isNotEmpty() && $own->every(fn (Performance $p) => $p->status === 'withdrawn' || $p->withdrawn_at !== null),
+                // Все выступления выбранного дня завершены (снятые не в счёт).
+                'finished' => $inDay->contains(fn (Performance $p) => $p->status !== 'withdrawn' && $p->withdrawn_at === null)
+                    && $inDay->every(fn (Performance $p) => $p->status === 'withdrawn' || $p->withdrawn_at !== null
+                        || in_array($p->status, ['done', 'published', 'inquiry', 'under_review'], true)),
                 'times' => $inDay->filter(fn (Performance $p) => $p->scheduled_at_label !== null)
                     ->map(fn (Performance $p) => ['apparatus' => $p->apparatus, 'time' => $p->scheduled_at_label])->values()->all(),
             ];

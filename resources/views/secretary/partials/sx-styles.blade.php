@@ -132,6 +132,8 @@
     .sx-stream-list{display:flex;flex-direction:column;gap:.4rem;min-height:3.5rem;border-radius:.375rem}
     .sx-stream.sx-collapsed .sx-stream-body{display:none}
     .sx-stream.sx-collapsed .sx-rot{transform:rotate(-90deg)}
+    .sx-stream.sx-collapsed.sx-force-open .sx-stream-body{display:block}
+    .sx-stream[data-finished]:not(.sx-collapsed){opacity:.85}
     .sx-rot{transition:transform .15s}
     .sortable-ghost{opacity:.35}
     .sortable-drag,.sortable-fallback{outline:2px solid var(--sx-em)!important;box-shadow:0 12px 32px rgba(0,0,0,.6)!important;opacity:.95!important}
