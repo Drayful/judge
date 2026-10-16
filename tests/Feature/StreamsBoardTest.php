@@ -13,6 +13,7 @@ use App\Models\Tournament;
 use App\Models\TournamentAward;
 use App\Models\User;
 use App\Services\StartListService;
+use App\Services\StartProtocolExporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -164,7 +165,107 @@ class StreamsBoardTest extends TestCase
         $this->postJson(route('secretary.tournament.start-list.order', $this->tournament), ['date' => '2026-10-18', 'keys' => $wanted])->assertStatus(422);
 
         // Excel использует тот же порядок.
-        $rows = collect(app(\App\Services\StartProtocolExporter::class)->buildStartSheet($this->tournament, '2026-10-18')->getActiveSheet()->toArray())->flatten()->filter()->values();
+        $rows = collect(app(StartProtocolExporter::class)->buildStartSheet($this->tournament, '2026-10-18')->getActiveSheet()->toArray())->flatten()->filter()->values();
         $this->assertLessThan($rows->search(fn ($v) => str_contains((string) $v, 'Награждение 2015 A')), $rows->search(fn ($v) => str_contains((string) $v, 'Открытие')));
+    }
+
+    /** Сессия дня 1 нужного потока группы. */
+    private function day1(Group $group, int $streamNo): StreamSession
+    {
+        return StreamSession::query()
+            ->whereIn('category_id', Category::query()->where('group_id', $group->id)->where('stream_no', $streamNo)->select('id'))
+            ->where('session_no', 1)
+            ->firstOrFail();
+    }
+
+    /** @return list<string> */
+    private function times(StreamSession $session): array
+    {
+        return Performance::query()->where('stream_session_id', $session->id)->orderBy('order_index')->orderBy('id')->pluck('scheduled_at_label')->all();
+    }
+
+    /** Вторая группа (2015 B) с одним потоком в тот же день, начало в $start. */
+    private function secondGroup(string $start): Group
+    {
+        foreach (range(1, 2) as $i) {
+            $athlete = Athlete::create(['last_name' => 'Вторая'.$i, 'first_name' => 'Имя', 'birthdate' => '2015-01-01', 'club' => 'Клуб']);
+            Entry::create(['tournament_id' => $this->tournament->id, 'athlete_id' => $athlete->id, 'program' => 'individual', 'birth_year' => 2015, 'division' => 'B', 'order_index' => $i]);
+        }
+        $this->post(route('secretary.tournament.board.pool', $this->tournament), ['program' => 'individual', 'birth_year' => 2015, 'division' => 'B'])->assertSessionHasNoErrors();
+        $group = Group::query()->where('division', 'B')->firstOrFail();
+        $this->post(route('secretary.tournament.board.streams', [$this->tournament, $group]), [
+            'stream_count' => 1, 'number_mode' => 'per_stream', 'minutes' => 3, 'order' => 'list',
+            'apparatus_mode' => 'fixed', 'apparatus' => ['Мяч'],
+            'days' => [['date' => '2026-10-18', 'start' => $start, 'apparatus' => ['Мяч']]],
+        ])->assertSessionHasNoErrors();
+
+        return $group->fresh();
+    }
+
+    public function test_award_in_the_middle_of_a_stream_shifts_following_performances_and_streams(): void
+    {
+        $group = $this->groupWithStreams();
+        $other = $this->secondGroup('10:00');
+        $this->assertSame(['09:00', '09:03', '09:06', '09:09', '09:12', '09:15'], $this->times($this->day1($group, 1)));
+
+        $this->post(route('secretary.tournament.awards.store', $this->tournament), ['title' => 'Награждение', 'scheduled_on' => '2026-10-18', 'starts_at' => '09:06', 'ends_at' => '09:16'])
+            ->assertSessionHasNoErrors();
+
+        // Поток 1: выход в 09:06 попал на награждение — с него всё идёт после 09:16.
+        $this->assertSame(['09:00', '09:03', '09:16', '09:19', '09:22', '09:25'], $this->times($this->day1($group, 1)));
+        $this->assertSame('09:28', substr($this->day1($group, 1)->ends_at, 0, 5));
+        // Поток 2 этой же группы идёт следом, другая группа дня сдвинута на 10 минут.
+        $this->assertSame('09:28', substr($this->day1($group, 2)->starts_at, 0, 5));
+        $this->assertSame(['10:10', '10:13'], $this->times($this->day1($other, 1)));
+        // Другой день не затронут.
+        $this->assertSame('10:00', substr(StreamSession::query()->whereDate('scheduled_on', '2026-10-19')->orderBy('starts_at')->value('starts_at'), 0, 5));
+
+        // Пересчёт после перетаскивания не теряет сдвиг.
+        $entries = Entry::query()->where('group_id', $group->id)->orderBy('order_index')->get();
+        $this->postJson(route('secretary.tournament.board.arrange', [$this->tournament, $group]), [
+            'streams' => [$entries->where('stream_no', 1)->pluck('id')->reverse()->values()->all(), $entries->where('stream_no', 2)->pluck('id')->values()->all()],
+            'unassigned' => [],
+        ])->assertOk();
+        $this->assertSame(['09:00', '09:03', '09:16', '09:19', '09:22', '09:25'], $this->times($this->day1($group, 1)));
+
+        // Удаление награждения возвращает время.
+        $this->delete(route('secretary.tournament.awards.destroy', [$this->tournament, TournamentAward::query()->firstOrFail()]))->assertSessionHasNoErrors();
+        $this->assertSame(['09:00', '09:03', '09:06', '09:09', '09:12', '09:15'], $this->times($this->day1($group, 1)));
+        $this->assertSame('09:18', substr($this->day1($group, 2)->starts_at, 0, 5));
+        $this->assertSame(['10:00', '10:03'], $this->times($this->day1($other, 1)));
+    }
+
+    public function test_moving_an_award_reverts_old_shift_and_applies_new_one(): void
+    {
+        $group = $this->groupWithStreams();
+        $other = $this->secondGroup('10:00');
+        $this->post(route('secretary.tournament.awards.store', $this->tournament), ['title' => 'Награждение', 'scheduled_on' => '2026-10-18', 'starts_at' => '09:06', 'ends_at' => '09:16']);
+        $award = TournamentAward::query()->firstOrFail();
+
+        // Переносим после первой группы: её выступления возвращаются, вторая группа сдвинута на 10 минут.
+        $this->patch(route('secretary.tournament.awards.update', [$this->tournament, $award]), ['title' => 'Награждение 2015 A', 'scheduled_on' => '2026-10-18', 'starts_at' => '09:30', 'ends_at' => '09:40'])
+            ->assertSessionHasNoErrors();
+        $this->assertSame(['09:00', '09:03', '09:06', '09:09', '09:12', '09:15'], $this->times($this->day1($group, 1)));
+        $this->assertSame('09:30', substr($this->day1($group, 2)->ends_at, 0, 5));
+        $this->assertSame(['10:10', '10:13'], $this->times($this->day1($other, 1)));
+
+        // Изменение только названия ничего не сдвигает.
+        $this->patch(route('secretary.tournament.awards.update', [$this->tournament, $award]), ['title' => 'Церемония', 'scheduled_on' => '2026-10-18', 'starts_at' => '09:30', 'ends_at' => '09:40']);
+        $this->assertSame(['10:10', '10:13'], $this->times($this->day1($other, 1)));
+
+        // Награждение без окончания время не меняет.
+        $this->post(route('secretary.tournament.awards.store', $this->tournament), ['title' => 'Открытие', 'scheduled_on' => '2026-10-18', 'starts_at' => '08:50']);
+        $this->assertSame(['10:10', '10:13'], $this->times($this->day1($other, 1)));
+    }
+
+    public function test_award_shift_past_midnight_is_rejected_without_changes(): void
+    {
+        $this->groupWithStreams();
+        $other = $this->secondGroup('23:50');
+
+        $this->post(route('secretary.tournament.awards.store', $this->tournament), ['title' => 'Поздно', 'scheduled_on' => '2026-10-18', 'starts_at' => '23:00', 'ends_at' => '23:30'])
+            ->assertSessionHasErrors('starts_at');
+        $this->assertDatabaseCount('tournament_awards', 0);
+        $this->assertSame(['23:50', '23:53'], $this->times($this->day1($other, 1)));
     }
 }

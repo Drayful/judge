@@ -9,6 +9,7 @@ use App\Models\Performance;
 use App\Models\StreamSession;
 use App\Models\Tournament;
 use App\Models\TournamentAward;
+use App\Services\AwardScheduleService;
 use App\Services\GroupPoolService;
 use App\Services\StartListService;
 use App\Services\StreamBuilderService;
@@ -31,6 +32,7 @@ class StreamsBoardController extends Controller
     public function __construct(
         private readonly StreamBuilderService $builder,
         private readonly StartListService $startList,
+        private readonly AwardScheduleService $awards,
     ) {}
 
     public function index(Request $request, Tournament $tournament): View
@@ -275,10 +277,15 @@ class StreamsBoardController extends Controller
 
     public function storeAward(Request $request, Tournament $tournament): RedirectResponse
     {
-        $award = $tournament->awards()->create($this->validateAward($request));
+        $data = $this->validateAward($request);
+        try {
+            $award = $this->awards->create($tournament, $data);
+        } catch (DomainException $e) {
+            return back()->withErrors(['starts_at' => $e->getMessage()])->withInput();
+        }
         $this->startList->placeAwardByTime($award);
 
-        return $this->backToStartList($tournament, $award, 'Награждение добавлено.');
+        return $this->backToStartList($tournament, $award, 'Награждение добавлено.'.$this->shiftNote($award));
     }
 
     public function updateAward(Request $request, Tournament $tournament, TournamentAward $award): RedirectResponse
@@ -287,20 +294,35 @@ class StreamsBoardController extends Controller
         $data = $this->validateAward($request);
         $moved = $award->scheduled_on?->format('Y-m-d') !== $data['scheduled_on']
             || substr((string) $award->starts_at, 0, 5) !== $data['starts_at'];
-        $award->update($data);
+        try {
+            $this->awards->update($award, $data);
+        } catch (DomainException $e) {
+            return back()->withErrors(['starts_at' => $e->getMessage()]);
+        }
         if ($moved) {
-            $this->startList->placeAwardByTime($award);
+            $this->startList->placeAwardByTime($award->fresh());
         }
 
-        return $this->backToStartList($tournament, $award, 'Награждение сохранено.');
+        return $this->backToStartList($tournament, $award, 'Награждение сохранено.'.$this->shiftNote($award->fresh()));
     }
 
     public function destroyAward(Tournament $tournament, TournamentAward $award): RedirectResponse
     {
         abort_unless((int) $award->tournament_id === (int) $tournament->id, 404);
-        $award->delete();
+        try {
+            $this->awards->delete($award);
+        } catch (DomainException $e) {
+            return back()->withErrors(['starts_at' => $e->getMessage()]);
+        }
 
-        return back()->with('status', 'Награждение удалено.');
+        return back()->with('status', 'Награждение удалено, время выступлений пересчитано.');
+    }
+
+    private function shiftNote(TournamentAward $award): string
+    {
+        return $award->ends_at
+            ? ' Выступления этого дня после '.substr((string) $award->starts_at, 0, 5).' сдвинуты на время награждения.'
+            : ' Окончание не указано — время выступлений не менялось.';
     }
 
     /* ======================= Данные ======================= */

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Group;
 use App\Models\Performance;
+use App\Models\TournamentAward;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -75,6 +76,7 @@ class StreamScheduleService
     /**
      * Время по дням группы: в каждой сессии (дне) потоки идут друг за другом
      * от времени начала первого потока; снятые время не занимают.
+     * Выход, попавший на награждение этого дня, переносится на его окончание.
      */
     public function recalculateGroupSessions(Group $group): void
     {
@@ -82,6 +84,7 @@ class StreamScheduleService
         $sessionNos = $categories->flatMap(fn (Category $category) => $category->sessions->pluck('session_no'))->unique()->sort()->values();
 
         DB::transaction(function () use ($categories, $sessionNos) {
+            $awards = [];
             foreach ($sessionNos as $sessionNo) {
                 $cursor = null;
                 foreach ($categories as $category) {
@@ -95,7 +98,12 @@ class StreamScheduleService
                         }
                         $cursor = Carbon::createFromFormat('H:i', substr((string) $session->starts_at, 0, 5))->startOfMinute();
                     }
+                    $date = $session->scheduled_on?->format('Y-m-d');
+                    $dayAwards = $date !== null
+                        ? ($awards[$date] ??= $this->awardIntervals((int) $category->tournament_id, $date))
+                        : [];
                     $minutes = max(1, (int) ($category->minutes_per_athlete ?? 2));
+                    $this->skipAwards($cursor, $dayAwards);
                     $session->starts_at = $cursor->format('H:i');
 
                     Performance::query()->where('stream_session_id', $session->id)->update(['scheduled_at_label' => null]);
@@ -107,6 +115,7 @@ class StreamScheduleService
                         ->orderBy('id')
                         ->get(['id']);
                     foreach ($performances as $performance) {
+                        $this->skipAwards($cursor, $dayAwards);
                         Performance::query()->whereKey($performance->id)->update(['scheduled_at_label' => $cursor->format('H:i')]);
                         $cursor->addMinutes($minutes);
                     }
@@ -126,6 +135,44 @@ class StreamScheduleService
                 $category->save();
             }
         });
+    }
+
+    /**
+     * Интервалы награждений дня (минуты от полуночи), по возрастанию начала.
+     *
+     * @return list<array{0:int,1:int}>
+     */
+    public function awardIntervals(int $tournamentId, string $date): array
+    {
+        $minutes = fn ($time) => ((int) substr((string) $time, 0, 2)) * 60 + (int) substr((string) $time, 3, 2);
+
+        return TournamentAward::query()
+            ->where('tournament_id', $tournamentId)
+            ->whereDate('scheduled_on', $date)
+            ->whereNotNull('starts_at')
+            ->whereNotNull('ends_at')
+            ->get(['starts_at', 'ends_at'])
+            ->map(fn (TournamentAward $award) => [$minutes($award->starts_at), $minutes($award->ends_at)])
+            ->filter(fn (array $interval) => $interval[1] > $interval[0])
+            ->sortBy(fn (array $interval) => $interval[0])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Если момент выхода попадает на награждение — переносим его на окончание
+     * (с учётом награждений, идущих подряд).
+     *
+     * @param  list<array{0:int,1:int}>  $awards
+     */
+    private function skipAwards(Carbon $cursor, array $awards): void
+    {
+        foreach ($awards as [$start, $end]) {
+            $now = $cursor->hour * 60 + $cursor->minute;
+            if ($now >= $start && $now < $end) {
+                $cursor->setTime(intdiv($end, 60), $end % 60);
+            }
+        }
     }
 
     private function applyPerformanceTimes(Category $category, Carbon $start): Carbon

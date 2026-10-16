@@ -128,7 +128,7 @@
                 <label class="sx-field"><span class="sx-label">Окончание</span><input type="time" name="ends_at" value="{{ old('ends_at') }}" class="sx-input"></label>
                 <button class="sx-btn sx-btn-amber" style="padding:.55rem 1.1rem">@include('secretary.partials.sx-icon', ['name' => 'plus', 'size' => 15]) Добавить</button>
             </form>
-            <div class="sx-small sx-muted" style="margin-top:.6rem">Время любое — потоки не сдвигаются. Награждение встанет в лист по времени, потом его можно перетащить.</div>
+            <div class="sx-small sx-muted" style="margin-top:.6rem">Время любое. Все выступления этого дня, начиная с начала награждения, сдвинутся на его длительность (если указано окончание); при удалении или переносе время вернётся. Награждение встанет в лист по времени, потом его можно перетащить.</div>
         </div>
 
         {{-- ===== Сводка ===== --}}
